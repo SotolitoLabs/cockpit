@@ -41,6 +41,7 @@
 #include "common/cockpitjson.h"
 #include "common/cockpitlog.h"
 #include "common/cockpitpipetransport.h"
+#include "common/cockpittest.h"
 #include "common/cockpitunixfd.h"
 #include "common/cockpitwebresponse.h"
 
@@ -440,6 +441,9 @@ run_bridge (const gchar *interactive)
       g_setenv ("HOME", pwd->pw_dir, TRUE);
       g_setenv ("SHELL", pwd->pw_shell, TRUE);
     }
+
+  /* Reset the umask, typically this is done in .bashrc for a login shell */
+  umask (022);
 
   /*
    * This process talks on stdin/stdout. However lots of stuff wants to write

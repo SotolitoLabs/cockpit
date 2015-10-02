@@ -1,13 +1,12 @@
 
 kubernetesdir = $(pkgdatadir)/kubernetes
-kubernetes_GZ = \
+nodist_kubernetes_DATA = \
 	pkg/kubernetes/app.min.css.gz \
-	pkg/kubernetes/cluster.min.html.gz \
+	pkg/kubernetes/index.min.html.gz \
 	pkg/kubernetes/kubernetes.min.js.gz \
 	$(NULL)
 kubernetes_DATA = \
 	pkg/kubernetes/manifest.json \
-	$(kubernetes_GZ) \
 	$(NULL)
 
 kubernetes_VIEWS = \
@@ -36,7 +35,6 @@ kubernetesdebug_DATA = \
 	pkg/kubernetes/app.css \
 	pkg/kubernetes/app.js \
 	pkg/kubernetes/client.js \
-	pkg/kubernetes/cluster.html \
 	pkg/kubernetes/config.js \
 	pkg/kubernetes/containers.css \
 	pkg/kubernetes/containers.js \
@@ -47,9 +45,9 @@ kubernetesdebug_DATA = \
 	pkg/kubernetes/graphs.js \
 	pkg/kubernetes/images.css \
 	pkg/kubernetes/images.js \
+	pkg/kubernetes/index.html \
 	pkg/kubernetes/kubernetes.js \
 	pkg/kubernetes/node.js \
-	pkg/kubernetes/moment.js \
 	pkg/kubernetes/object-describer.js \
 	pkg/kubernetes/deploy.js \
 	pkg/kubernetes/revealable.css \
@@ -83,16 +81,15 @@ kubernetes_MIN = \
 	$(NULL)
 kubernetes_BUNDLE = \
 	pkg/kubernetes/d3.min.js \
-	pkg/kubernetes/moment.min.js \
 	$(kubernetes_MIN) \
 	$(NULL)
 
 # Bundles all the view templates into a $templateCache loadable
-pkg/kubernetes/templates.min.js: $(kubernetes_VIEWS)
+pkg/kubernetes/templates.js: $(kubernetes_VIEWS)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/ngbundle -d kubernetes/app -o $@ $^
 
 # Everything else into a nice big bundle
-pkg/kubernetes/kubernetes.min.js: $(kubernetes_BUNDLE) pkg/kubernetes/templates.min.js
+pkg/kubernetes/kubernetes.min.js: $(kubernetes_BUNDLE) pkg/kubernetes/templates.js
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/jsbundle $@ $^
 
 kubernetes_TESTS = \
@@ -103,17 +100,18 @@ TESTS += $(kubernetes_TESTS)
 
 CLEANFILES += \
 	pkg/kubernetes/app.min.css \
-	pkg/kubernetes/cluster.min.html \
+	pkg/kubernetes/index.min.html \
 	pkg/kubernetes/kubernetes.min.js \
-	pkg/kubernetes/templates.min.js \
+	pkg/kubernetes/templates.js \
 	$(kubernetes_MIN) \
-	$(kubernetes_GZ) \
+	$(nodist_kubernetes_DATA) \
 	$(NULL)
 
 EXTRA_DIST += \
-	pkg/kubernetes/cluster.min.html \
+	pkg/kubernetes/app.min.css \
+	pkg/kubernetes/index.min.html \
 	pkg/kubernetes/kubernetes.min.js \
-	pkg/kubernetes/templates.min.js \
+	pkg/kubernetes/templates.js \
 	$(kubernetes_BUNDLE) \
 	$(kubernetes_DATA) \
 	$(kubernetesdebug_DATA) \
@@ -135,13 +133,7 @@ update-lib:: update-bower
 		$(BOWER)/d3/d3.js
 	$(JSMODULE) -o $(srcdir)/pkg/kubernetes/d3.min.js \
 		$(BOWER)/d3/d3.min.js
-	$(JSMODULE) -o $(srcdir)/pkg/kubernetes/moment.js \
-		$(BOWER)/momentjs/moment.js
-	$(JSMODULE) -o $(srcdir)/pkg/kubernetes/moment.min.js \
-		$(BOWER)/momentjs/min/moment.min.js
 
 # Never recreate these files
 pkg/kubernetes/d3.min.js:
-	@true
-pkg/kubernetes/moment.min.js:
 	@true

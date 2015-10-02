@@ -32,7 +32,7 @@ class TestConnection(MachineCase):
         self.start_cockpit()
 
         # take cockpit-ws down on the login page
-        b.open("system/host")
+        b.open("/system")
         b.wait_visible("#login")
         b.set_val("#login-user-input", "admin")
         b.set_val("#login-password-input", "foobar")
@@ -40,9 +40,13 @@ class TestConnection(MachineCase):
         b.click('#login-button')
         b.wait_text_not('#login-fatal-message', "")
         m.execute("systemctl start cockpit-testing.socket")
+        b.reload()
+        b.wait_visible("#login")
+        b.set_val("#login-user-input", "admin")
+        b.set_val("#login-password-input", "foobar")
         b.click('#login-button')
         b.expect_reload()
-        b.enter_page("/system/host")
+        b.enter_page("/system")
 
         # take cockpit-ws down on the server page
         m.execute("systemctl stop cockpit-testing.socket")
@@ -61,9 +65,13 @@ class TestConnection(MachineCase):
         with b.wait_timeout(20):
             b.wait_text_not('#login-fatal-message', "")
         m.execute("iptables -D INPUT 1")
+        b.reload()
+        b.wait_visible("#login")
+        b.set_val("#login-user-input", "admin")
+        b.set_val("#login-password-input", "foobar")
         b.click('#login-button')
         b.expect_reload()
-        b.enter_page("/system/host")
+        b.enter_page("/system")
 
         # sever the connection on the server page
         m.execute("iptables -I INPUT 1 -p tcp --dport 9090 -j REJECT")
@@ -74,7 +82,7 @@ class TestConnection(MachineCase):
         m.execute("iptables -D INPUT 1")
         b.click('#disconnected-reconnect')
         b.expect_reload()
-        b.enter_page("/system/host")
+        b.enter_page("/system")
 
         self.allow_restart_journal_messages()
 
@@ -125,7 +133,13 @@ class TestConnection(MachineCase):
         m = self.machine
         self.start_cockpit()
         m.execute('echo "[WebService]\nOrigins = http://other-origin:9090 http://localhost:9090" > /etc/cockpit/cockpit.conf')
-        m.execute('curl -s -f -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Origin: http://other-origin:9090" -H "Host: localhost:9090" -H "Sec-Websocket-Key: 3sc2c9IzwRUc3BlSIYwtSA==" -H "Sec-Websocket-Version: 13" http://localhost:9090/socket')
+        output = m.execute('curl -s -f -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Origin: http://other-origin:9090" -H "Host: localhost:9090" -H "Sec-Websocket-Key: 3sc2c9IzwRUc3BlSIYwtSA==" -H "Sec-Websocket-Version: 13" http://localhost:9090/cockpit/socket')
+        self.assertIn('"no-session"', output)
+
+        # The socket should also answer at /socket
+        output = m.execute('curl -s -f -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Origin: http://other-origin:9090" -H "Host: localhost:9090" -H "Sec-Websocket-Key: 3sc2c9IzwRUc3BlSIYwtSA==" -H "Sec-Websocket-Version: 13" http://localhost:9090/socket')
+        self.assertIn('"no-session"', output)
+
         self.allow_journal_messages('peer did not close io when expected')
 
 test_main()

@@ -197,7 +197,7 @@ setup_mock_webserver (TestCase *test,
   user = g_get_user_name ();
   test->auth = mock_auth_new (user, PASSWORD);
 
-  test->creds = cockpit_creds_new (user, COCKPIT_CRED_PASSWORD, PASSWORD, NULL);
+  test->creds = cockpit_creds_new (user, "cockpit", COCKPIT_CRED_PASSWORD, PASSWORD, NULL);
 }
 
 static void
@@ -467,7 +467,7 @@ start_web_service_and_create_client (TestCase *test,
   *service = cockpit_web_service_new (test->creds, NULL);
 
   /* Note, we are forcing the websocket to parse its own headers */
-  cockpit_web_service_socket (*service, test->io_b, NULL, NULL);
+  cockpit_web_service_socket (*service, "/unused", test->io_b, NULL, NULL);
 }
 
 static void
@@ -909,7 +909,7 @@ test_socket_unauthenticated (TestCase *test,
   /* Matching the above origin */
   cockpit_ws_default_host_header = "127.0.0.1";
 
-  cockpit_web_service_noauth (test->io_b, NULL, NULL);
+  cockpit_web_service_noauth (test->io_b, "/cockpit/socket", NULL, NULL);
 
   g_signal_connect (client, "message", G_CALLBACK (on_message_get_bytes), &received);
 
@@ -1386,7 +1386,7 @@ test_idling (TestCase *test,
   g_signal_connect (service, "idling", G_CALLBACK (on_idling_set_flag), &flag);
   g_assert (cockpit_web_service_get_idling (service));
 
-  cockpit_web_service_socket (service, test->io_b, NULL, NULL);
+  cockpit_web_service_socket (service, "/unused", test->io_b, NULL, NULL);
   g_assert (!cockpit_web_service_get_idling (service));
 
   while (web_socket_connection_get_ready_state (client) == WEB_SOCKET_STATE_CONNECTING)
@@ -1437,7 +1437,7 @@ test_dispose (TestCase *test,
   g_object_unref (transport);
   g_object_unref (pipe);
 
-  cockpit_web_service_socket (service, test->io_b, NULL, NULL);
+  cockpit_web_service_socket (service, "/unused", test->io_b, NULL, NULL);
 
   while (web_socket_connection_get_ready_state (client) == WEB_SOCKET_STATE_CONNECTING)
     g_main_context_iteration (NULL, TRUE);
@@ -1524,7 +1524,7 @@ setup_resource (TestResourceCase *tc,
   g_strfreev (environ);
 
   user = g_get_user_name ();
-  creds = cockpit_creds_new (user, COCKPIT_CRED_PASSWORD, PASSWORD, NULL);
+  creds = cockpit_creds_new (user, "cockpit", COCKPIT_CRED_PASSWORD, PASSWORD, NULL);
 
   transport = cockpit_pipe_transport_new (tc->pipe);
   tc->service = cockpit_web_service_new (creds, transport);
@@ -1567,9 +1567,9 @@ test_resource_simple (TestResourceCase *tc,
   GError *error = NULL;
   GBytes *bytes;
 
-  response = cockpit_web_response_new (tc->io, "/cockpit/@localhost/another/test.html", NULL, NULL);
+  response = cockpit_web_response_new (tc->io, "/@localhost/another/test.html", NULL, NULL);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.html");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1606,7 +1606,7 @@ test_resource_not_found (TestResourceCase *tc,
 
   response = cockpit_web_response_new (tc->io, "/cockpit/another@localhost/not-exist", NULL, NULL);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "another@localhost", "/not-exist");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1640,7 +1640,7 @@ test_resource_no_path (TestResourceCase *tc,
   /* Missing path after package */
   response = cockpit_web_response_new (tc->io, "/cockpit/another@localhost", NULL, NULL);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "another@localhost", "");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1675,14 +1675,14 @@ test_resource_failure (TestResourceCase *tc,
 
   cockpit_expect_message ("*: failed to retrieve resource: terminated");
 
-  response = cockpit_web_response_new (tc->io, "/cockpit/@localhost/another/test.html", NULL, NULL);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
 
   /* Now kill the bridge */
   g_assert (cockpit_pipe_get_pid (tc->pipe, &pid));
   g_assert_cmpint (pid, >, 0);
   g_assert_cmpint (kill (pid, SIGTERM), ==, 0);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.html");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1729,8 +1729,8 @@ test_resource_checksum (TestResourceCase *tc,
   g_object_unref (input);
 
   /* Start the connection up, and poke it a bit */
-  response = cockpit_web_response_new (io, "/cockpit/@localhost/checksum", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  response = cockpit_web_response_new (io, "/unused", NULL, NULL);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/checksum");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1747,8 +1747,10 @@ test_resource_checksum (TestResourceCase *tc,
   g_object_unref (output);
   g_object_unref (response);
 
-  response = cockpit_web_response_new (tc->io, "/cockpit/$71100b932eb766ef9043f855974ae8e3834173e2/test/sub/file.ext", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
+  cockpit_web_service_resource (tc->service, tc->headers, response,
+                                "$71100b932eb766ef9043f855974ae8e3834173e2",
+                                "/test/sub/file.ext");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1791,8 +1793,8 @@ test_resource_redirect_checksum (TestResourceCase *tc,
   g_object_unref (input);
 
   /* Start the connection up, and poke it a bit */
-  response = cockpit_web_response_new (io, "/cockpit/@localhost/not-found", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  response = cockpit_web_response_new (io, "/unused", NULL, NULL);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/not-found");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1802,8 +1804,8 @@ test_resource_redirect_checksum (TestResourceCase *tc,
   g_object_unref (response);
 
   /* Now do the real request ... we should be redirected */
-  response = cockpit_web_response_new (tc->io, "/cockpit/@localhost/test/sub/file.ext", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/test/sub/file.ext");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1835,10 +1837,10 @@ test_resource_not_modified (TestResourceCase *tc,
   g_hash_table_insert (tc->headers, g_strdup ("If-None-Match"),
                        g_strdup ("\"$3dccaa0e86f6cb47294825bc3fdf7435ff6b04c3\""));
 
-  response = cockpit_web_response_new (tc->io,
-                                       "/cockpit/$3dccaa0e86f6cb47294825bc3fdf7435ff6b04c3/test/sub/file.ext",
-                                       NULL, tc->headers);
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, tc->headers);
+  cockpit_web_service_resource (tc->service, tc->headers, response,
+                                "$3dccaa0e86f6cb47294825bc3fdf7435ff6b04c3",
+                                "/test/sub/file.ext");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1864,9 +1866,9 @@ test_resource_no_checksum (TestResourceCase *tc,
   GBytes *bytes;
 
   /* Missing checksum */
-  response = cockpit_web_response_new (tc->io, "/cockpit/", NULL, NULL);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "xxx", "/test");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1898,9 +1900,9 @@ test_resource_bad_checksum (TestResourceCase *tc,
   GBytes *bytes;
 
   /* Missing checksum */
-  response = cockpit_web_response_new (tc->io, "/cockpit/09323094823029348/path", NULL, NULL);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "09323094823029348", "/path");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1931,9 +1933,9 @@ test_resource_language_suffix (TestResourceCase *tc,
   GError *error = NULL;
   GBytes *bytes;
 
-  response = cockpit_web_response_new (tc->io, "/cockpit/@localhost/another/test.de.html", NULL, NULL);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.de.html");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -1968,10 +1970,10 @@ test_resource_language_fallback (TestResourceCase *tc,
   GError *error = NULL;
   GBytes *bytes;
 
-  response = cockpit_web_response_new (tc->io, "/cockpit/@localhost/another/test.fi.html", NULL, NULL);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
 
   /* Language cookie overrides */
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.fi.html");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);
@@ -2006,9 +2008,9 @@ test_resource_gzip_encoding (TestResourceCase *tc,
   GError *error = NULL;
   GBytes *bytes;
 
-  response = cockpit_web_response_new (tc->io, "/cockpit/@localhost/another/test-file.txt", NULL, NULL);
+  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
 
-  cockpit_web_service_resource (tc->service, tc->headers, response);
+  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test-file.txt");
 
   while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
     g_main_context_iteration (NULL, TRUE);

@@ -20,9 +20,9 @@
         });
     </script>
 </head>
-<body>
+<body hidden>
 
-    <div id="server" class="container-fluid" hidden>
+    <div id="server" class="container-fluid">
         <div class="col-md-4 col-lg-3 cockpit-info-table-container">
             <table class="cockpit-info-table">
                 <tr>
@@ -62,7 +62,18 @@
                 </tr>
                 <tr id="server-pmlogger-onoff-row" hidden>
                     <td translatable="yes">Store performance data</td>
-                    <td id="server-pmlogger-onoff"></td>
+                    <td>
+                        <div class="btn-group btn-onoff" id="server-pmlogger-switch" data-toggle="buttons">
+                            <label class="btn">
+                                <input type="radio" name="pmlogger-switch" autocomplete="off">
+                                <span translatable="yes">On</span>
+                            </label>
+                            <label class="btn active">
+                                <input type="radio" name="pmlogger-switch" autocomplete="off" checked>
+                                <span translatable="yes">Off</span>
+                            </label>
+                        </div>
+                    </td>
                 </tr>
             </table>
         </div>
@@ -226,20 +237,10 @@
                         <tr>
                             <td></td>
                             <td>
-                                <div class="form-group row nomargin">
-                                    <div class="col-md-8 nopadding">
-                                        <input type='text' class="form-control" id="systime-date-input"/>
-                                    </div>
-                                    <div class="col-md-4 row nomargin nopadding">
-                                        <div class="col-md-offset-1 col-md-5 nopadding">
-                                            <input type='text' class="form-control" id="systime-time-hours"/>
-                                        </div>
-                                        <div class="col-md-1 text-center nopadding">:</div>
-                                        <div class="col-md-5 nopadding">
-                                            <input type='text' class="form-control" id="systime-time-minutes"/>
-                                        </div>
-                                    </div>
-                                </div>
+                                <input type='text' class="form-control" id="systime-date-input"/>
+                                <input type='text' class="form-control" id="systime-time-hours"/>
+                                :
+                                <input type='text' class="form-control" id="systime-time-minutes"/>
                             </td>
                         </tr>
                         <tr>

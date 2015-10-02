@@ -33,6 +33,12 @@ define([
 var _ = cockpit.gettext;
 var C_ = cockpit.gettext;
 
+/* Handles an href link to a server */
+$(document).on("click", "a[data-address]", function(ev) {
+    cockpit.jump("/", $(this).attr("data-address"));
+    ev.preventDefault();
+});
+
 var common_plot_options = {
     legend: { show: false },
     series: { shadowSize: 0 },
@@ -169,14 +175,7 @@ function host_edit_dialog(machine_manager, host) {
             label: $('#host-edit-name').val()
         };
         var promise = machine_manager.change(machine.key, values);
-        promise
-            .done(function() {
-                dlg.modal('hide');
-            })
-            .fail(function(ex) {
-                dlg.dialog('failure', ex);
-            });
-        dlg.dialog('wait', promise);
+        dlg.dialog('promise', promise);
     });
     $('#host-edit-avatar').off('click');
     $('#host-edit-avatar').on('click', function () {
@@ -1063,7 +1062,7 @@ function init() {
             cockpit.location = '';
         }
 
-        $("body").show();
+        $("body").removeAttr("hidden");
     }
 
     cockpit.translate();

@@ -1,12 +1,11 @@
 
 dashboarddir = $(pkgdatadir)/dashboard
-dashboard_GZ = \
+nodist_dashboard_DATA = \
 	pkg/dashboard/bundle.min.js.gz \
-	pkg/dashboard/list.min.html.gz \
+	pkg/dashboard/index.min.html.gz \
 	$(NULL)
 dashboard_DATA = \
 	pkg/dashboard/manifest.json \
-	$(dashboard_GZ) \
 	$(NULL)
 
 dashboarddebugdir = $(debugdir)$(dashboarddir)
@@ -14,7 +13,7 @@ dashboarddebug_DATA = \
 	pkg/dashboard/bundle.js \
 	pkg/dashboard/list.js \
 	pkg/dashboard/image-editor.js \
-	pkg/dashboard/list.html \
+	pkg/dashboard/index.html \
 	$(NULL)
 
 dashboard_BUNDLE = \
@@ -26,15 +25,15 @@ pkg/dashboard/bundle.min.js: $(dashboard_BUNDLE)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/jsbundle $@ $^
 
 CLEANFILES += \
-	pkg/networkmanager/bundle.min.js \
-	pkg/networkmanager/interfaces.min.html \
-	$(networkmanager_BUNDLE) \
-	$(networkmanager_GZ) \
+	pkg/dashboard/bundle.min.js \
+	pkg/dashboard/index.min.html \
+	$(dashboard_BUNDLE) \
+	$(nodist_dashboard_DATA) \
 	$(NULL)
 
 EXTRA_DIST += \
 	pkg/dashboard/bundle.min.js \
-	pkg/dashboard/list.min.html \
+	pkg/dashboard/index.min.html \
 	$(dashboard_DATA) \
 	$(dashboarddebug_DATA) \
 	$(dashboard_BUNDLE) \

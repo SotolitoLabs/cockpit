@@ -50,7 +50,6 @@ $RUNNER <<EOF
 ./check-storage-msdos
 ./check-storage-luks
 ./check-storage-mdraid
-./check-storage-jobs
 ./check-storage-lvm2
 ./check-storage-used
 ./check-storage-hidden
@@ -69,6 +68,7 @@ $RUNNER <<EOF
 ./check-reauthorize
 ./check-docker
 ./check-loopback
+./check-embed
 ./check-kubernetes
 ./check-openshift
 ./check-keys

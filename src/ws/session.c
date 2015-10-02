@@ -30,13 +30,15 @@
 #include <string.h>
 
 #include <security/pam_appl.h>
+
+#include <sys/types.h>
 #include <sys/signal.h>
+#include <sys/stat.h>
 #include <sys/resource.h>
 #include <dirent.h>
 #include <sched.h>
 #include <utmp.h>
 #include <unistd.h>
-#include <sys/types.h>
 #include <pwd.h>
 #include <sys/wait.h>
 #include <grp.h>
@@ -349,7 +351,6 @@ open_session (pam_handle_t *pamh)
 {
   struct passwd *buf = NULL;
   const char *name;
-  char login[256];
   int res;
 
   name = NULL;
@@ -376,16 +377,16 @@ open_session (pam_handle_t *pamh)
     }
 
   /*
-   * If we're already in the right session, then skip cockpit-session.
-   * This is used when testing, or running as your own user.
-   *
-   * This doesn't apply if this code is running as a service, or otherwise
-   * unassociated from a terminal, we get a non-zero return value from
-   * getlogin_r() in that case.
+   * If we're already running as the right user, and have authenticated
+   * then skip starting a new session. This is used when testing, or
+   * running as your own user.
    */
 
-  want_session = (getlogin_r (login, sizeof (login)) != 0 ||
-                  strcmp (login, pwd->pw_name) != 0);
+  want_session = !(geteuid () != 0 &&
+                   geteuid () == pwd->pw_uid &&
+                   getuid () == pwd->pw_uid &&
+                   getegid () == pwd->pw_gid &&
+                   getgid () == pwd->pw_gid);
 
   if (want_session)
     {
@@ -784,12 +785,12 @@ fdwalk (int (*cb)(void *data, int fd),
 static int
 session (char **env)
 {
-  char *argv[] = { PACKAGE_BIN_DIR "/cockpit-bridge", NULL };
+  char *argv[] = { "cockpit-bridge", NULL };
   debug ("executing bridge: %s", argv[0]);
   if (env)
-    execve (argv[0], argv, env);
+    execvpe (argv[0], argv, env);
   else
-    execv (argv[0], argv);
+    execvp (argv[0], argv);
   warn ("can't exec %s", argv[0]);
   return 127;
 }
@@ -850,68 +851,6 @@ fork_session (char **env)
 }
 
 static void
-maybe_nsenter (void)
-{
-  struct {
-    int type;
-    const char *name;
-    int fd;
-  } namespaces[] = {
-    { CLONE_NEWUSER, "ns/user", -1 },
-    { CLONE_NEWIPC, "ns/ipc", -1 },
-    { CLONE_NEWUTS, "ns/uts", -1 },
-    { CLONE_NEWNET, "ns/net", -1 },
-    { CLONE_NEWPID, "ns/pid", -1 },
-    { CLONE_NEWNS, "ns/mnt", -1 },
-    { 0 }
-  };
-
-  const char *baselink = "/container/target-namespace";
-  char base[256];
-  char *filename;
-  ssize_t len;
-  int i;
-
-  len = readlink (baselink, base, sizeof (base));
-  if (len < 0)
-    {
-      /* A missing namespace file is not a bug */
-      if (errno == ENOENT)
-        return;
-
-      err (EX, "couldn't read target namespace link: %s", baselink);
-    }
-  else if (len == sizeof (base))
-    {
-      errx (EX, "target namespace link too long: %s", baselink);
-    }
-
-  for (i = 0; namespaces[i].type != 0; i++)
-    {
-      if (asprintf (&filename, "%s/%s", base, namespaces[i].name) < 0)
-        errx (42, "couldn't allocate namespace name");
-      namespaces[i].fd = open (filename, O_RDONLY);
-      if (namespaces[i].fd < 0)
-        err (EX, "couldn't open namespace file: %s", filename);
-      free (filename);
-    }
-
-  for (i = 0; namespaces[i].type != 0; i++)
-    {
-      if (setns (namespaces[i].fd, namespaces[i].type) < 0)
-        {
-          /* For now we ignore errors resulting from the user namespace not being active */
-          if (namespaces[i].type != CLONE_NEWUSER || errno != EINVAL)
-            err (EX, "couldn't change into %s namespace", namespaces[i].name);
-        }
-      close (namespaces[i].fd);
-    }
-
-  if (chdir ("/") < 0)
-    err (EX, "couldn't change to root directory");
-}
-
-static void
 pass_to_child (int signo)
 {
   kill (child, signo);
@@ -965,6 +904,9 @@ main (int argc,
   if (argc != 3)
     errx (2, "invalid arguments to cockpit-session");
 
+  /* Cleanup the umask */
+  umask (077);
+
   save_environment ();
 
   /* When setuid root, make sure our group is also root */
@@ -997,9 +939,6 @@ main (int argc,
   signal (SIGTSTP, SIG_IGN);
   signal (SIGHUP, SIG_IGN);
   signal (SIGPIPE, SIG_IGN);
-
-  /* Switch namespaces if we've been requested to do so */
-  maybe_nsenter ();
 
   if (strcmp (auth, "basic") == 0)
     pamh = perform_basic ();

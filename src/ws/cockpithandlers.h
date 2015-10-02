@@ -25,6 +25,8 @@
 #include "common/cockpitwebserver.h"
 #include "common/cockpitwebresponse.h"
 
+extern const gchar *cockpit_ws_shell_component;
+
 typedef struct {
   CockpitAuth *auth;
   const gchar **static_roots;
@@ -39,19 +41,13 @@ gboolean       cockpit_handler_socket            (CockpitWebServer *server,
                                                   guint in_length,
                                                   CockpitHandlerData *data);
 
-gboolean       cockpit_handler_login             (CockpitWebServer *server,
-                                                  const gchar *path,
-                                                  GHashTable *headers,
-                                                  CockpitWebResponse *response,
-                                                  CockpitHandlerData *data);
-
 gboolean       cockpit_handler_root              (CockpitWebServer *server,
                                                   const gchar *path,
                                                   GHashTable *headers,
                                                   CockpitWebResponse *response,
                                                   CockpitHandlerData *ws);
 
-gboolean       cockpit_handler_resource          (CockpitWebServer *server,
+gboolean       cockpit_handler_default           (CockpitWebServer *server,
                                                   const gchar *path,
                                                   GHashTable *headers,
                                                   CockpitWebResponse *response,

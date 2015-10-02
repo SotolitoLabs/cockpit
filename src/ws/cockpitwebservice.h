@@ -42,11 +42,13 @@ CockpitWebService *  cockpit_web_service_new         (CockpitCreds *creds,
 void                 cockpit_web_service_disconnect  (CockpitWebService *self);
 
 void                 cockpit_web_service_socket      (CockpitWebService *self,
+                                                      const gchar *path,
                                                       GIOStream *io_stream,
                                                       GHashTable *headers,
                                                       GByteArray *input_buffer);
 
 void                 cockpit_web_service_sideband    (CockpitWebService *self,
+                                                      const gchar *path,
                                                       const gchar *details,
                                                       GIOStream *io_stream,
                                                       GHashTable *headers,
@@ -54,9 +56,12 @@ void                 cockpit_web_service_sideband    (CockpitWebService *self,
 
 void                 cockpit_web_service_resource    (CockpitWebService *self,
                                                       GHashTable *headers,
-                                                      CockpitWebResponse *response);
+                                                      CockpitWebResponse *response,
+                                                      const gchar *where,
+                                                      const gchar *path);
 
 void                 cockpit_web_service_noauth      (GIOStream *io_stream,
+                                                      const gchar *path,
                                                       GHashTable *headers,
                                                       GByteArray *input_buffer);
 

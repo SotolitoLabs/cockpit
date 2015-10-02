@@ -324,7 +324,7 @@ test_authenticate (TestCase *test,
   build_authorization_header (in_headers, &output);
   gss_release_buffer (&minor, &output);
 
-  cockpit_auth_login_async (test->auth, in_headers, NULL, on_ready_get_result, &result);
+  cockpit_auth_login_async (test->auth, "/cockpit+test", in_headers, NULL, on_ready_get_result, &result);
   g_hash_table_unref (in_headers);
 
   while (result == NULL)
@@ -337,6 +337,7 @@ test_authenticate (TestCase *test,
 
   creds = cockpit_web_service_get_creds (service);
   g_assert_cmpstr (g_get_user_name (), ==, cockpit_creds_get_user (creds));
+  g_assert_cmpstr ("cockpit+test", ==, cockpit_creds_get_application (creds));
   g_assert_cmpstr (NULL, ==, cockpit_creds_get_password (creds));
 
   g_object_unref (service);
@@ -359,7 +360,7 @@ test_authenticate (TestCase *test,
 
   include_cookie_as_if_client (out_headers, out_headers);
 
-  service = cockpit_auth_check_cookie (test->auth, out_headers);
+  service = cockpit_auth_check_cookie (test->auth, "/cockpit+test", out_headers);
   g_assert (service != NULL);
 
   creds = cockpit_web_service_get_creds (service);
@@ -396,7 +397,8 @@ static void
 on_kdc_setup (gpointer user_data)
 {
   /* Kill all sub processes when this process exits */
-  prctl (PR_SET_PDEATHSIG, 15);
+  if (prctl (PR_SET_PDEATHSIG, SIGTERM) < 0)
+    g_critical ("prctl failed: %s", g_strerror (errno));
 
   /* Start a new session for this process */
   setsid ();
@@ -441,6 +443,7 @@ mock_kdc_start (void)
         {
           if (errno != EAGAIN && errno != EINTR)
             g_error ("couldn't read from mock-kdc: %s", g_strerror (errno));
+            break;
         }
       else
         {
@@ -526,6 +529,9 @@ main (int argc,
   cockpit_ws_session_program = BUILDDIR "/cockpit-session";
 
   cockpit_test_init (&argc, &argv);
+
+  /* Try to debug crashing during tests */
+  signal (SIGABRT, cockpit_test_signal_backtrace);
 
   mock_kdc_start ();
 

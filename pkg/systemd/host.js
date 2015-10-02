@@ -30,6 +30,7 @@ define([
     "shell/cockpit-util",
     "base1/bootstrap-datepicker",
     "base1/bootstrap-combobox",
+    "base1/patterns",
 ], function($, cockpit, domain, controls, shell, server, service) {
 "use strict";
 
@@ -195,17 +196,13 @@ PageServer.prototype = {
 
         var pmcd_service = service.proxy("pmcd");
         var pmlogger_service = service.proxy("pmlogger");
+        var pmlogger_promise;
 
-        self.pmlogger_onoff = controls.OnOff(false,
-                                             change_pmlogger_state,
-                                             null,
-                                             null,
-                                             null);
-
-        function change_pmlogger_state(val) {
+        $("#server-pmlogger-switch").on("change", function(ev) {
+            var val = $(this).onoff('value');
             if (pmlogger_service.exists) {
                 if (val) {
-                    $.when(pmcd_service.enable(),
+                    pmlogger_promise = $.when(pmcd_service.enable(),
                            pmcd_service.start(),
                            pmlogger_service.enable(),
                            pmlogger_service.start()).
@@ -213,25 +210,27 @@ PageServer.prototype = {
                             console.warn("Enabling pmlogger failed", error);
                         });
                 } else {
-                    $.when(pmlogger_service.disable(),
+                    pmlogger_promise = $.when(pmlogger_service.disable(),
                            pmlogger_service.stop()).
                         fail(function (error) {
                             console.warn("Disabling pmlogger failed", error);
                         });
                 }
+                pmlogger_promise.always(function() {
+                    pmlogger_promise = null;
+                    refresh_pmlogger_state();
+                });
             }
-        }
+        });
 
         function refresh_pmlogger_state() {
             if (!pmlogger_service.exists)
                 $('#server-pmlogger-onoff-row').hide();
-            else {
-                self.pmlogger_onoff.set(pmlogger_service.enabled);
+            else if (!pmlogger_promise) {
+                $("#server-pmlogger-switch").onoff('value', pmlogger_service.enabled);
                 $('#server-pmlogger-onoff-row').show();
             }
         }
-
-        $('#server-pmlogger-onoff').empty().append(self.pmlogger_onoff);
 
         $(pmlogger_service).on('changed', refresh_pmlogger_state);
         refresh_pmlogger_state();
@@ -530,17 +529,9 @@ PageSystemInformationChangeHostname.prototype = {
         var new_full_name = $("#sich-pretty-hostname").val();
         var new_name = $("#sich-hostname").val();
 
-        function on_done(resp) {
-            $("#system_information_change_hostname").modal('hide');
-        }
-        function on_fail(error) {
-            $("#system_information_change_hostname").modal('hide');
-            show_unexpected_error(error);
-        }
-        self.hostname_proxy.call("SetStaticHostname", [new_name, true])
-                     .done(on_done).fail(on_fail);
-        self.hostname_proxy.call("SetPrettyHostname", [new_full_name, true])
-                     .done(on_done).fail(on_fail);
+        var one = self.hostname_proxy.call("SetStaticHostname", [new_name, true]);
+        var two = self.hostname_proxy.call("SetPrettyHostname", [new_full_name, true]);
+        $("#system_information_change_hostname").dialog("promise", $.when(one, two));
     },
 
     _on_full_name_changed: function(event) {
@@ -727,39 +718,34 @@ PageSystemInformationChangeSystime.prototype = {
     _on_apply_button: function(event) {
         var server_time = PageSystemInformationChangeSystime.server_time;
 
-        if (! this.check_input())
+        if (!this.check_input())
             return;
 
         var manual_time = $('#change_systime').val() == 'manual_time';
 
-        server_time.timedate.call('SetNTP', [$('#change_systime').val() == 'ntp_time', true])
-            .fail(function(err) {
-                show_unexpected_error(err);
-                $("#system_information_change_systime").modal('hide');
-            })
+        var promise = server_time.timedate.call('SetNTP', [!manual_time, true])
             .done(function() {
-                if (! $('#systime-timezones').prop('disabled')) {
-                    server_time.timedate.call('SetTimezone', [$('#systime-timezones').val(), true])
-                        .fail(function(err) {
-                            show_unexpected_error(err);
-                        });
+                var promises = [];
+                var promise;
+
+                if (!$('#systime-timezones').prop('disabled')) {
+                    promise = server_time.timedate.call('SetTimezone', [$('#systime-timezones').val(), true]);
+                    promises.push(promise);
                 }
 
-                if (!manual_time) {
-                    $("#system_information_change_systime").modal('hide');
-                    return;
+                if (manual_time) {
+                    promise = server_time.change_time($("#systime-date-input").val(),
+                                                      $('#systime-time-hours').val(),
+                                                      $('#systime-time-minutes').val());
+                    promises.push(promise);
                 }
 
-                server_time.change_time($("#systime-date-input").val(),
-                                        $('#systime-time-hours').val(),
-                                        $('#systime-time-minutes').val())
-                    .fail(function(err) {
-                        show_unexpected_error(err);
-                    })
-                    .always(function() {
-                        $("#system_information_change_systime").modal('hide');
-                    });
+                $("#system_information_change_systime").dialog("promise", $.when.apply($, promises));
+            })
+            .fail(function(ex) {
+                $("#system_information_change_systime").dialog("failure", ex);
             });
+        $("#system_information_change_systime").dialog("wait", promise);
     },
 
     check_input: function() {
@@ -915,16 +901,13 @@ PageShutdownDialog.prototype = {
             when = "+" + delay;
 
         var arg = (op == "shutdown") ? "--poweroff" : "--reboot";
-        cockpit.spawn(["shutdown", arg, when, message], { superuser: "try" })
-            .fail(function(ex) {
-                $('#shutdown-dialog').modal('hide');
-                show_unexpected_error(ex);
-            })
-            .done(function(ex) {
-                if (op == "restart")
-                    cockpit.hint("restart");
-                $('#shutdown-dialog').modal('hide');
-            });
+
+        var promise = cockpit.spawn(["shutdown", arg, when, message], { superuser: "try" });
+        $('#shutdown-dialog').dialog("promise", promise);
+        promise.done(function() {
+            if (op == "restart")
+                cockpit.hint("restart");
+        });
     },
 
     restart: function() {
@@ -1119,12 +1102,12 @@ $("#link-memory").on("click", function() {
 });
 
 $("#link-network").on("click", function() {
-    cockpit.jump("/network/interfaces");
+    cockpit.jump("/network");
     return false;
 });
 
 $("#link-disk").on("click", function() {
-    cockpit.jump("/storage/devices");
+    cockpit.jump("/storage");
     return false;
 });
 
@@ -1140,36 +1123,29 @@ $("#link-disk").on("click", function() {
  * 'dialog_setup', 'page_show', and 'page_hide'.
  */
 
-function show_error_dialog(title, message) {
-    if (message) {
-        $("#error-popup-title").text(title);
-        $("#error-popup-message").text(message);
-    } else {
-        $("#error-popup-title").text(_("Error"));
-        $("#error-popup-message").text(title);
-    }
-
-    $('.modal[role="dialog"]').modal('hide');
-    $('#error-popup').modal('show');
-}
-
-function show_unexpected_error(error) {
-    show_error_dialog(_("Unexpected error"), error.message || error);
-}
-
 function dialog_setup(d) {
     d.setup();
+    var already_entered = false;
     $('#' + d.id).
-        on('show.bs.modal', function () { d.enter(); }).
-        on('shown.bs.modal', function () { d.show(); }).
-        on('hidden.bs.modal', function () { d.leave(); });
+        on('show.bs.modal', function (event) {
+            if (event.target.id === d.id)
+                d.enter();
+        }).
+        on('shown.bs.modal', function (event) {
+            if (event.target.id === d.id)
+              d.show();
+        }).
+        on('hidden.bs.modal', function (event) {
+            if (event.target.id === d.id)
+              d.leave();
+        });
 }
 
 function page_show(p, arg) {
     if (!p._entered_)
         p.enter(arg);
     p._entered_ = true;
-    $('#' + p.id).show();
+    $('#' + p.id).show().removeAttr("hidden");
     p.show();
 }
 
@@ -1202,7 +1178,7 @@ function init() {
             cockpit.location = '';
         }
 
-        $("body").show();
+        $("body").removeAttr("hidden");
     }
 
     cockpit.translate();

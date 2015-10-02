@@ -70,7 +70,7 @@ class TestKubernetes(KubernetesCase):
         m = self.machine
         b.wait_timeout(120)
 
-        self.login_and_go("/kubernetes/cluster", host=None)
+        self.login_and_go("/kubernetes")
         b.wait_present("#node-list")
         b.wait_in_text("#node-list", "127.0.0.1")
 
@@ -79,11 +79,11 @@ class TestKubernetes(KubernetesCase):
 
         pods = m.execute('kubectl get pods --output=template -t="{{ range .items }}{{.metadata.name}}|{{ end }}"')
         podl = pods.split("|")
-        print podl[0]
         b.click("a[href='#/list']")
         b.wait_present("#content .details-listing")
         self.assertEqual(b.text(".details-listing tbody[data-id='services/default/mock'] th"), "mock")
         self.assertEqual(b.text(".details-listing tbody[data-id='replicationcontrollers/default/mock'] th"), "mock")
+        b.wait_present(".details-listing tbody[data-id='pods/default/"+podl[0]+"'] th")
         self.assertEqual(b.text(".details-listing tbody[data-id='pods/default/"+podl[0]+"'] th"), podl[0])
 
         b.click(".details-listing tbody[data-id='services/default/mock'] th")
@@ -111,7 +111,7 @@ class TestKubernetes(KubernetesCase):
         b = self.browser
         m = self.machine
 
-        self.login_and_go("/kubernetes/cluster", host=None)
+        self.login_and_go("/kubernetes")
         b.wait_present("#node-list")
         b.wait_in_text("#node-list", "127.0.0.1")
 
@@ -157,11 +157,21 @@ class TestKubernetes(KubernetesCase):
         # Make sure pod has started
         with b.wait_timeout(120):
             b.wait_text("#service-list tr[data-name='mock']:first-of-type td.containers", "1")
-        b.click("#service-list tr[data-name='mock']:first-of-type")
+
+        # Adjust the service
+        b.click("#services-enable-change")
+        b.click("#service-list tr[data-name='mock']:first-of-type button")
+        b.wait_popup("adjust-dialog")
+        b.set_val("#adjust-dialog input.adjust-replica", 2)
+        b.click("#adjust-dialog .btn-primary")
+        b.wait_popdown("adjust-dialog")
+        b.click("#services-enable-change")
+        b.wait_in_text("#service-list tr[data-name='mock']:first-of-type td.containers", "2")
 
         # Check that clicking on service goes to containers
+        b.click("#service-list tr[data-name='mock']:first-of-type td.containers")
         b.wait_present("#content .containers-listing tbody tr th")
-        self.assertEqual(b.text("#content .containers-listing tbody tr th"), "mock-container")
+        self.assertEqual(b.text("#content .containers-listing tbody:first-of-type tr th"), "mock-container")
 
         # Check that service shows up on listing view
         b.click("a[href='#/list']")
@@ -227,7 +237,6 @@ class TestKubernetes(KubernetesCase):
         b.upload_file("#deploy-app-manifest-file", "files/mock-k8s-tiny-app.json")
         b.wait_val("#deploy-app-namespace", "mynamespace1")
         b.set_val("#deploy-app-namespace", "mynamespace2")
-        self.assertEqual(b.text("#deploy-app-namespace-group ul li:first-child"), "default")
         self.assertEqual(b.text("#deploy-app-namespace-group ul li:last-child"), "mynamespace1")
         b.dialog_complete("#deploy-app-dialog")
 
@@ -245,7 +254,7 @@ class TestKubernetes(KubernetesCase):
         m.execute("kubectl create -f /tmp/mock-k8s-tiny-app.json")
 
         # The service has loaded and containers instantiated
-        self.login_and_go("/kubernetes/cluster", host=None)
+        self.login_and_go("/kubernetes")
         b.wait_present("#service-list tr[data-name='mock'] td.containers")
         with b.wait_timeout(120):
             b.wait_text("#service-list tr[data-name='mock'] td.containers", "1")
@@ -264,7 +273,7 @@ class TestConnection(KubernetesCase):
         b = self.browser
 
         # Connect without starting a kube server
-        self.login_and_go("/kubernetes/cluster", host=None)
+        self.login_and_go("/kubernetes")
         b.wait_present(".curtains")
         b.wait_in_text(".curtains", "Couldn't connect to Kubernetes server")
         b.wait_in_text(".curtains", "Couldn't find running kube-apiserver")
@@ -309,7 +318,7 @@ class TestConnection(KubernetesCase):
         m.execute("systemctl start etcd kube-apiserver")
         self.wait_api_server(port=6443, scheme='https')
 
-        self.login_and_go("/kubernetes/cluster", host=None)
+        self.login_and_go("/kubernetes")
         b.wait_present("#service-list")
         b.wait_in_text("#service-list", "You can deploy an application to your cluster.")
 
@@ -334,13 +343,13 @@ class TestNulecule(KubernetesCase):
         m = self.machine
         b.wait_timeout(120)
 
-        self.login_and_go("/kubernetes/cluster", host=None)
+        self.login_and_go("/kubernetes")
         b.wait_present("#node-list")
         b.wait_in_text("#node-list", "127.0.0.1")
 
         # 1)check atomic version
-        output = m.execute("atomic -v")
-        self.assertTrue(output >= 1.1)
+        output = m.execute("atomic -v 2>&1")
+        self.assertTrue(float(output) >= 1.1)
 
         # 2) fail  invalid image
         b.click("#deploy-app")
@@ -348,7 +357,6 @@ class TestNulecule(KubernetesCase):
         b.set_val("#deploy-app-type", "nulecule")
         b.set_val("#deploy-app-nulecule-image", "submod/helloapache1")
         b.set_val("#deploy-app-namespace", "mynamespace")
-        b.click("#deploy-app-start")
         b.dialog_complete("#deploy-app-dialog", result="fail")
         b.dialog_cancel("#deploy-app-dialog")
 
@@ -371,7 +379,6 @@ class TestNulecule(KubernetesCase):
         b.set_val("#deploy-app-type", "nulecule")
         b.set_val("#deploy-app-nulecule-image", "submod/helloapache")
         b.set_val("#deploy-app-namespace", "mynamespace")
-        b.click("#deploy-app-start")
         b.dialog_complete("#deploy-app-dialog", result="fail")
         b.dialog_cancel("#deploy-app-dialog")
 

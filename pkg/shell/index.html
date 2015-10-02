@@ -4,7 +4,6 @@
     <title>Cockpit</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <base href="/cockpit/@@base@@/shell/index.html">
     <link href="../base1/cockpit.css" rel="stylesheet">
     <link href="../../static/branding.css" rel="stylesheet">
     <link href="shell.css" rel="stylesheet">
@@ -15,10 +14,7 @@
     <nav id="topnav" class="navbar navbar-default navbar-pf" role="navigation">
       <div class="navbar-header">
         <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse-1">
-          <span class="sr-only" translatable="yes">Toggle navigation</span>
-          <span class="icon-bar"></span>
-          <span class="icon-bar"></span>
-          <span class="icon-bar"></span>
+          <i class="fa fa-bars" alt="Toggle navigation"></i>
         </button>
         <div class="navbar-brand">
           <div id="index-brand"></div>
@@ -175,7 +171,7 @@
         <div class="panel panel-default">
           <div class="panel-heading">
             <h4 class="panel-title">
-              <a data-toggle="collapse" href="/@localhost/#tools-panel" class="collapsed" translatable="yes">
+              <a data-toggle="collapse" data-target="#tools-panel" class="collapsed" translatable="yes">
                 Tools
               </a>
             </h4>
@@ -232,9 +228,9 @@
     <div id="content">
       <!-- Initially populate these frames -->
       <iframe class="container-frame"
-          name="cockpit1:localhost/dashboard/list" src="../dashboard/list.html"></iframe>
+          name="cockpit1:localhost/dashboard" src="../dashboard/index.html#/"></iframe>
       <iframe class="container-frame"
-          name="cockpit1:localhost/system/host" src="../system/host.html"></iframe>
+          name="cockpit1:localhost/system" src="../system/index.html#/"></iframe>
     </div>
   </body>
 </html>

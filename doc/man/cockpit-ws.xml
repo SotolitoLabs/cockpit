@@ -32,7 +32,7 @@
 
   <refnamediv>
     <refname>cockpit-ws</refname>
-    <refpurpose>Cockpit web server</refpurpose>
+    <refpurpose>Cockpit web service</refpurpose>
   </refnamediv>
 
   <refsynopsisdiv>
@@ -48,7 +48,7 @@
 
   <refsect1><title>DESCRIPTION</title>
     <para>
-      The <command>cockpit-ws</command> program is the web server
+      The <command>cockpit-ws</command> program is the web service
       component used for communication between the browser application
       and various configuration tools and services like
       <citerefentry>
@@ -64,20 +64,9 @@
   </refsect1>
 
   <refsect1>
-    <title>AUTHENTICATION</title>
-    <para>
-      Access to the <literal>com.redhat.Cockpit</literal> D-Bus service
-      via the <filename>/socket</filename> URI requires authentication
-      - this is implemented by asking for the root password. Static
-      files from <filename>/usr/share/cockpit/static</filename> are
-      served without requiring any authentication.
-    </para>
-  </refsect1>
-
-  <refsect1>
     <title>TRANSPORT SECURITY</title>
     <para>
-      To specify the TLS certificate the web server should use, simply
+      To specify the TLS certificate the web service should use, simply
       drop a file with the extension <literal>.cert</literal> in the
       <filename>/etc/cockpit/ws-certs.d</filename> directory. If there are
       multiple files in this directory, then the highest priority one

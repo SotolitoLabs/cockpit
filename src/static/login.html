@@ -10,9 +10,8 @@
         var phantom_checkpoint = phantom_checkpoint || function () { };
 
         (function(console) {
-
-            /* Filled in by cockpit-ws handler */
-            var initial_environment = @@environment@@;
+            var environment = window.environment || { };
+            var login_path;
 
             function unquote(str) {
                 str = str.trim();
@@ -51,17 +50,19 @@
             }
 
             function brand(_id, def) {
-                var elt = id(_id);
-                if (!elt)
+                var sytle, elt = id(_id);
+                if (elt)
+                    style = window.getComputedStyle(elt);
+                if (!style)
                     return;
 
-                var len, content = window.getComputedStyle(elt).content;
+                var len, content = style.content;
                 if (content && content != "none" && content != "normal") {
                     len = content.length;
                     if ((content[0] === '"' || content[0] === '\'') &&
                         len > 2 && content[len - 1] === content[0])
                         content = content.substr(1, len - 2);
-                    elt.innerHTML = format(content, initial_environment["os-release"]) || def;
+                    elt.innerHTML = format(content, environment["os-release"]) || def;
                 }
             }
 
@@ -84,7 +85,8 @@
                        req("sessionStorage", window) &&
                        req("JSON", window) &&
                        req("defineProperty", Object) &&
-                       req("console", window);
+                       req("console", window) &&
+                       req("pushState", window.history);
             }
 
             function trim(s) {
@@ -100,7 +102,12 @@
                 if (!requisites())
                     return;
 
-                var os_release = JSON.stringify(initial_environment["os-release"]);
+                var path = window.location.pathname || "/";
+                if (path.indexOf("/cockpit") !== 0)
+                    path = "/cockpit";
+                login_path = "/" + path.split("/")[1] + "/login";
+
+                var os_release = JSON.stringify(environment["os-release"]);
                 localStorage.setItem('os-release', os_release);
 
                 /* Try automatic/kerberos authentication? */
@@ -114,7 +121,7 @@
 
             function auto_login() {
                 var xhr = new XMLHttpRequest();
-                xhr.open("GET", "/login", true);
+                xhr.open("GET", login_path, true);
                 xhr.onreadystatechange = function () {
                     if (xhr.readyState != 4) {
                         return;
@@ -144,9 +151,9 @@
 
             function show_login() {
                 /* Show the login screen */
-                document.title = initial_environment.hostname;
+                document.title = environment.hostname;
                 var b = document.createElement("b");
-                b.appendChild(document.createTextNode(initial_environment.hostname));
+                b.appendChild(document.createTextNode(environment.hostname));
                 id("server-name").appendChild(b);
                 id("login").style.visibility = 'visible';
                 id("login-user-input").focus();
@@ -183,7 +190,7 @@
                 id("login-button").setAttribute('disabled', "true");
                 id("login-spinner").style.display = 'block';
                 var xhr = new XMLHttpRequest();
-                xhr.open("GET", "/login", true);
+                xhr.open("GET", login_path, true);
                 xhr.setRequestHeader("Authorization", "Basic " + btoa(utf8(user + ":" + password)));
                 xhr.onreadystatechange = function () {
                     if (xhr.readyState != 4) {
@@ -193,7 +200,7 @@
                     } else if (xhr.status == 401) {
                         if (window.console)
                             console.log(xhr.statusText);
-                        if (xhr.statusText.indexOf("not-supported") > -1) {
+                        if (xhr.statusText.indexOf("authentication-not-supported") > -1) {
                             var user = trim(id("login-user-input").value);
                             fatal("The server refused to authenticate '" + user + "' using password authentication, and no other supported authentication methods are available.");
                         } else {

@@ -31,6 +31,7 @@
 #include "common/cockpitjson.h"
 #include "common/cockpitlog.h"
 #include "common/cockpitpipetransport.h"
+#include "common/cockpitwebinject.h"
 #include "common/cockpitwebresponse.h"
 #include "common/cockpitwebserver.h"
 
@@ -1270,6 +1271,7 @@ process_and_relay_open (CockpitWebService *self,
       if (!cockpit_json_get_string (options, "password", NULL, &password))
         password = NULL;
       creds = cockpit_creds_new (specific_user,
+                                 cockpit_creds_get_application (self->creds),
                                  COCKPIT_CRED_PASSWORD, password,
                                  COCKPIT_CRED_RHOST, cockpit_creds_get_rhost (self->creds),
                                  NULL);
@@ -1727,6 +1729,7 @@ cockpit_web_service_new (CockpitCreds *creds,
 
 static WebSocketConnection *
 create_web_socket_server_for_stream (const gchar **protocols,
+                                     const gchar *path,
                                      const gchar *query,
                                      GIOStream *io_stream,
                                      GHashTable *headers,
@@ -1741,6 +1744,8 @@ create_web_socket_server_for_stream (const gchar **protocols,
   gboolean secure;
   gchar *url;
 
+  g_return_val_if_fail (path != NULL, NULL);
+
   if (headers)
     host = g_hash_table_lookup (headers, "Host");
   if (!host)
@@ -1748,9 +1753,10 @@ create_web_socket_server_for_stream (const gchar **protocols,
 
   secure = G_IS_TLS_CONNECTION (io_stream);
 
-  url = g_strdup_printf ("%s://%s/socket%s%s",
+  url = g_strdup_printf ("%s://%s%s%s%s",
                          secure ? "wss" : "ws",
                          host ? host : "localhost",
+                         path,
                          query ? "?" : "",
                          query ? query : "");
 
@@ -1785,6 +1791,7 @@ create_web_socket_server_for_stream (const gchar **protocols,
  */
 void
 cockpit_web_service_socket (CockpitWebService *self,
+                            const gchar *path,
                             GIOStream *io_stream,
                             GHashTable *headers,
                             GByteArray *input_buffer)
@@ -1792,7 +1799,8 @@ cockpit_web_service_socket (CockpitWebService *self,
   const gchar *protocols[] = { "cockpit1", NULL };
   WebSocketConnection *connection;
 
-  connection = create_web_socket_server_for_stream (protocols, NULL, io_stream, headers, input_buffer);
+  connection = create_web_socket_server_for_stream (protocols, path,
+                                                    NULL, io_stream, headers, input_buffer);
 
   g_signal_connect (connection, "open", G_CALLBACK (on_web_socket_open), self);
   g_signal_connect (connection, "closing", G_CALLBACK (on_web_socket_closing), self);
@@ -1854,12 +1862,17 @@ on_web_socket_noauth (WebSocketConnection *connection,
 
 void
 cockpit_web_service_noauth (GIOStream *io_stream,
+                            const gchar *path,
                             GHashTable *headers,
                             GByteArray *input_buffer)
 {
   WebSocketConnection *connection;
+  gchar *application;
 
-  connection = create_web_socket_server_for_stream (NULL, NULL, io_stream, headers, input_buffer);
+  application = cockpit_auth_parse_application (path);
+  connection = create_web_socket_server_for_stream (NULL, application, NULL, io_stream,
+                                                    headers, input_buffer);
+  g_free (application);
 
   g_signal_connect (connection, "open", G_CALLBACK (on_web_socket_noauth), NULL);
   g_signal_connect (connection, "error", G_CALLBACK (on_web_socket_error), NULL);
@@ -1946,6 +1959,7 @@ on_sideband_invalid (WebSocketConnection *connection,
 
 void
 cockpit_web_service_sideband (CockpitWebService *self,
+                              const gchar *path,
                               const gchar *escaped,
                               GIOStream *io_stream,
                               GHashTable *headers,
@@ -2006,7 +2020,8 @@ cockpit_web_service_sideband (CockpitWebService *self,
   channel = generated = generate_channel_id (self);
   json_object_set_string_member (options, "channel", generated);
 
-  connection = create_web_socket_server_for_stream (protocols, escaped, io_stream, headers, input_buffer);
+  connection = create_web_socket_server_for_stream (protocols, path, escaped,
+                                                    io_stream, headers, input_buffer);
 
   sideband = cockpit_sideband_track (&self->sidebands, channel, connection);
   sideband->options = json_object_ref (options);
@@ -2028,7 +2043,8 @@ out:
 
   if (!sideband)
     {
-      connection = create_web_socket_server_for_stream (NULL, escaped, io_stream, headers, input_buffer);
+      connection = create_web_socket_server_for_stream (NULL, path, escaped, io_stream,
+                                                        headers, input_buffer);
       g_signal_connect (connection, "open", G_CALLBACK (on_sideband_invalid), "protocol-error");
       g_signal_connect (connection, "error", G_CALLBACK (on_web_socket_error), NULL);
       g_signal_connect (connection, "close", G_CALLBACK (g_object_unref), NULL);
@@ -2044,8 +2060,9 @@ cockpit_web_service_get_idling (CockpitWebService *self)
 
 static gboolean
 redirect_to_checksum_path (CockpitWebService *self,
+                           CockpitWebResponse *response,
                            const gchar *checksum,
-                           CockpitWebResponse *response)
+                           const gchar *path)
 {
   gchar *location;
   const gchar *body;
@@ -2053,7 +2070,9 @@ redirect_to_checksum_path (CockpitWebService *self,
   gboolean ret;
   gsize length;
 
-  location = g_strdup_printf ("/cockpit/$%s%s", checksum, cockpit_web_response_get_path (response));
+  location = g_strdup_printf ("/%s/$%s%s",
+                              cockpit_creds_get_application (self->creds),
+                              checksum, path);
 
   body = "<html><head><title>Temporary redirect</title></head>"
          "<body>Access via checksum</body></html>";
@@ -2079,11 +2098,13 @@ typedef struct {
   CockpitWebResponse *response;
   CockpitTransport *transport;
   GHashTable *headers;
+  gchar *base_path;
   gchar *channel;
   gulong recv_sig;
   gulong closed_sig;
   gulong control_sig;
   gboolean done;
+  gpointer service;
 } ResourceResponse;
 
 static void
@@ -2139,9 +2160,13 @@ resource_response_done (ResourceResponse *rr,
       cockpit_web_response_abort (rr->response);
     }
 
+  if (rr->service)
+    g_object_remove_weak_pointer (rr->service, &rr->service);
+
   g_object_unref (rr->response);
   g_object_unref (rr->transport);
   g_hash_table_unref (rr->headers);
+  g_free (rr->base_path);
   g_free (rr->channel);
   g_free (rr);
 }
@@ -2213,6 +2238,46 @@ out:
   return ret;
 }
 
+static void
+resource_inject (ResourceResponse *rr)
+{
+  static const gchar *marker = "<head>";
+  CockpitSession *session;
+  CockpitWebFilter *filter;
+  CockpitWebService *self;
+  GString *str;
+  GBytes *tag;
+
+  if (!rr->base_path || !rr->service)
+    return;
+
+  self = COCKPIT_WEB_SERVICE (rr->service);
+  session = cockpit_session_by_transport (&self->sessions, rr->transport);
+  if (!session)
+    return;
+
+  str = g_string_new ("");
+  if (session->checksum)
+    {
+      g_string_printf (str, "\n    <base href=\"/%s/$%s%s\">",
+                       cockpit_creds_get_application (self->creds),
+                       session->checksum, rr->base_path);
+    }
+  else
+    {
+      g_string_printf (str, "\n    <base href=\"/%s/@%s%s\">",
+                       cockpit_creds_get_application (self->creds),
+                       session->host, rr->base_path);
+    }
+
+  tag = g_string_free_to_bytes (str);
+  filter = cockpit_web_inject_new (marker, tag);
+  g_bytes_unref (tag);
+
+  cockpit_web_response_add_filter (rr->response, filter);
+  g_object_unref (filter);
+}
+
 static gboolean
 on_resource_recv_first (CockpitTransport *transport,
                         const gchar *channel,
@@ -2234,6 +2299,7 @@ on_resource_recv_first (CockpitTransport *transport,
 
   if (parse_http_headers (rr, payload, &status, &reason))
     {
+      resource_inject (rr);
       cockpit_web_response_headers_full (rr->response, status, reason, -1, rr->headers);
       g_free (reason);
     }
@@ -2298,7 +2364,8 @@ on_resource_closed (CockpitTransport *transport,
 static ResourceResponse *
 resource_response_new (CockpitWebService *self,
                        CockpitSession *session,
-                       CockpitWebResponse *response)
+                       CockpitWebResponse *response,
+                       const gchar *base_path)
 {
   ResourceResponse *rr;
 
@@ -2308,6 +2375,10 @@ resource_response_new (CockpitWebService *self,
   rr->headers = cockpit_web_server_new_table ();
   rr->channel = generate_channel_id (self);
   rr->logname = cockpit_web_response_get_path (response);
+  rr->base_path = g_strdup (base_path);
+
+  rr->service = self;
+  g_object_add_weak_pointer (rr->service, &rr->service);
 
   rr->recv_sig = g_signal_connect (rr->transport, "recv", G_CALLBACK (on_resource_recv_first), rr);
   rr->closed_sig = g_signal_connect (rr->transport, "closed", G_CALLBACK (on_resource_closed), rr);
@@ -2316,29 +2387,39 @@ resource_response_new (CockpitWebService *self,
   return rr;
 }
 
-static gboolean
-resource_respond (CockpitWebService *self,
-                  GHashTable *headers,
-                  CockpitWebResponse *response,
-                  const gchar *where)
+void
+cockpit_web_service_resource (CockpitWebService *self,
+                              GHashTable *headers,
+                              CockpitWebResponse *response,
+                              const gchar *where,
+                              const gchar *path)
 {
   ResourceResponse *rr;
   CockpitSession *session = NULL;
+  const gchar *base_path = NULL;
   const gchar *host = NULL;
   gchar *quoted_etag = NULL;
   gchar *package = NULL;
   gchar *val = NULL;
-  gboolean ret = FALSE;
+  gboolean handled = FALSE;
   GHashTableIter iter;
   GBytes *command;
-  const gchar *path;
   gchar **parts = NULL;
   JsonObject *object;
   JsonObject *heads;
   gpointer key;
   gpointer value;
 
-  if (where[0] == '@')
+  g_return_if_fail (COCKPIT_IS_WEB_SERVICE (self));
+  g_return_if_fail (COCKPIT_IS_WEB_RESPONSE (response));
+  g_return_if_fail (headers != NULL);
+  g_return_if_fail (path != NULL);
+
+  if (where == NULL)
+    {
+      host = "localhost";
+    }
+  else if (where[0] == '@')
     {
       host = where + 1;
     }
@@ -2351,7 +2432,7 @@ resource_respond (CockpitWebService *self,
         {
           cockpit_web_response_headers (response, 304, "Not Modified", 0, "ETag", quoted_etag, NULL);
           cockpit_web_response_complete (response);
-          ret = TRUE;
+          handled = TRUE;
           goto out;
         }
 
@@ -2382,20 +2463,25 @@ resource_respond (CockpitWebService *self,
     }
 
   session = lookup_or_open_session_for_host (self, host, NULL, self->creds, FALSE);
-  path = cockpit_web_response_get_path (response);
-
-  /*
-   * Maybe send back a redirect to the checksum url. We only do this if actually
-   * accessing a file, and not a some sort of data like '/checksum', or a root path
-   * like '/'
-   */
-  if (where[0] == '@' && session->checksum && path && strchr (path, '.'))
+  if (where)
     {
-      ret = redirect_to_checksum_path (self, session->checksum, response);
-      goto out;
+      /*
+       * Maybe send back a redirect to the checksum url. We only do this if actually
+       * accessing a file, and not a some sort of data like '/checksum', or a root path
+       * like '/'
+       */
+      if (where[0] == '@' && session->checksum && strchr (path, '.'))
+        {
+          handled = redirect_to_checksum_path (self, response, session->checksum, path);
+          goto out;
+        }
+    }
+  else
+    {
+      base_path = path;
     }
 
-  rr = resource_response_new (self, session, response);
+  rr = resource_response_new (self, session, response, base_path);
 
   if (quoted_etag)
     {
@@ -2447,10 +2533,7 @@ resource_respond (CockpitWebService *self,
       g_free (val);
     }
 
-  if (where[0] != '$')
-    json_object_set_string_member (heads, "Pragma", "no-cache");
   json_object_set_string_member (heads, "Host", session->host);
-
   json_object_set_object_member (object, "headers", heads);
 
   command = cockpit_json_write_bytes (object);
@@ -2469,45 +2552,12 @@ resource_respond (CockpitWebService *self,
   cockpit_transport_send (rr->transport, NULL, command);
   g_bytes_unref (command);
 
-  ret = TRUE;
+  handled = TRUE;
 
 out:
   g_strfreev (parts);
   g_free (quoted_etag);
   g_free (package);
-  return ret;
-}
-
-void
-cockpit_web_service_resource (CockpitWebService *self,
-                              GHashTable *headers,
-                              CockpitWebResponse *response)
-{
-  gboolean handled = FALSE;
-  const gchar *path;
-  gchar *where;
-
-  path = cockpit_web_response_get_path (response);
-
-  if (g_str_equal (path, "/"))
-    {
-      handled = resource_respond (self, headers, response, "@localhost");
-    }
-  else if (g_str_has_prefix (path, "/cockpit/"))
-    {
-      g_free (cockpit_web_response_pop_path (response));
-
-      where = cockpit_web_response_pop_path (response);
-      if (!where)
-        {
-          g_debug ("invalid path: %s", path);
-        }
-      else if (where[0] == '@' || where[0] == '$')
-        {
-          handled = resource_respond (self, headers, response, where);
-        }
-      g_free (where);
-    }
 
   if (!handled)
     cockpit_web_response_error (response, 404, NULL, NULL);

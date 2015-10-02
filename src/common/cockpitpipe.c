@@ -866,11 +866,12 @@ cockpit_pipe_class_init (CockpitPipeClass *klass)
  * write zero bytes to a pipe.
  */
 void
-cockpit_pipe_write (CockpitPipe *self,
-                    GBytes *data)
+_cockpit_pipe_write (CockpitPipe *self,
+                    GBytes *data,
+                    const gchar *caller,
+                    int line)
 {
   g_return_if_fail (COCKPIT_IS_PIPE (self));
-  g_return_if_fail (!self->priv->closing);
 
   /* If self->priv->io is already gone but we are still waiting for the
      child to exit, then we haven't emitted the "close" signal yet
@@ -883,7 +884,11 @@ cockpit_pipe_write (CockpitPipe *self,
       return;
     }
 
-  g_return_if_fail (!self->priv->closed);
+  if (self->priv->closed)
+    {
+      g_warning ("assertion self->priv-closed failed at %s %d", caller, line);
+      return;
+    }
 
   if (g_bytes_get_size (data) == 0)
     {

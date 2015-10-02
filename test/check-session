@@ -27,7 +27,8 @@ class TestSession(MachineCase):
 
         self.allow_restart_journal_messages()
         # Might happen when killing the bridge.
-        self.allow_journal_messages("localhost: dropping message while waiting for child to exit")
+        self.allow_journal_messages("localhost: dropping message while waiting for child to exit",
+                                    ".*No session for cookie")
 
         def wait_session(should_exist):
             def cond():
@@ -46,7 +47,7 @@ class TestSession(MachineCase):
         wait_session(False)
 
         # Login
-        self.login_and_go("/system/host")
+        self.login_and_go("/system")
         wait_session(True)
 
         # Logout
@@ -59,14 +60,14 @@ class TestSession(MachineCase):
         b.set_val("#login-password-input", "foobar")
         b.click('#login-button')
         b.expect_reload()
-        b.enter_page("/system/host")
+        b.enter_page("/system")
         wait_session(True)
 
         # Kill session from the outside
         m.execute("loginctl kill-user admin")
         wait_session(False)
 
-        b.relogin("/system/host", "admin")
+        b.relogin("/system", "admin")
         wait_session(True)
 
         # Kill session from the inside
@@ -74,18 +75,10 @@ class TestSession(MachineCase):
         b.wait_present("#content")
         b.wait_visible("#content")
         b.wait_text('#content-user-name', 'Administrator')
+        b.click('#content-user-name')
         b.click('#go-account')
-        b.enter_page("/users/local")
+        b.enter_page("/users")
         b.wait_text ("#account-user-name", "admin")
         b.wait_text("#account-user-name", "admin")
-        b.click("#account-logout")
-
-        # HACK - https://github.com/cockpit-project/cockpit/issues/2451
-        #
-        # The click above has no effect because the button is disabled
-        # (because Cockpit thinks "admin" is not logged in), so we
-        # don't check for it.
-        #
-        # wait_session(False)
 
 test_main ()

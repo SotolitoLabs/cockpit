@@ -97,12 +97,12 @@ class Browser:
     def title(self):
         return self.phantom.do('return document.title');
 
-    def open(self, page, href=None, url=None, port=9090, host="localhost"):
+    def open(self, href):
         """
         Load a page into the browser.
 
         Arguments:
-          page: The id of the Cockpit page to load, such as "/dashboard/list".
+          page: The path of the Cockpit page to load, such as "/dashboard".
           url: The full URL to load.
 
         Either PAGE or URL needs to be given.
@@ -110,21 +110,15 @@ class Browser:
         Raises:
           Error: When a timeout occurs waiting for the page to load.
         """
-        if not href:
-            href = "/" + (page or "")
-        if host and "@" not in href:
-            href = "/@" + host + href
-        if not url:
-            url = "/#%s" % (href, )
-        if url.startswith("/"):
-            url = "http://%s:%d%s" % (self.address, port, url)
+        if href.startswith("/"):
+            href = "http://%s:9090%s" % (self.address, href)
 
         def tryopen(hard=False):
             try:
                 if self.phantom:
                     self.phantom.kill()
                 self.phantom = Phantom("en_US.utf8")
-                self.phantom.open(url)
+                self.phantom.open(href)
                 return True
             except:
                 if hard:
@@ -137,26 +131,16 @@ class Browser:
             sleep(0.1)
             tries = tries + 1
 
-        self.init_after_load()
-
-    def init_after_load(self):
-        self.phantom.inject("%s/sizzle.js" % topdir)
-        self.phantom.inject("%s/phantom-lib.js" % topdir)
-        self.phantom.do("ph_init()")
-
     def reload(self):
         self.switch_to_top()
         self.wait_js_cond("ph_select('iframe.container-frame').every(function (e) { return e.getAttribute('data-loaded'); })")
-        self.phantom.reload()
-        self.init_after_load()
+        self.phantom.reload(self.phantom_wait_timeout)
 
     def expect_reload(self):
         self.phantom.expect_reload(self.phantom_wait_timeout)
-        self.init_after_load()
 
     def switch_to_frame(self, name):
         self.phantom.switch_to_frame(name)
-        self.init_after_load()
 
     def switch_to_top(self):
         self.phantom.switch_to_top()
@@ -175,8 +159,8 @@ class Browser:
         #    hash = "/@" + host + hash
         self.call_js_func('ph_go', hash)
 
-    def click(self, selector):
-        self.call_js_func('ph_click', selector)
+    def click(self, selector, force=False):
+        self.call_js_func('ph_click', selector, force)
 
     def val(self, selector):
         return self.call_js_func('ph_val', selector)
@@ -231,6 +215,9 @@ class Browser:
 
     def wait_not_present(self, selector):
         return self.wait_js_func('!ph_is_present', selector)
+
+    def is_visible(self, selector):
+        return self.call_js_func('ph_is_visible', selector)
 
     def wait_visible(self, selector):
         return self.wait_js_func('ph_is_visible', selector)
@@ -305,7 +292,7 @@ class Browser:
         self.click(sel + " " + button)
         self.wait_not_visible(sel)
 
-    def enter_page(self, id, host="localhost"):
+    def enter_page(self, path, host=None, reconnect=True):
         """Wait for a page to become current.
 
         Arguments:
@@ -313,18 +300,30 @@ class Browser:
             id: The identifier the page.  This is a string starting with "/"
                 For old cockpit this may be an old style page identifier.
         """
-        assert id.startswith("/")
+        assert path.startswith("/")
         if host:
-            frame = host + id
+            frame = host + path
         else:
-            frame = "localhost" + id
+            frame = "localhost" + path
         frame = "cockpit1:" + frame
 
         self.switch_to_top()
-        self.wait_present("iframe.container-frame[name='%s'][data-loaded]" % frame)
-        self.wait_visible("iframe.container-frame[name='%s']" % frame)
-        self.switch_to_frame(frame)
 
+        while True:
+            try:
+                self.wait_present("iframe.container-frame[name='%s'][data-loaded]" % frame)
+                self.wait_visible("iframe.container-frame[name='%s']" % frame)
+                break
+            except Error, ex:
+                if reconnect and ex.msg == 'timeout':
+                    reconnect = False
+                    if self.is_present(".curtains button"):
+                        self.click(".curtains button", True)
+                        self.wait_not_visible(".curtains")
+                        continue
+                raise exc_info[0], exc_info[1], exc_info[2]
+
+        self.switch_to_frame(frame)
         self.wait_present("body")
         self.wait_visible("body")
 
@@ -338,14 +337,19 @@ class Browser:
         # We don't need to open the menu, it's enough to simulate a
         # click on the invisible button.
         if entry:
-            self.click(sel + ' a:contains("%s")' % entry);
+            self.click(sel + ' a:contains("%s")' % entry, True);
         else:
             self.click(sel + ' button:first-child');
 
-    def login_and_go(self, page, href=None, user=None, host="localhost"):
+    def login_and_go(self, path=None, user=None, host=None):
         if user is None:
             user = self.default_user
-        self.open(page, href=href, host=host)
+        href = path
+        if not href:
+            href = "/"
+        if host:
+            href = "/@" + host + href
+        self.open(href)
         self.wait_visible("#login")
         self.set_val('#login-user-input', user)
         self.set_val('#login-password-input', "foobar")
@@ -353,15 +357,16 @@ class Browser:
         self.expect_reload()
         self.wait_present('#content')
         self.wait_visible('#content')
-        if page:
-            self.enter_page(page, host=host)
+        if path:
+            self.enter_page(path.split("#")[0], host=host)
 
     def logout(self):
         self.switch_to_top()
+        self.click("#content-user-name")
         self.click('#go-logout')
         self.expect_reload()
 
-    def relogin(self, page, user=None):
+    def relogin(self, path=None, user=None):
         if user is None:
             user = self.default_user
         self.logout()
@@ -372,8 +377,12 @@ class Browser:
         self.expect_reload()
         self.wait_present('#content')
         self.wait_visible('#content')
-        if page:
-            self.enter_page(page)
+        if path:
+            if path.startswith("/@"):
+                host = path[2:].split("/")[0]
+            else:
+                host = None
+            self.enter_page(path.split("#")[0], host=host)
 
     def snapshot(self, title, label=None):
         """Take a snapshot of the current screen and save it as a PNG.
@@ -391,7 +400,7 @@ class Browser:
 
 class MachineCase(unittest.TestCase):
     runner = None
-    machine_class = testvm.QemuMachine
+    machine_class = testvm.VirtMachine
     machine = None
     machines = [ ]
 
@@ -408,9 +417,11 @@ class MachineCase(unittest.TestCase):
         self.addCleanup(lambda: browser.kill())
         return browser
 
-    def setUp(self):
+    def setUp(self, macaddr=None):
         self.machine = self.new_machine()
-        self.machine.start()
+        self.machine.start(macaddr=macaddr)
+        if arg_trace:
+            print "starting machine %s" % (self.machine.address)
         self.machine.wait_boot()
         self.browser = self.new_browser()
         self.tmpdir = tempfile.mkdtemp()
@@ -478,9 +489,9 @@ systemctl start docker
         else:
             self.machine.execute("systemctl restart cockpit-testing.socket")
 
-    def login_and_go(self, page, href=None, user=None, host="localhost"):
+    def login_and_go(self, path, user=None, host=None):
         self.start_cockpit(host)
-        self.browser.login_and_go(page, href=href, user=user, host=host)
+        self.browser.login_and_go(path, user=user, host=host)
 
     allowed_messages = [
         # This is a failed login, which happens every time
@@ -524,7 +535,9 @@ systemctl start docker
                                     "request timed out, closing",
                                     "PolicyKit daemon disconnected from the bus.",
                                     "We are no longer a registered authentication agent.",
-                                    ".*: failed to retrieve resource: terminated"
+                                    ".*: failed to retrieve resource: terminated",
+                                    # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1253319
+                                    'audit:.*denied.*2F6D656D66643A73642D73797374656D642D636F726564756D202864656C.*',
                                     )
 
     def allow_authorize_journal_messages(self):
@@ -585,7 +598,12 @@ class Phantom:
         environ = os.environ.copy()
         if lang:
             environ["LC_ALL"] = lang
-        self.driver = subprocess.Popen([ "%s/phantom-driver" % topdir ], env=environ,
+        cmd = [
+            "%s/phantom-driver" % topdir,
+            "%s/sizzle.js" % topdir,
+            "%s/phantom-lib.js" % topdir
+        ]
+        self.driver = subprocess.Popen(cmd, env=environ,
                                        stdout=subprocess.PIPE, stdin=subprocess.PIPE, close_fds=True)
         self.frame = None
 
@@ -593,9 +611,10 @@ class Phantom:
         if arg_trace:
             print "->", repr(args)[:200]
         self.driver.stdin.write(json.dumps(args).replace("\n", " ")+ "\n")
-        res = json.loads(self.driver.stdout.readline())
+        line = self.driver.stdout.readline()
         if arg_trace:
-            print "<-", res
+            print "<-", line.strip()
+        res = json.loads(line)
         if 'error' in res:
             raise Error(res['error'])
         if 'timeout' in res:
@@ -609,8 +628,8 @@ class Phantom:
         if status != "success":
             raise Error(status)
 
-    def reload(self):
-        status = self.run({'cmd': 'reload'})
+    def reload(self, timeout):
+        status = self.run({'cmd': 'reload', 'timeout': timeout*1000})
         if status != "success":
             raise Error(status)
 

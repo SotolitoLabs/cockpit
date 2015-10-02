@@ -189,10 +189,14 @@ function calculate_url() {
     if (window.mock && window.mock.url)
         return window.mock.url;
     var window_loc = window.location.toString();
+    var path = window.location.pathname || "/";
+    if (path.indexOf("/cockpit") !== 0)
+        path = "/cockpit";
+    var prefix = path.split("/")[1];
     if (window_loc.indexOf('http:') === 0) {
-        return "ws://" + window.location.host + "/socket";
+        return "ws://" + window.location.host + "/" + prefix + "/socket";
     } else if (window_loc.indexOf('https:') === 0) {
-        return "wss://" + window.location.host + "/socket";
+        return "wss://" + window.location.host + "/" + prefix + "/socket";
     } else {
         transport_debug("Cockpit must be used over http or https");
         return null;
@@ -294,6 +298,17 @@ function Transport() {
     /* See if we should communicate via parent */
     if (window.parent !== window && window.name.indexOf("cockpit1:") === 0)
         ws = new ParentWebSocket(window.parent);
+
+    /* HACK: Compatibility if we're hosted by older Cockpit versions */
+    try {
+           /* See if we should communicate via parent */
+           if (!ws && window.parent !== window && window.parent.options &&
+                window.parent.options.protocol == "cockpit1") {
+               ws = new ParentWebSocket(window.parent);
+            }
+    } catch (ex) {
+       /* permission access errors */
+    }
 
     if (!ws) {
         var ws_loc = calculate_url();
@@ -1590,6 +1605,9 @@ function full_scope(cockpit, $, po) {
         var calls = { };
         var cache;
 
+        /* The problem we closed with */
+        var closed;
+
         self.constructors = { "*": DBusProxy };
 
         function ensure_cache() {
@@ -1684,11 +1702,11 @@ function full_scope(cockpit, $, po) {
         this.notify = notify;
 
         function close_perform(options) {
-            var problem = options.problem || "disconnected";
+            closed = options.problem || "disconnected";
             var outstanding = calls;
             calls = { };
             $.each(outstanding, function(id, dfd) {
-                dfd.reject(new DBusError(problem));
+                dfd.reject(new DBusError(closed));
             });
             $(self).triggerHandler("close", [ options ]);
         }
@@ -1730,8 +1748,13 @@ function full_scope(cockpit, $, po) {
 
             var msg = JSON.stringify(method_call);
             dbus_debug("dbus:", msg);
-            channel.send(msg);
-            calls[id] = dfd;
+
+            if (channel) {
+                channel.send(msg);
+                calls[id] = dfd;
+            } else {
+                dfd.reject(new DBusError(closed));
+            }
 
             return dfd.promise();
         };
@@ -2310,6 +2333,8 @@ function full_scope(cockpit, $, po) {
             return _("Not permitted to perform this action.");
         else if (problem == "authentication-failed")
             return _("Login failed");
+        else if (problem == "authentication-not-supported")
+            return _("The server refused to authenticate using any supported methods.");
         else if (problem == "unknown-hostkey")
             return _("Untrusted host");
         else if (problem == "internal-error")
@@ -2792,6 +2817,7 @@ function full_scope(cockpit, $, po) {
             options_list = [ options_list ];
 
         var channels = [ ];
+        var following = false;
 
         self.series = cockpit.series(interval, cache, fetch_for_series);
 
@@ -2805,6 +2831,12 @@ function full_scope(cockpit, $, po) {
         function transfer(options_list, callback, is_archive) {
             if (options_list.length === 0)
                 return;
+
+            if (!is_archive) {
+                if (following)
+                    return;
+                following = true;
+            }
 
             var options = $.extend({
                 payload: "metrics1",
@@ -2949,13 +2981,8 @@ function full_scope(cockpit, $, po) {
             transfer(archive_options_list, drain, true);
         };
 
-        var following = false;
-
         self.follow = function follow() {
-            if (!following) {
-                following = true;
-                transfer(options_list, drain);
-            }
+            transfer(options_list, drain);
         };
 
         self.close = function close(options) {

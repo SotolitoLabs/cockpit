@@ -4,12 +4,13 @@ basedir = $(pkgdatadir)/base1
 base_GEN = \
 	$(addprefix po/po.,$(addsuffix .js,$(LINGUAS))) \
 	$(NULL)
-base_GZ = \
+nodist_base_DATA = \
 	pkg/base1/angular.min.js.gz \
 	pkg/base1/cockpit.min.css.gz \
 	pkg/base1/po.js.gz \
 	pkg/base1/require.min.js.gz \
 	pkg/base1/term.min.js.gz \
+	pkg/base1/moment.min.js.gz \
 	pkg/base1/mustache.min.js.gz \
 	pkg/base1/jquery.min.js.gz \
 	pkg/base1/cockpit.min.js.gz \
@@ -18,15 +19,16 @@ base_GZ = \
 	$(NULL)
 base_DATA = \
 	pkg/base1/manifest.json \
-	$(base_GZ) \
 	$(NULL)
 
 basedebugdir = $(debugdir)$(basedir)
 basedebug_DATA = \
 	pkg/base1/angular.js \
+	pkg/base1/angular-patternfly.css \
 	pkg/base1/bootstrap-datepicker.js \
 	pkg/base1/bootstrap-select.js \
 	pkg/base1/bootstrap-combobox.js \
+	pkg/base1/bundle.js \
 	pkg/base1/cockpit.css \
 	pkg/base1/patternfly.css \
 	pkg/base1/patternfly-additions.css \
@@ -34,6 +36,7 @@ basedebug_DATA = \
 	pkg/base1/require.js \
 	pkg/base1/patterns.js \
 	pkg/base1/term.js \
+	pkg/base1/moment.js \
 	pkg/base1/mustache.js \
 	pkg/base1/jquery.js \
 	pkg/base1/cockpit.js \
@@ -63,13 +66,6 @@ install-data-local::
 
 basefontsdir = $(pkgdatadir)/base1/fonts
 basefonts_DATA = \
-	pkg/base1/fonts/fontawesome.woff.gz \
-	pkg/base1/fonts/patternfly.woff.gz \
-	pkg/base1/fonts/glyphicons.woff.gz \
-	$(NULL)
-
-basefontsdebugdir = $(debugdir)$(basefontsdir)
-basefontsdebug_DATA = \
 	pkg/base1/fonts/fontawesome.woff \
 	pkg/base1/fonts/patternfly.woff \
 	pkg/base1/fonts/glyphicons.woff \
@@ -86,6 +82,7 @@ base_TESTS = \
 	pkg/base1/test-spawn-proc.html \
 	pkg/base1/test-http.html \
 	pkg/base1/test-dbus.html \
+	pkg/base1/test-dbus-address.html \
 	pkg/base1/test-dbus-framed.html \
 	pkg/base1/test-location.html \
 	pkg/base1/test-framed.html \
@@ -110,7 +107,7 @@ CLEANFILES += \
 	pkg/base1/patterns.min.js \
 	pkg/base1/bootstrap-combobox.min.js \
 	$(base_GEN) \
-	$(base_GZ) \
+	$(nodist_base_DATA) \
 	$(NULL)
 
 EXTRA_DIST += \
@@ -119,10 +116,13 @@ EXTRA_DIST += \
 	pkg/base1/bootstrap-datepicker.min.js \
 	pkg/base1/bootstrap-combobox.min.js \
 	pkg/base1/bundle.min.js \
+	pkg/base1/cockpit.min.css \
 	pkg/base1/jquery.min.js \
 	pkg/base1/require.min.js \
 	pkg/base1/mustache.min.js \
+	pkg/base1/moment.min.js \
 	pkg/base1/term.min.js \
+	pkg/base1/test-dbus-common.js \
 	$(base_BUNDLE) \
 	$(base_DATA) \
 	$(basedebug_DATA) \
@@ -141,6 +141,8 @@ update-lib:: update-bower
 		$(BOWER)/patternfly/dist/css/patternfly.css > $(srcdir)/pkg/base1/patternfly.css
 	sed -f $(srcdir)/tools/patternfly.sed \
 		$(BOWER)/patternfly/dist/css/patternfly-additions.css > $(srcdir)/pkg/base1/patternfly-additions.css
+	sed -f $(srcdir)/tools/patternfly.sed \
+		$(BOWER)/angular-patternfly/dist/styles/angular-patternfly.css > $(srcdir)/pkg/base1/angular-patternfly.css
 	$(JSMODULE) -o $(srcdir)/pkg/base1/jquery.js \
 	    $(BOWER)/jquery/dist/jquery.js \
 	    $(BOWER)/patternfly/components/bootstrap/dist/js/bootstrap.js \
@@ -210,13 +212,19 @@ update-lib:: update-bower
 	    $(BOWER)/angular-route/angular-route.js \
 	    $(BOWER)/angular-animate/angular-animate.js \
 	    $(BOWER)/angular-bootstrap/ui-bootstrap.js \
-	    $(BOWER)/angular-bootstrap/ui-bootstrap-tpls.js
+	    $(BOWER)/angular-bootstrap/ui-bootstrap-tpls.js \
+	    $(BOWER)/angular-patternfly/dist/angular-patternfly.js
 	$(JSMODULE) -m -a window.angular -d jquery -o $(srcdir)/pkg/base1/angular.min.js \
 	    $(BOWER)/angular/angular.min.js \
 	    $(BOWER)/angular-animate/angular-animate.min.js \
 	    $(BOWER)/angular-route/angular-route.min.js \
 	    $(BOWER)/angular-bootstrap/ui-bootstrap.min.js \
-	    $(BOWER)/angular-bootstrap/ui-bootstrap-tpls.min.js
+	    $(BOWER)/angular-bootstrap/ui-bootstrap-tpls.min.js \
+	    $(BOWER)/angular-patternfly/dist/angular-patternfly.min.js
+	$(JSMODULE) -o $(srcdir)/pkg/base1/moment.js \
+		$(BOWER)/momentjs/moment.js
+	$(JSMODULE) -o $(srcdir)/pkg/base1/moment.min.js \
+		$(BOWER)/momentjs/min/moment.min.js
 
 # Never recreate these files
 pkg/base1/angular.min.js:
@@ -230,4 +238,6 @@ pkg/base1/require.min.js:
 pkg/base1/bootstrap-select.min.js:
 	@true
 pkg/base1/bootstrap-datepicker.min.js:
+	@true
+pkg/base1/moment.min.js:
 	@true

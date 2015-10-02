@@ -33,7 +33,7 @@ class TestStorage(StorageCase):
         if m.os == "rhel-7":
             return
 
-        self.login_and_go("/storage/devices")
+        self.login_and_go("/storage")
         b.wait_in_text("#drives", "VirtIO")
 
         m.add_disk("50M", serial="DISK1")
@@ -81,7 +81,7 @@ class TestStorage(StorageCase):
         b.wait_in_text("#content", "1% full")
 
         # remove the volume group
-        b.go("/")
+        b.go("#/")
         b.wait_visible("#storage")
         m.execute("vgremove -f TEST1")
         b.wait_not_in_text("#vgroups", "TEST1")
@@ -151,6 +151,9 @@ class TestStorage(StorageCase):
                       "mount_point": mount_point_thin })
         b.wait_in_text('#content', "100% full")
 
+        # There should be a stuck job now
+        b.wait_in_text("#jobs", "Erasing")
+
         # add a disk, resize the pool and let the operation finish
         b.click('[data-action="vgroup_add_disk"]')
         self.dialog_wait_open()
@@ -163,6 +166,9 @@ class TestStorage(StorageCase):
         self.dialog({ "size": "80" })
         b.wait_in_text("#content", "(ext4 File System)")
         self.wait_in_storaged_configuration(mount_point_thin)
+
+        # The job should be gone
+        b.wait_not_in_text("#jobs", "Erasing")
 
         # remove volume group
         b.click_action_btn('.panel-heading:contains("Volume Group") .btn-group', "Delete")

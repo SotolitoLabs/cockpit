@@ -5,19 +5,12 @@
  * for routine operations.
  */
 
-function ph_init ()
-{
-    localStorage.clear();
-    if (!window.Sizzle)
-        throw "Sizzle was not properly loaded"
-    phantom_checkpoint = function() {
-        console.log ("-*-CHECKPOINT-*-");
-    }
-}
+localStorage.clear();
 
-function ph_select(sel)
-{
-    /* Sizzle loaded in testlib.py */
+if (!window.Sizzle)
+    throw "Sizzle was not properly loaded"
+
+function ph_select(sel) {
     return Sizzle(sel);
 }
 
@@ -103,17 +96,38 @@ function ph_has_attr (sel, attr, val)
     return ph_attr(sel, attr) == val;
 }
 
-function ph_click (sel)
-{
+function ph_click(sel, force) {
+    var el = ph_find(sel);
+
+    /* The element has to be visible, and not collapsed */
+    if (!force && (el.offsetWidth <= 0 || el.offsetHeight <= 0))
+        throw sel + " is not visible";
+
     var ev = document.createEvent("MouseEvent");
     ev.initMouseEvent(
-            "click",
-            true /* bubble */, true /* cancelable */,
-            window, null,
-            0, 0, 0, 0, /* coordinates */
-            false, false, false, false, /* modifier keys */
-            0 /*left*/, null);
-    ph_find(sel).dispatchEvent(ev);
+        "click",
+        true /* bubble */, true /* cancelable */,
+        window, null,
+        0, 0, 0, 0, /* coordinates */
+        false, false, false, false, /* modifier keys */
+        0 /*left*/, null);
+
+    /* The click has to actually work */
+    var clicked = false;
+    function click() {
+        clicked = true;
+    }
+
+    el.addEventListener("click", click, true);
+
+    /* Now dispatch the event */
+    el.dispatchEvent(ev);
+
+    el.removeEventListener("click", click, true);
+
+    /* It really had to work */
+    if (!clicked)
+        throw sel + " is disabled or somehow not clickable";
 }
 
 function ph_set_checked (sel, val)
@@ -150,9 +164,19 @@ function ph_text_is (sel, text)
     return ph_text(sel) == text;
 }
 
-function ph_go (hash)
-{
-    window.location.hash = hash;
+function ph_go(href) {
+    if (href.indexOf("#") === 0) {
+        window.location.hash = href;
+
+    } else {
+        if (!window.name.indexOf("cockpit1") === 0)
+            throw "ph_go() called in non cockpit window";
+        var control = {
+            command: "jump",
+            location: href
+        };
+        window.parent.postMessage("\n" + JSON.stringify(control), "*");
+    }
 }
 
 function ph_focus(sel)

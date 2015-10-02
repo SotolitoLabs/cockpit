@@ -24,7 +24,8 @@
 #include "cockpitws.h"
 
 #include "common/cockpitjson.h"
-#include "common/cockpittemplate.h"
+#include "common/cockpitenums.h"
+#include "common/cockpitwebinject.h"
 
 #include "websocket/websocket.h"
 
@@ -35,9 +36,10 @@
 
 #include <string.h>
 
-/* Called by @server when handling HTTP requests to /socket - runs in a separate
- * thread dedicated to the request so it may do blocking I/O
- */
+/* For overriding during tests */
+const gchar *cockpit_ws_shell_component = "/shell/index.html";
+
+/* Called by @server when handling HTTP requests to /cockpit/socket */
 gboolean
 cockpit_handler_socket (CockpitWebServer *server,
                         const gchar *path,
@@ -49,153 +51,126 @@ cockpit_handler_socket (CockpitWebServer *server,
 {
   CockpitWebService *service;
   const gchar *query = NULL;
+  const gchar *segment = NULL;
 
-  if (!g_str_has_prefix (path, "/socket"))
+  /*
+   * Socket requests should come in on /cockpit/socket or /cockpit+app/socket.
+   * However older javascript may connect on /socket, so we continue to support that.
+   */
+
+  if (path && path[0])
+    segment = strchr (path + 1, '/');
+  if (!segment)
+    segment = path;
+
+  if (!segment || !g_str_has_prefix (segment, "/socket"))
     return FALSE;
 
-  if (path[7] == '?')
-    query = path + 8;
-  else if (path[7] != '\0')
+  if (segment[7] == '?')
+    query = segment + 8;
+  else if (segment[7] != '\0')
     return FALSE;
 
-  service = cockpit_auth_check_cookie (ws->auth, headers);
+  service = cockpit_auth_check_cookie (ws->auth, path, headers);
   if (service)
     {
       if (query)
-        cockpit_web_service_sideband (service, query, io_stream, headers, input);
+        cockpit_web_service_sideband (service, path, query, io_stream, headers, input);
       else
-        cockpit_web_service_socket (service, io_stream, headers, input);
+        cockpit_web_service_socket (service, path, io_stream, headers, input);
       g_object_unref (service);
     }
   else
     {
-      cockpit_web_service_noauth (io_stream, headers, input);
+      cockpit_web_service_noauth (io_stream, path, headers, input);
     }
 
   return TRUE;
 }
 
 static GBytes *
-substitute_environment (const gchar *variable,
-                        gpointer user_data)
+build_environment (GHashTable *os_release)
 {
-  GHashTable *os_release = user_data;
+  static const gchar *prefix = "\n    <script>\nvar environment = ";
+  static const gchar *suffix = ";\n    </script>";
+  GByteArray *buffer;
   GHashTableIter iter;
-  GBytes *ret = NULL;
+  GBytes *bytes;
   JsonObject *object;
   gchar *hostname;
   gpointer key, value;
   JsonObject *osr;
 
-  if (g_str_equal (variable, "environment"))
+  object = json_object_new ();
+  hostname = g_malloc0 (HOST_NAME_MAX + 1);
+  gethostname (hostname, HOST_NAME_MAX);
+  hostname[HOST_NAME_MAX] = '\0';
+  json_object_set_string_member (object, "hostname", hostname);
+  g_free (hostname);
+
+  if (os_release)
     {
-      object = json_object_new ();
-      hostname = g_malloc0 (HOST_NAME_MAX + 1);
-      gethostname (hostname, HOST_NAME_MAX);
-      hostname[HOST_NAME_MAX] = '\0';
-      json_object_set_string_member (object, "hostname", hostname);
-      g_free (hostname);
-
-      if (os_release)
-        {
-          osr = json_object_new ();
-          g_hash_table_iter_init (&iter, os_release);
-          while (g_hash_table_iter_next (&iter, &key, &value))
-            json_object_set_string_member (osr, key, value);
-          json_object_set_object_member (object, "os-release", osr);
-        }
-
-      ret = cockpit_json_write_bytes (object);
-      json_object_unref (object);
+      osr = json_object_new ();
+      g_hash_table_iter_init (&iter, os_release);
+      while (g_hash_table_iter_next (&iter, &key, &value))
+        json_object_set_string_member (osr, key, value);
+      json_object_set_object_member (object, "os-release", osr);
     }
 
-  return ret;
+  bytes = cockpit_json_write_bytes (object);
+  json_object_unref (object);
+
+  buffer = g_bytes_unref_to_array (bytes);
+  g_byte_array_prepend (buffer, (const guint8 *)prefix, strlen (prefix));
+  g_byte_array_append (buffer, (const guint8 *)suffix, strlen (suffix));
+  return g_byte_array_free_to_bytes (buffer);
 }
 
 static void
 send_login_html (CockpitWebResponse *response,
                  CockpitHandlerData *ws)
 {
+  static const gchar *marker = "<head>";
+  CockpitWebFilter *filter;
   GHashTable *headers = NULL;
-  GList *l, *output = NULL;
   gchar *login_html;
   GMappedFile *file;
   GError *error = NULL;
   GBytes *body = NULL;
-  gsize length;
+  GBytes *mark, *environment;
 
   login_html = g_build_filename (ws->static_roots[0], "login.html", NULL);
+
   file = g_mapped_file_new (login_html, FALSE, &error);
   if (file == NULL)
     {
       g_warning ("%s: %s", login_html, error->message);
       cockpit_web_response_error (response, 500, NULL, NULL);
       g_clear_error (&error);
-      goto out;
-    }
-
-  body = g_mapped_file_get_bytes (file);
-  output = cockpit_template_expand (body, substitute_environment, ws->os_release);
-
-  length = 0;
-  for (l = output; l != NULL; l = g_list_next (l))
-    length += g_bytes_get_size (l->data);
-
-  headers = cockpit_web_server_new_table ();
-  g_hash_table_insert (headers, g_strdup ("Content-Type"), g_strdup ("text/html; charset=utf8"));
-
-  cockpit_web_response_headers_full (response, 200, "OK", length, headers);
-
-  for (l = output; l != NULL; l = g_list_next (l))
-    {
-      if (!cockpit_web_response_queue (response, l->data))
-        break;
-    }
-  if (l == NULL)
-    cockpit_web_response_complete (response);
-
-out:
-  g_list_free_full (output, (GDestroyNotify)g_bytes_unref);
-  if (headers)
-    g_hash_table_unref (headers);
-  g_free (login_html);
-  if (body)
-    g_bytes_unref (body);
-  if (file)
-    g_mapped_file_unref (file);
-}
-
-gboolean
-cockpit_handler_resource (CockpitWebServer *server,
-                          const gchar *path,
-                          GHashTable *headers,
-                          CockpitWebResponse *response,
-                          CockpitHandlerData *ws)
-{
-  CockpitWebService *service;
-
-  if (g_str_has_prefix (path, "/cockpit/static/"))
-    {
-      cockpit_web_response_file (response, path + 16, TRUE, ws->static_roots);
-      return TRUE;
-    }
-
-  service = cockpit_auth_check_cookie (ws->auth, headers);
-  if (service)
-    {
-      cockpit_web_service_resource (service, headers, response);
-      g_object_unref (service);
-    }
-  else if (g_str_equal (path, "/") || g_str_has_suffix (path, ".html"))
-    {
-      send_login_html (response, ws);
     }
   else
     {
-      cockpit_web_response_error (response, 401, NULL, NULL);
+      mark = g_bytes_new_static (marker, strlen (marker));
+      environment = build_environment (ws->os_release);
+      filter = cockpit_web_inject_new (marker, environment);
+      g_bytes_unref (environment);
+      g_bytes_unref (mark);
+
+      cockpit_web_response_add_filter (response, filter);
+      g_object_unref (filter);
+
+      headers = cockpit_web_server_new_table ();
+      g_hash_table_insert (headers, g_strdup ("Content-Type"), g_strdup ("text/html; charset=utf8"));
+
+      body = g_mapped_file_get_bytes (file);
+      cockpit_web_response_content (response, headers, body, NULL);
+
+      g_hash_table_unref (headers);
+      g_bytes_unref (body);
+      g_mapped_file_unref (file);
     }
 
-  return TRUE;
+  g_free (login_html);
 }
 
 static gchar *
@@ -286,38 +261,157 @@ on_login_complete (GObject *object,
   g_object_unref (response);
 }
 
-gboolean
-cockpit_handler_login (CockpitWebServer *server,
-                       const gchar *path,
-                       GHashTable *headers,
-                       CockpitWebResponse *response,
-                       CockpitHandlerData *ws)
+static void
+handle_login (CockpitHandlerData *data,
+              CockpitWebService *service,
+              const gchar *path,
+              GHashTable *headers,
+              CockpitWebResponse *response)
 {
-  CockpitWebService *service;
-  CockpitCreds *creds;
-  gchar *remote_peer = NULL;
   GHashTable *out_headers;
+  gchar *remote_peer = NULL;
   GIOStream *io_stream;
+  CockpitCreds *creds;
 
-  service = cockpit_auth_check_cookie (ws->auth, headers);
-  if (service == NULL)
-    {
-      io_stream = cockpit_web_response_get_stream (response);
-      remote_peer = get_remote_address (io_stream);
-      cockpit_auth_login_async (ws->auth, headers, remote_peer, on_login_complete,
-                                g_object_ref (response));
-      g_free (remote_peer);
-    }
-  else
+  if (service)
     {
       out_headers = cockpit_web_server_new_table ();
       creds = cockpit_web_service_get_creds (service);
       send_login_response (response, creds, out_headers);
       g_hash_table_unref (out_headers);
-      g_object_unref (service);
+    }
+  else
+    {
+      io_stream = cockpit_web_response_get_stream (response);
+      remote_peer = get_remote_address (io_stream);
+      cockpit_auth_login_async (data->auth, path, headers, remote_peer,
+                                on_login_complete, g_object_ref (response));
+      g_free (remote_peer);
+    }
+}
+
+static void
+handle_resource (CockpitHandlerData *data,
+                 CockpitWebService *service,
+                 const gchar *path,
+                 GHashTable *headers,
+                 CockpitWebResponse *response)
+{
+  gchar *where;
+
+  where = cockpit_web_response_pop_path (response);
+  if (where && (where[0] == '@' || where[0] == '$') && where[1] != '\0')
+    {
+      if (service)
+        {
+          cockpit_web_service_resource (service, headers, response, where,
+                                        cockpit_web_response_get_path (response));
+        }
+      else if (g_str_has_suffix (path, ".html"))
+        {
+          send_login_html (response, data);
+        }
+      else
+        {
+          cockpit_web_response_error (response, 401, NULL, NULL);
+        }
+    }
+  else
+    {
+      cockpit_web_response_error (response, 404, NULL, NULL);
     }
 
-  /* no response yet */
+  g_free (where);
+}
+
+static void
+handle_shell (CockpitHandlerData *data,
+              CockpitWebService *service,
+              const gchar *path,
+              GHashTable *headers,
+              CockpitWebResponse *response)
+{
+  gboolean valid;
+
+  /* Check if a valid path for a shell to be served at */
+  valid = g_str_equal (path, "/") ||
+          g_str_has_prefix (path, "/@") ||
+          strspn (path + 1, COCKPIT_RESOURCE_PACKAGE_VALID) == strcspn (path + 1, "/");
+
+  if (g_str_has_prefix (path, "/@/") || g_str_has_prefix (path, "//"))
+    valid = FALSE;
+
+  if (!valid)
+    {
+      cockpit_web_response_error (response, 404, NULL, NULL);
+    }
+  else if (service)
+    {
+      cockpit_web_service_resource (service, headers, response,
+                                    NULL, cockpit_ws_shell_component);
+    }
+  else
+    {
+      send_login_html (response, data);
+    }
+}
+
+gboolean
+cockpit_handler_default (CockpitWebServer *server,
+                         const gchar *path,
+                         GHashTable *headers,
+                         CockpitWebResponse *response,
+                         CockpitHandlerData *data)
+{
+  CockpitWebService *service;
+  const gchar *remainder = NULL;
+  gboolean resource;
+
+  path = cockpit_web_response_get_path (response);
+  g_return_val_if_fail (path != NULL, FALSE);
+
+  resource = g_str_has_prefix (path, "/cockpit/") ||
+             g_str_has_prefix (path, "/cockpit+") ||
+             g_str_equal (path, "/cockpit");
+
+  /* Stuff in /cockpit or /cockpit+xxx */
+  if (resource)
+    {
+      cockpit_web_response_skip_path (response);
+      remainder = cockpit_web_response_get_path (response);
+
+      if (!remainder)
+        {
+          cockpit_web_response_error (response, 404, NULL, NULL);
+          return TRUE;
+        }
+      else if (g_str_has_prefix (remainder, "/static/"))
+        {
+          /* Static stuff is served without authentication */
+          cockpit_web_response_file (response, remainder + 8, TRUE, data->static_roots);
+          return TRUE;
+        }
+    }
+
+  /* Remainder of stuff needs authentication */
+  service = cockpit_auth_check_cookie (data->auth, path, headers);
+
+  if (resource)
+    {
+      if (g_str_equal (remainder, "/login"))
+        {
+          handle_login (data, service, path, headers, response);
+        }
+      else
+        {
+          handle_resource (data, service, path, headers, response);
+        }
+    }
+  else
+    {
+      handle_shell (data, service, path, headers, response);
+    }
+
   return TRUE;
 }
 
