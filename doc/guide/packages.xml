@@ -49,7 +49,7 @@
     </itemizedlist>
 
     <para>Packages placed in <code>$XDG_DATA_HOME</code> are not cached by Cockpit or the web browser.
-      Other packages are cached agressively, and are accessed using a checksum of the files in
+      Other packages are cached aggressively, and are accessed using a checksum of the files in
       the packages and their names.</para>
 
     <para>You can use the following command to list the packages installed on a server. You'll note that
@@ -90,6 +90,12 @@ $ cockpit-bridge --packages
           provides. These will be added into the Cockpit user interface on the side bar.
           Each property on this object is named for the identifier of such an item, and the
           property value is a JSON object described below.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>name</term>
+        <listitem><para>An optional string that changes the name of the package. Normally
+          packages derive their name from the directory that they are located in. This
+          field overrides that name.</para></listitem>
       </varlistentry>
       <varlistentry>
         <term>tools</term>

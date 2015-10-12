@@ -1,127 +1,126 @@
-# SOME DESCRIPTIVE TITLE.
-# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the PACKAGE package.
-# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+# Robert Antoni Buj Gelonch <rbuj@fedoraproject.org>, 2015. #zanata
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2015-10-06 17:06-0700\n"
-"PO-Revision-Date: \n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: LANGUAGE <LL@li.org>\n"
-"Language: de\n"
+"PO-Revision-Date: 2015-10-06 02:30-0400\n"
+"Last-Translator: Robert Antoni Buj Gelonch <rbuj@fedoraproject.org>\n"
+"Language-Team: Catalan\n"
+"Language: ca\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"X-Generator: Zanata 3.7.1\n"
+"X-Generator: Zanata 3.7.2\n"
+"Plural-Forms: nplurals=2; plural=(n != 1)\n"
 
 #: ../pkg/dashboard/index.html.h:1 ../pkg/shell/index.html.h:1
 #: ../pkg/systemd/index.html.h:1 ../src/ws/cockpit.desktop.in.h:1
 msgid "Cockpit"
-msgstr ""
+msgstr "Cockpit"
 
 #: ../pkg/dashboard/index.html.h:2
 msgid "Lost connection. Trying to reconnect"
-msgstr ""
+msgstr "Es va perdre la connexió. S'intenta connectar de nou"
 
 #: ../pkg/dashboard/index.html.h:3 ../pkg/realmd/operation.html.h:4
 #: ../pkg/users/index.html.h:8
 msgid "User Name"
-msgstr "Benutzername"
+msgstr "Nom d'usuari"
 
 #: ../pkg/dashboard/index.html.h:4 ../pkg/users/index.html.h:13
 msgid "Password"
-msgstr ""
+msgstr "Contrasenya"
 
 #: ../pkg/dashboard/list.js:206
 msgid "The user <b>$0</b> is not permitted to manage servers"
-msgstr ""
+msgstr "A l'usuari <b>$0</b> no se li permet gestionar els servidors"
 
 #: ../pkg/dashboard/list.js:406
 msgid ""
 "You are currently connected directly to this server. You cannot delete it."
 msgstr ""
+"Actualment esteu connectat directament a aquest servidor. No podeu eliminar-"
+"ho."
 
 #: ../pkg/dashboard/list.js:578
 msgid "IP address or host name cannot contain whitespace."
-msgstr ""
+msgstr "L'adreça IP o el nom de l'amfitrió no poden contenir espais en blanc."
 
 #: ../pkg/dashboard/list.js:581 ../pkg/dashboard/list.js:606
 #: ../pkg/dashboard/list.js:712 ../pkg/dashboard/list.js:812
 #: ../pkg/dashboard/list.js:850 ../pkg/dashboard/list.js:871
 #: ../pkg/realmd/operation.html.h:11
 msgid "Next"
-msgstr ""
+msgstr "Següent"
 
 #: ../pkg/dashboard/list.js:603
 msgid "User name cannot contain whitespace."
-msgstr ""
+msgstr "El nom d'usuari no pot contenir espais en blanc."
 
 #: ../pkg/dashboard/list.js:620
 msgid "Enter IP address or host name"
-msgstr ""
+msgstr "Introduïu l'adreça IP o el nom de l'amfitrió"
 
 #: ../pkg/dashboard/list.js:728
 msgid "Add host"
-msgstr ""
+msgstr "Afegeix un amfitrió"
 
 #: ../pkg/dashboard/list.js:737 ../pkg/systemd/services.html.h:12
 msgid "Close"
-msgstr ""
+msgstr "Tanca"
 
 #: ../pkg/dashboard/list.js:853
 msgid "IP address or host name cannot be empty."
-msgstr ""
+msgstr "L'adreça IP o el nom de l'amfitrió no poden estar en blanc."
 
 #: ../pkg/dashboard/list.js:874
 msgid "User name cannot be empty."
-msgstr ""
+msgstr "El nom d'usuari no pot estar en blanc."
 
 #: ../pkg/dashboard/list.js:950
 msgid "Synchronize admin logins"
-msgstr ""
+msgstr "Sincronitza els inicis de sessions dels administradors"
 
 #: ../pkg/docker/console.html.h:1 ../pkg/docker/run.js:194
 msgid "Container"
-msgstr ""
+msgstr "Contenidor"
 
 #: ../pkg/docker/index.html.h:1
 msgid "Containers"
-msgstr ""
+msgstr "Contenidors"
 
 #: ../pkg/docker/index.html.h:2
 msgid "Connecting to Docker"
-msgstr ""
+msgstr "S'està connectant al Docker"
 
 #: ../pkg/docker/index.html.h:3
 msgid "Not authorized to access Docker on this system"
-msgstr ""
+msgstr "No s'autoritza l'accés Docker en aquest sistema"
 
 #: ../pkg/docker/index.html.h:4
 msgid "Docker is not installed or activated on the system"
-msgstr ""
+msgstr "Docker no està activat o instal·lat al sistema"
 
 #: ../pkg/docker/index.html.h:5
 msgid "Can't connect to Docker"
-msgstr ""
+msgstr "No es pot connectar a Docker"
 
 #: ../pkg/docker/index.html.h:6
 msgid "Start Docker"
-msgstr ""
+msgstr "Inicia el Docker"
 
 #: ../pkg/docker/index.html.h:7
 msgid "Try again"
-msgstr ""
+msgstr "Torna-ho a intentar"
 
 #: ../pkg/docker/index.html.h:8 ../pkg/systemd/logs.html.h:9
 msgid "All"
-msgstr ""
+msgstr "Tots"
 
 #: ../pkg/docker/index.html.h:9 ../pkg/storaged/details.js:1416
 msgid "Running"
-msgstr "Läuft"
+msgstr "En execució"
 
 #: ../pkg/docker/index.html.h:10
 msgid ""
@@ -129,47 +128,50 @@ msgid ""
 "              Get new image\n"
 "            "
 msgstr ""
+"\n"
+"              Obté una nova imatge\n"
+"            "
 
 #: ../pkg/docker/index.html.h:13
 msgid "{{host_port_label}}"
-msgstr ""
+msgstr "{{host_port_label}}"
 
 #: ../pkg/docker/index.html.h:14
 msgid "{{alias_label}}"
-msgstr ""
+msgstr "{{alias_label}}"
 
 #: ../pkg/docker/index.html.h:15
 msgid "Image"
-msgstr ""
+msgstr "Imatge"
 
 #: ../pkg/docker/index.html.h:16
 msgid "Container Name"
-msgstr ""
+msgstr "Nom del contenidor"
 
 #: ../pkg/docker/index.html.h:17
 msgid "Command"
-msgstr ""
+msgstr "Ordre"
 
 #: ../pkg/docker/index.html.h:18
 msgid "Memory limit"
-msgstr ""
+msgstr "Límit de memòria"
 
 #: ../pkg/docker/index.html.h:19
 msgid "CPU priority"
-msgstr ""
+msgstr "Prioritat de CPU"
 
 #: ../pkg/docker/index.html.h:20
 msgid "With terminal"
-msgstr ""
+msgstr "Amb el terminal"
 
 #: ../pkg/docker/index.html.h:21
 msgid "Links"
-msgstr ""
+msgstr "Enllaços"
 
 #: ../pkg/docker/index.html.h:22 ../pkg/networkmanager/index.html.h:19
 #: ../pkg/networkmanager/interfaces.js:2221
 msgid "Ports"
-msgstr ""
+msgstr "Ports"
 
 #: ../pkg/docker/index.html.h:23 ../pkg/networkmanager/index.html.h:42
 #: ../pkg/users/index.html.h:17
@@ -178,6 +180,9 @@ msgid ""
 "            Cancel\n"
 "          "
 msgstr ""
+"\n"
+"            Cancel·la\n"
+"          "
 
 #: ../pkg/docker/index.html.h:26
 msgid ""
@@ -185,6 +190,9 @@ msgid ""
 "            Run\n"
 "          "
 msgstr ""
+"\n"
+"            Executa\n"
+"          "
 
 #: ../pkg/docker/index.html.h:29
 msgid ""
@@ -192,6 +200,9 @@ msgid ""
 "            Download\n"
 "          "
 msgstr ""
+"\n"
+"            Baixa\n"
+"          "
 
 #: ../pkg/docker/index.html.h:32 ../pkg/users/index.html.h:20
 msgid ""
@@ -199,18 +210,21 @@ msgid ""
 "            Change\n"
 "          "
 msgstr ""
+"\n"
+"            Canvia\n"
+"          "
 
 #: ../pkg/docker/index.html.h:35
 msgid "Repository"
-msgstr ""
+msgstr "Dipòsit"
 
 #: ../pkg/docker/index.html.h:36
 msgid "Tag"
-msgstr ""
+msgstr "Tag"
 
 #: ../pkg/docker/index.html.h:37
 msgid "Author"
-msgstr ""
+msgstr "Autor"
 
 #: ../pkg/docker/index.html.h:38
 msgid ""
@@ -218,39 +232,42 @@ msgid ""
 "            Commit\n"
 "          "
 msgstr ""
+"\n"
+"            Consigna\n"
+"          "
 
 #: ../pkg/docker/index.html.h:41 ../pkg/networkmanager/index.html.h:52
 #: ../pkg/shell/index.js:50 ../pkg/users/local.js:1122
 msgid "Unexpected error"
-msgstr ""
+msgstr "Error inesperat"
 
 #: ../pkg/docker/containers.js:57
 msgid "Failed to start Docker: $0"
-msgstr ""
+msgstr "Ha fallat l'inici del Docker: $0"
 
 #: ../pkg/docker/details.js:40 ../pkg/docker/image.js:38
 msgctxt "page-title"
 msgid "Containers"
-msgstr ""
+msgstr "Contenidors"
 
 #: ../pkg/docker/details.js:177
 msgid "${hip}:${hport} -> $cport"
-msgstr ""
+msgstr "${hip}:${hport} -> $cport"
 
 #: ../pkg/docker/details.js:205 ../pkg/docker/image.js:105
 #: ../pkg/storaged/details.js:1650
 msgid "Not found"
-msgstr ""
+msgstr "No s'ha trobat"
 
 #: ../pkg/docker/details.js:294 ../pkg/docker/image.js:148
 #: ../pkg/storaged/details.js:558 ../pkg/storaged/details.js:721
 #: ../pkg/storaged/details.js:881
 msgid "Please confirm deletion of $0"
-msgstr ""
+msgstr "Si us plau, confirmeu l'eliminació de $0"
 
 #: ../pkg/docker/details.js:295
 msgid "Deleting a container will erase all data in it."
-msgstr ""
+msgstr "L'eliminació d'un contenidor n'eliminarà totes les dades."
 
 #: ../pkg/docker/details.js:296 ../pkg/docker/image.js:150
 #: ../pkg/kubernetes/index.html.h:35 ../pkg/storaged/details.js:563
@@ -258,11 +275,11 @@ msgstr ""
 #: ../pkg/storaged/details.js:993 ../pkg/storaged/details.js:1460
 #: ../pkg/storaged/details.js:1618 ../pkg/users/index.html.h:6
 msgid "Delete"
-msgstr "Löschen"
+msgstr "Elimina"
 
 #: ../pkg/docker/image.js:70
 msgid "Image $0"
-msgstr ""
+msgstr "Imatge $0"
 
 #: ../pkg/docker/image.js:149
 msgid ""
@@ -270,6 +287,10 @@ msgid ""
 "you need it later.  Unless this image has never been pushed to a repository, "
 "that is, in which case you probably can't download it again."
 msgstr ""
+"L'eliminació d'una imatge ho eliminarà, però probablement es pot baixar de "
+"nou si es necessita més endavant. Llevat que aquesta imatge mai hagi estat "
+"empesa a un dipòsit, que ho és, en aquest cas probablement no pugueu baixar-"
+"ho de nou."
 
 #: ../pkg/docker/overview.js:182
 msgid "Run image"
@@ -284,166 +305,170 @@ msgstr ""
 
 #: ../pkg/docker/run.js:196
 msgid "Host"
-msgstr ""
+msgstr "Amfitrió"
 
 #: ../pkg/docker/run.js:228
 msgid "Invalid port"
-msgstr ""
+msgstr "Port no vàlid"
 
 #: ../pkg/docker/run.js:238
 msgid "Duplicate port"
-msgstr ""
+msgstr "Port duplicat"
 
 #. still valid if empty
 #: ../pkg/docker/run.js:326
 msgid "No alias specified"
-msgstr ""
+msgstr "No s'ha especificat l'àlies"
 
 #: ../pkg/docker/run.js:336
 msgid "Duplicate alias"
-msgstr ""
+msgstr "Àlies duplicat"
 
 #: ../pkg/docker/run.js:371
 msgid "No container specified"
-msgstr ""
+msgstr "No s'ha especificat el contenidor"
 
 #: ../pkg/docker/run.js:466
 msgid "to host port"
-msgstr ""
+msgstr "al port de l'amfitrió"
 
 #: ../pkg/docker/run.js:467 ../pkg/docker/run.js:534
 msgid "none"
-msgstr ""
+msgstr "cap"
 
 #: ../pkg/docker/run.js:499 ../pkg/docker/run.js:500
 msgid "UDP"
-msgstr ""
+msgstr "UDP"
 
 #: ../pkg/docker/run.js:502
 msgid "TCP"
-msgstr ""
+msgstr "TCP"
 
 #: ../pkg/docker/run.js:533
 msgid "alias"
-msgstr ""
+msgstr "àlies"
 
 #: ../pkg/docker/search.js:130
 msgid "Error downloading"
-msgstr ""
+msgstr "Error en la baixada"
 
 #: ../pkg/docker/util.js:71
 msgid "Up since $StartedAt"
-msgstr ""
+msgstr "Aixecat des de $StartedAt"
 
 #: ../pkg/docker/util.js:73
 msgid "Exited $ExitCode"
-msgstr ""
+msgstr "Sortida $ExitCode"
 
 #: ../pkg/docker/util.js:82
 msgid "default"
-msgstr ""
+msgstr "per defecte"
 
 #: ../pkg/docker/util.js:83
 msgid "$0 shares"
-msgstr ""
+msgstr "$0 comparticions"
 
 #: ../pkg/docker/util.js:182
 msgid "Stopped"
-msgstr ""
+msgstr "Aturat"
 
 #: ../pkg/docker/util.js:281
 msgid "unlimited"
-msgstr ""
+msgstr "il·limitat"
 
 #: ../pkg/docker/util.js:402
 msgid "Container is currently running."
-msgstr ""
+msgstr "El contenidor s'està executant actualment."
 
 #: ../pkg/docker/util.js:404
 msgid ""
 "Container is currently marked as not running, but regular stopping failed."
 msgstr ""
+"El contenidor actualment està marcat com a no en execució, però va fallar "
+"l'aturada normal."
 
 #: ../pkg/docker/util.js:405
 msgid "Error message from Docker:"
-msgstr ""
+msgstr "Missatge d'error del Docker:"
 
 #: ../pkg/docker/util.js:415
 msgid "Please confirm forced deletion of $0"
-msgstr ""
+msgstr "Si us plau, confirmeu l'eliminació forçada de $0"
 
 #: ../pkg/docker/util.js:417
 msgid "Force Delete"
-msgstr ""
+msgstr "Força l'eliminació"
 
 #: ../pkg/docker/util.js:458
 msgid "Failed to stop Docker scope: $0"
-msgstr ""
+msgstr "Ha fallat l'aturada de l'àmbit del Docker: $0"
 
 #: ../pkg/kubernetes/adjust.js:109 ../pkg/kubernetes/details.js:62
 msgid "Not a valid number of replicas"
-msgstr ""
+msgstr "No és un nombre vàlid de rèpliques"
 
 #: ../pkg/kubernetes/adjust.js:111 ../pkg/kubernetes/details.js:64
 msgid "The maximum number of replicas is 128"
-msgstr ""
+msgstr "El nombre màxim de rèpliques és 128"
 
 #: ../pkg/kubernetes/adjust.js:125 ../pkg/kubernetes/details.js:76
 msgid "Updating $0..."
-msgstr ""
+msgstr "S'està actualitzant $0..."
 
 #: ../pkg/kubernetes/client.js:520
 msgid "Couldn't find running kube-apiserver"
-msgstr ""
+msgstr "No es va poder trobar el kube-apiserver en execució"
 
 #: ../pkg/kubernetes/client.js:1343
 msgid "Invalid kubernetes application manifest"
-msgstr ""
+msgstr "manifest d'aplicació de Kubernetes no vàlid"
 
 #: ../pkg/kubernetes/client.js:1369
 msgid "Unsupported kubernetes object in data"
-msgstr ""
+msgstr "objecte Kubernetes no admès a les dades"
 
 #: ../pkg/kubernetes/client.js:1456
 msgid "Unsupported or incompatible kubernetes API server."
-msgstr ""
+msgstr "Servidor de l'API del Kubernetes no admès o incompatible."
 
 #: ../pkg/kubernetes/client.js:1458
 msgid "Could not connect to kubernetes API server."
-msgstr ""
+msgstr "No es va poder connectar al servidor de l'API del Kubernetes."
 
 #: ../pkg/kubernetes/deploy.js:69
 msgid "Please create another namespace for $0 \"$1\""
-msgstr ""
+msgstr "Si us plau, creeu un altre espai de noms per a $0 \"$1\""
 
 #: ../pkg/kubernetes/deploy.js:254 ../pkg/kubernetes/deploy.js:291
 msgid "Namespace cannot be empty."
-msgstr ""
+msgstr "L'espai de noms no pot estar en blanc."
 
 #: ../pkg/kubernetes/deploy.js:256 ../pkg/kubernetes/deploy.js:293
 msgid "Please provide a valid namespace."
-msgstr ""
+msgstr "Si us plau, un espai de noms vàlid."
 
 #: ../pkg/kubernetes/deploy.js:306
 msgid ""
 "No metadata file was selected. Please select a Kubernetes metadata file."
 msgstr ""
+"No es va seleccionar cap fitxer de metadades. Si us plau, seleccioneu un "
+"fitxer de metadades del Kubernetes."
 
 #: ../pkg/kubernetes/deploy.js:308
 msgid "The selected file is not a valid Kubernetes application manifest."
-msgstr ""
+msgstr "El fitxer seleccionat no és un manifest d'aplicació Kubernetes vàlid."
 
 #: ../pkg/kubernetes/deploy.js:323
 msgid "Unable to read the Kubernetes application manifest. Code $0."
-msgstr ""
+msgstr "No es pot llegir el fitxer del manifest del Kubernetes. Codi $0."
 
 #: ../pkg/kubernetes/deploy.js:340
 msgid "Nulecule field cannot be empty."
-msgstr ""
+msgstr "El camp del Nulecule no pot estar en blanc."
 
 #: ../pkg/kubernetes/deploy.js:404
 msgid "Namespace"
-msgstr ""
+msgstr "Espai de noms"
 
 #: ../pkg/kubernetes/deploy.js:406
 msgid "Project"
@@ -451,51 +476,51 @@ msgstr ""
 
 #: ../pkg/kubernetes/deploy.js:409 ../pkg/kubernetes/deploy.js:459
 msgid "Select Manifest File..."
-msgstr ""
+msgstr "Selecciona el fitxer del manifest..."
 
 #: ../pkg/kubernetes/details.js:24
 #, fuzzy
 msgid "Delete $0 $1?"
-msgstr "Löschen"
+msgstr "Elimina $0"
 
 #: ../pkg/kubernetes/details.js:258
 msgid "Ready"
-msgstr ""
+msgstr "A punt"
 
 #: ../pkg/kubernetes/details.js:258
 msgid "Not Ready"
-msgstr ""
+msgstr "No a punt"
 
 #: ../pkg/kubernetes/details.js:275 ../pkg/networkmanager/interfaces.js:545
 #: ../pkg/networkmanager/interfaces.js:949
 #: ../pkg/networkmanager/interfaces.js:1865
 #: ../pkg/networkmanager/interfaces.js:1867
 msgid "Unknown"
-msgstr "Unbekannt"
+msgstr "Desconegut"
 
 #: ../pkg/kubernetes/graphs.js:333
 msgid "CPU"
-msgstr ""
+msgstr "CPU"
 
 #: ../pkg/kubernetes/graphs.js:338
 msgid "Memory"
-msgstr ""
+msgstr "Memòria"
 
 #: ../pkg/kubernetes/graphs.js:343
 msgid "Network"
-msgstr ""
+msgstr "Xarxa"
 
 #: ../pkg/kubernetes/index.html.h:1
 msgid "Kubernetes Cluster"
-msgstr ""
+msgstr "Clúster Kubernetes"
 
 #: ../pkg/kubernetes/index.html.h:2
 msgid "Connecting to Kubernetes"
-msgstr ""
+msgstr "S'està connectant al Kubernetes"
 
 #: ../pkg/kubernetes/index.html.h:3
 msgid "Couldn't connect to Kubernetes server"
-msgstr ""
+msgstr "No es va poder connectar al servidor Kubernetes"
 
 #: ../pkg/kubernetes/index.html.h:4
 msgid ""
@@ -503,10 +528,13 @@ msgid ""
 "            Reconnect\n"
 "          "
 msgstr ""
+"\n"
+"            Torna a connectar\n"
+"          "
 
 #: ../pkg/kubernetes/index.html.h:7
 msgid "Deploy Application"
-msgstr ""
+msgstr "Desplega l'aplicació"
 
 #: ../pkg/kubernetes/index.html.h:8
 msgid ""
@@ -514,14 +542,17 @@ msgid ""
 "                  Type\n"
 "                  "
 msgstr ""
+"\n"
+"                  Tipus\n"
+"                  "
 
 #: ../pkg/kubernetes/index.html.h:11
 msgid "Kubernetes Manifest"
-msgstr ""
+msgstr "Manifest Kubernetes"
 
 #: ../pkg/kubernetes/index.html.h:12
 msgid "Nulecule Application"
-msgstr ""
+msgstr "Aplicació Nulecule"
 
 #: ../pkg/kubernetes/index.html.h:13
 msgid ""
@@ -529,6 +560,9 @@ msgid ""
 "                  Manifest\n"
 "                  "
 msgstr ""
+"\n"
+"                  Manifest\n"
+"                  "
 
 #: ../pkg/kubernetes/index.html.h:16
 msgid ""
@@ -536,6 +570,9 @@ msgid ""
 "                  Nulecule\n"
 "                  "
 msgstr ""
+"\n"
+"                  Nulecule\n"
+"                  "
 
 #: ../pkg/kubernetes/index.html.h:19
 msgid ""
@@ -543,6 +580,9 @@ msgid ""
 "              Cancel\n"
 "              "
 msgstr ""
+"\n"
+"              Cancel·la\n"
+"              "
 
 #: ../pkg/kubernetes/index.html.h:22
 msgid ""
@@ -550,10 +590,13 @@ msgid ""
 "              Deploy\n"
 "              "
 msgstr ""
+"\n"
+"              Desplega\n"
+"              "
 
 #: ../pkg/kubernetes/index.html.h:25
 msgid "Adjust Service"
-msgstr ""
+msgstr "Ajusta el servei"
 
 #: ../pkg/kubernetes/index.html.h:26 ../pkg/networkmanager/index.html.h:14
 #: ../pkg/storaged/overview.js:388 ../pkg/storaged/overview.js:443
@@ -563,28 +606,30 @@ msgstr ""
 #: ../pkg/storaged/details.js:748 ../pkg/storaged/details.js:777
 #: ../pkg/storaged/index.html.h:12
 msgid "Name"
-msgstr "Name"
+msgstr "Nom"
 
 #: ../pkg/kubernetes/index.html.h:27 ../pkg/realmd/operation.html.h:10
 #: ../pkg/storaged/index.html.h:16
 msgid "Cancel"
-msgstr "Abbrechen"
+msgstr "Cancel·la"
 
 #: ../pkg/kubernetes/index.html.h:28
 msgid "Adjust"
-msgstr ""
+msgstr "Ajusta"
 
 #: ../pkg/kubernetes/index.html.h:29
+#, fuzzy
 msgid "Adjust Replication Controller"
-msgstr ""
+msgstr "Controlador de replicació"
 
 #: ../pkg/kubernetes/index.html.h:30
 msgid "Replicas"
-msgstr ""
+msgstr "Rèpliques"
 
 #: ../pkg/kubernetes/index.html.h:31
+#, fuzzy
 msgid "Please Confirm Deletion"
-msgstr ""
+msgstr "Si us plau, confirmeu l'eliminació de $0"
 
 #: ../pkg/kubernetes/index.html.h:32
 msgid ""
@@ -595,22 +640,25 @@ msgid ""
 msgstr ""
 
 #: ../pkg/kubernetes/index.html.h:36
+#, fuzzy
 msgid ""
 "\n"
 "          "
 msgstr ""
+"\n"
+"            "
 
 #: ../pkg/kubernetes/index.html.h:38
 msgid "Add Cluster Node "
-msgstr ""
+msgstr "Afegeix un node del clúster"
 
 #: ../pkg/kubernetes/index.html.h:39
 msgid "Address"
-msgstr ""
+msgstr "Adreça"
 
 #: ../pkg/kubernetes/index.html.h:40
 msgid "Configure Kubelet and Proxy"
-msgstr ""
+msgstr "Configura el Kubelet i el servidor intermediari"
 
 #: ../pkg/kubernetes/index.html.h:41
 msgid "Configure Flannel networking"
@@ -619,35 +667,36 @@ msgstr ""
 #: ../pkg/kubernetes/index.html.h:42 ../pkg/storaged/details.js:537
 #: ../pkg/storaged/details.js:821
 msgid "Add"
-msgstr ""
+msgstr "Afegeix"
 
 #: ../pkg/kubernetes/node.js:65
 msgid "Please type an address"
-msgstr ""
+msgstr "Si us plau, introduïu una adreça"
 
 #: ../pkg/kubernetes/node.js:67
 msgid "The address contains invalid characters"
-msgstr ""
+msgstr "L'adreça conté caràcters no vàlids"
 
 #: ../pkg/kubernetes/node.js:74
 msgid "The name contains invalid charaters"
-msgstr ""
+msgstr "El nom conté caràcters no vàlids"
 
 #: ../pkg/kubernetes/nulecule.js:120
 msgid "The image is not a correctly labeled Nulecule image."
-msgstr ""
+msgstr "La imatge no està etiquetada correctament com a imatge de Nulecule."
 
 #: ../pkg/kubernetes/nulecule.js:134
+#, fuzzy
 msgid "This image is not a supported Nulecule image"
-msgstr ""
+msgstr "La imatge no està etiquetada correctament com a imatge de Nulecule."
 
 #: ../pkg/kubernetes/nulecule.js:155
 msgid "The 'atomic' command is not installed on the system."
-msgstr ""
+msgstr "L'ordre «atomic» no està instal·lada al sistema."
 
 #: ../pkg/kubernetes/nulecule.js:165
 msgid "The 'atomic' command version $0 is not supported."
-msgstr ""
+msgstr "La versió $0 de l'ordre «atomic» no està admesa."
 
 #: ../pkg/kubernetes/nulecule.js:230
 msgid "Unable to pull Nulecule app image."
@@ -655,11 +704,11 @@ msgstr ""
 
 #: ../pkg/kubernetes/nulecule.js:252
 msgid "Installing ..."
-msgstr ""
+msgstr "S'està instal·lant..."
 
 #: ../pkg/kubernetes/nulecule.js:259
 msgid "Running ..."
-msgstr ""
+msgstr "S'està executant..."
 
 #: ../pkg/kubernetes/nulecule.js:305
 msgid "Image failed to "
@@ -667,518 +716,537 @@ msgstr ""
 
 #: ../pkg/kubernetes/nulecule.js:361
 msgid "Unable to read answer.conf.sample file."
-msgstr ""
+msgstr "No s'ha pogut llegir el fitxer answer.conf.sample."
 
 #: ../pkg/kubernetes/nulecule.js:374
 msgid "Image failed to install."
-msgstr ""
+msgstr "La imatge no s'ha pogut instal·lar."
 
 #: ../pkg/kubernetes/nulecule.js:381
 msgid "Temporary folder was not created"
-msgstr ""
+msgstr "No es va crear el directori temporal"
 
 #: ../pkg/kubernetes/nulecule.js:388
 msgid "atomicapp version $0 is not supported."
-msgstr ""
+msgstr "la versió $0 d'atomicapp no està admesa."
 
 #: ../pkg/kubernetes/nulecule.js:428
 msgid "Image failed to run."
-msgstr ""
+msgstr "La imatge no s'ha pogut executar."
 
 #: ../pkg/networkmanager/index.html.h:1
 #, fuzzy
 msgid "Networking"
-msgstr "Vernetzung"
+msgstr "Xarxa"
 
 #: ../pkg/networkmanager/index.html.h:2 ../pkg/storaged/index.html.h:17
 msgid "Go to now"
-msgstr ""
+msgstr "Vés a ara"
 
 #: ../pkg/networkmanager/index.html.h:3 ../pkg/storaged/index.html.h:18
 msgid "5 minutes"
-msgstr ""
+msgstr "5 minuts"
 
 #: ../pkg/networkmanager/index.html.h:4 ../pkg/storaged/index.html.h:19
 msgid "1 hour"
-msgstr ""
+msgstr "1 hora"
 
 #: ../pkg/networkmanager/index.html.h:5 ../pkg/storaged/index.html.h:20
 msgid "6 hours"
-msgstr ""
+msgstr "6 hores"
 
 #: ../pkg/networkmanager/index.html.h:6 ../pkg/storaged/index.html.h:21
 msgid "1 day"
-msgstr ""
+msgstr "1 dia"
 
 #: ../pkg/networkmanager/index.html.h:7 ../pkg/storaged/index.html.h:22
 msgid "1 week"
-msgstr ""
+msgstr "1 setmana"
 
 #: ../pkg/networkmanager/index.html.h:8
+#, fuzzy
 msgid "Sending"
-msgstr ""
+msgstr "Lectura"
 
 #: ../pkg/networkmanager/index.html.h:9
+#, fuzzy
 msgid "Receiving"
-msgstr ""
+msgstr "Recent"
 
 #: ../pkg/networkmanager/index.html.h:10
 msgid "Interfaces"
-msgstr ""
+msgstr "Interfícies"
 
 #: ../pkg/networkmanager/index.html.h:11
+#, fuzzy
 msgid "Add Bond"
-msgstr ""
+msgstr "Enllaç"
 
 #: ../pkg/networkmanager/index.html.h:12
+#, fuzzy
 msgid "Add Bridge"
-msgstr ""
+msgstr "Pont"
 
 #: ../pkg/networkmanager/index.html.h:13
+#, fuzzy
 msgid "Add VLAN"
-msgstr ""
+msgstr "VLAN"
 
 #: ../pkg/networkmanager/index.html.h:15
+#, fuzzy
 msgid "IP Address"
-msgstr ""
+msgstr "Adreça"
 
 #: ../pkg/networkmanager/index.html.h:16
 #, fuzzy
 msgid "Networking Logs"
-msgstr "Vernetzung"
+msgstr "Xarxa"
 
 #: ../pkg/networkmanager/index.html.h:17
 msgid "Parent"
-msgstr ""
+msgstr "Pare"
 
 #: ../pkg/networkmanager/index.html.h:18
 msgid "VLAN Id"
-msgstr ""
+msgstr "Id. VLAN"
 
 #: ../pkg/networkmanager/index.html.h:20
 msgid "Spanning Tree Protocol (STP)"
-msgstr ""
+msgstr "STP (Spanning Tree Protocol)"
 
 #: ../pkg/networkmanager/index.html.h:21
 msgid "STP Priority"
-msgstr ""
+msgstr "Prioritat STP"
 
 #: ../pkg/networkmanager/index.html.h:22
 msgid "STP Forward delay"
-msgstr ""
+msgstr "Retard del reenviament STP"
 
 #: ../pkg/networkmanager/index.html.h:23
 msgid "STP Hello time"
-msgstr ""
+msgstr "STP Hello time"
 
 #: ../pkg/networkmanager/index.html.h:24
 msgid "STP Maximum message age"
-msgstr ""
+msgstr "Envelliment màxim del missatge STP"
 
 #: ../pkg/networkmanager/index.html.h:25
 msgid "Priority"
-msgstr ""
+msgstr "Prioritat"
 
 #: ../pkg/networkmanager/index.html.h:26
 msgid "Path cost"
-msgstr ""
+msgstr "Cost del camí"
 
 #: ../pkg/networkmanager/index.html.h:27
 msgid "Hair Pin mode"
-msgstr ""
+msgstr "Mode hairpin"
 
 #: ../pkg/networkmanager/index.html.h:28
 #: ../pkg/networkmanager/interfaces.js:2221
 msgid "Members"
-msgstr ""
+msgstr "Membres"
 
 #: ../pkg/networkmanager/index.html.h:29
 msgid "Mode"
-msgstr ""
+msgstr "Mode"
 
 #: ../pkg/networkmanager/index.html.h:30
 msgid "Primary"
-msgstr ""
+msgstr "Principal"
 
 #: ../pkg/networkmanager/index.html.h:31
 msgid "Link Monitoring"
-msgstr ""
+msgstr "Monitoratge de l'enllaç"
 
 #: ../pkg/networkmanager/index.html.h:32
 msgid "Monitoring Interval"
-msgstr ""
+msgstr "Interval del monitoratge"
 
 #: ../pkg/networkmanager/index.html.h:33
 msgid "Monitoring Targets"
-msgstr ""
+msgstr "Objectius del monitoratge"
 
 #: ../pkg/networkmanager/index.html.h:34
 msgid "Link up delay"
-msgstr ""
+msgstr "Retard de l'aixecament de l'enllaç"
 
 #: ../pkg/networkmanager/index.html.h:35
 msgid "Link down delay"
-msgstr ""
+msgstr "Retard del baixament de l'enllaç"
 
 #: ../pkg/networkmanager/index.html.h:36 ../pkg/users/index.html.h:34
+#, fuzzy
 msgid ""
 "\n"
 "            Delete\n"
 "          "
 msgstr ""
+"\n"
+"              Elimina\n"
+"            "
 
 #: ../pkg/networkmanager/index.html.h:39 ../pkg/storaged/index.html.h:50
 #: ../pkg/systemd/index.html.h:4
 msgid "On"
-msgstr ""
+msgstr "Engegat"
 
 #: ../pkg/networkmanager/index.html.h:40 ../pkg/storaged/index.html.h:51
 #: ../pkg/systemd/index.html.h:5
 msgid "Off"
-msgstr ""
+msgstr "Apagat"
 
 #: ../pkg/networkmanager/index.html.h:41
+#, fuzzy
 msgid "IP Settings"
-msgstr ""
+msgstr "Ajustos d'IPv4"
 
 #: ../pkg/networkmanager/index.html.h:45
+#, fuzzy
 msgid ""
 "\n"
 "            Apply\n"
 "          "
 msgstr ""
+"\n"
+"              Aplica\n"
+"            "
 
 #: ../pkg/networkmanager/index.html.h:48
+#, fuzzy
 msgid "Bond Settings"
-msgstr ""
+msgstr "Paràmetres dels comptes"
 
 #: ../pkg/networkmanager/index.html.h:49
+#, fuzzy
 msgid "Bridge Settings"
-msgstr ""
+msgstr "Ajustos d'IPv4"
 
 #: ../pkg/networkmanager/index.html.h:50
+#, fuzzy
 msgid "Bridge Port Settings"
-msgstr ""
+msgstr "Port del pont"
 
 #: ../pkg/networkmanager/index.html.h:51
+#, fuzzy
 msgid "VLAN Settings"
-msgstr ""
+msgstr "Ajustos d'IPv4"
 
 #. NM_DEVICE_STATE_UNAVAILABLE
 #: ../pkg/networkmanager/interfaces.js:707
 msgid "Not available"
-msgstr ""
+msgstr "No disponible"
 
 #. NM_DEVICE_STATE_DISCONNECTED
 #: ../pkg/networkmanager/interfaces.js:709
 #: ../pkg/networkmanager/interfaces.js:1166
 #: ../pkg/networkmanager/interfaces.js:1900
 msgid "Inactive"
-msgstr ""
+msgstr "Inactiu"
 
 #. NM_DEVICE_STATE_PREPARE
 #: ../pkg/networkmanager/interfaces.js:711
 msgid "Preparing"
-msgstr ""
+msgstr "S'està preparant"
 
 #. NM_DEVICE_STATE_CONFIG
 #: ../pkg/networkmanager/interfaces.js:713
 msgid "Configuring"
-msgstr ""
+msgstr "S'està configurant"
 
 #. NM_DEVICE_STATE_NEED_AUTH
 #: ../pkg/networkmanager/interfaces.js:715
 msgid "Authenticating"
-msgstr ""
+msgstr "S'està autenticant"
 
 #. NM_DEVICE_STATE_IP_CONFIG
 #: ../pkg/networkmanager/interfaces.js:717
 msgid "Configuring IP"
-msgstr ""
+msgstr "S'està configurant la IP"
 
 #. NM_DEVICE_STATE_IP_CHECK
 #: ../pkg/networkmanager/interfaces.js:719
 msgid "Checking IP"
-msgstr ""
+msgstr "S'està comprovant la IP"
 
 #. NM_DEVICE_STATE_SECONDARIES
 #: ../pkg/networkmanager/interfaces.js:721
 msgid "Waiting"
-msgstr ""
+msgstr "S'està esperant"
 
 #. NM_DEVICE_STATE_ACTIVATED
 #: ../pkg/networkmanager/interfaces.js:723
 msgid "Active"
-msgstr ""
+msgstr "Activa"
 
 #. NM_DEVICE_STATE_DEACTIVATING
 #: ../pkg/networkmanager/interfaces.js:725
 msgid "Deactivating"
-msgstr ""
+msgstr "S'està desactivant"
 
 #. NM_DEVICE_STATE_FAILED
 #: ../pkg/networkmanager/interfaces.js:727
 msgid "Failed"
-msgstr ""
+msgstr "Ha fallat"
 
 #: ../pkg/networkmanager/interfaces.js:1168
 msgid "No carrier"
-msgstr ""
+msgstr "Sense portadora"
 
 #: ../pkg/networkmanager/interfaces.js:1208
 msgid "Part of "
-msgstr ""
+msgstr "Part de"
 
 #: ../pkg/networkmanager/interfaces.js:1251
 msgid "The user <b>$0</b> is not permitted to modify network settings"
-msgstr ""
+msgstr "A l'usuari <b>$0</b> no se li permet modificar els ajustos de xarxa"
 
 #: ../pkg/networkmanager/interfaces.js:1312
 #: ../pkg/networkmanager/interfaces.js:1632
 msgctxt "page-title"
 msgid "Networking"
-msgstr "Vernetzung"
+msgstr "Xarxa"
 
 #: ../pkg/networkmanager/interfaces.js:1584
 msgid "Automatic (DHCP)"
-msgstr ""
+msgstr "Automàtica (DHCP)"
 
 #: ../pkg/networkmanager/interfaces.js:1585
 #: ../pkg/networkmanager/interfaces.js:1595
 msgid "Link local"
-msgstr ""
+msgstr "Enllaça localment"
 
 #: ../pkg/networkmanager/interfaces.js:1586
 #: ../pkg/networkmanager/interfaces.js:1596
 msgid "Manual"
-msgstr ""
+msgstr "Manual"
 
 #: ../pkg/networkmanager/interfaces.js:1587
 msgid "Shared"
-msgstr ""
+msgstr "Compartida"
 
 #: ../pkg/networkmanager/interfaces.js:1588 ../pkg/systemd/init.js:252
 msgid "Disabled"
-msgstr ""
+msgstr "Inhabilitada"
 
 #: ../pkg/networkmanager/interfaces.js:1593
 #: ../pkg/networkmanager/interfaces.js:2460
 #: ../pkg/networkmanager/interfaces.js:2464
 #: ../pkg/networkmanager/interfaces.js:2470 ../pkg/realmd/operation.js:237
 msgid "Automatic"
-msgstr ""
+msgstr "Automàtic"
 
 #: ../pkg/networkmanager/interfaces.js:1594
 msgid "Automatic (DHCP only)"
-msgstr ""
+msgstr "Automàtica, tan sols DHCP"
 
 #: ../pkg/networkmanager/interfaces.js:1597
 msgid "Ignore"
-msgstr ""
+msgstr "Ignora"
 
 #: ../pkg/networkmanager/interfaces.js:1602
 msgid "Round Robin"
-msgstr ""
+msgstr "Round Robin"
 
 #: ../pkg/networkmanager/interfaces.js:1603
 msgid "Active Backup"
-msgstr ""
+msgstr "Activa la còpia de seguretat"
 
 #: ../pkg/networkmanager/interfaces.js:1604
 msgid "XOR"
-msgstr ""
+msgstr "XOR"
 
 #: ../pkg/networkmanager/interfaces.js:1605
 msgid "Broadcast"
-msgstr ""
+msgstr "Difusió"
 
 #: ../pkg/networkmanager/interfaces.js:1606
 msgid "802.3ad"
-msgstr ""
+msgstr "802.3ad"
 
 #: ../pkg/networkmanager/interfaces.js:1607
 msgid "Adaptive transmit load balancing"
-msgstr ""
+msgstr "Balanceig de càrrega de transmissió adaptativa"
 
 #: ../pkg/networkmanager/interfaces.js:1608
 msgid "Adaptive load balancing"
-msgstr ""
+msgstr "Balanceig de càrrega adaptativa"
 
 #: ../pkg/networkmanager/interfaces.js:1613
 msgid "MII (Recommended)"
-msgstr ""
+msgstr "MII (recomanat)"
 
 #: ../pkg/networkmanager/interfaces.js:1614
 msgid "ARP"
-msgstr ""
+msgstr "ARP"
 
 #: ../pkg/networkmanager/interfaces.js:1851
 #: ../pkg/networkmanager/interfaces.js:1859
 #: ../pkg/networkmanager/interfaces.js:2055
 msgid "Bond"
-msgstr ""
+msgstr "Enllaç"
 
 #: ../pkg/networkmanager/interfaces.js:1853
 #: ../pkg/networkmanager/interfaces.js:1861
 #: ../pkg/networkmanager/interfaces.js:2119
 msgid "VLAN"
-msgstr ""
+msgstr "VLAN"
 
 #: ../pkg/networkmanager/interfaces.js:1855
 #: ../pkg/networkmanager/interfaces.js:1863
 #: ../pkg/networkmanager/interfaces.js:2081
 msgid "Bridge"
-msgstr ""
+msgstr "Pont"
 
 #: ../pkg/networkmanager/interfaces.js:1884
 msgid "Carrier"
-msgstr ""
+msgstr "Portadora"
 
 #: ../pkg/networkmanager/interfaces.js:1887
 msgid "Yes"
-msgstr ""
+msgstr "Sí"
 
 #: ../pkg/networkmanager/interfaces.js:1888
 msgid "No"
-msgstr ""
+msgstr "No"
 
 #: ../pkg/networkmanager/interfaces.js:1907
 #: ../pkg/subscriptions/index.html.h:45
 msgid "Status"
-msgstr "Status"
+msgstr "Estat"
 
 #: ../pkg/networkmanager/interfaces.js:1940
 msgid "Unknown configuration"
-msgstr ""
+msgstr "Configuració desconeguda"
 
 #: ../pkg/networkmanager/interfaces.js:2014
 msgid "Configure"
-msgstr ""
+msgstr "Configura"
 
 #: ../pkg/networkmanager/interfaces.js:2031
 msgid "Master"
-msgstr ""
+msgstr "Màster"
 
 #: ../pkg/networkmanager/interfaces.js:2050
 msgid "ARP Monitoring"
-msgstr ""
+msgstr "Monitoratge ARP"
 
 #: ../pkg/networkmanager/interfaces.js:2070
 msgid "Spanning Tree Protocol"
-msgstr ""
+msgstr "STP (Spanning Tree Protocol)"
 
 #: ../pkg/networkmanager/interfaces.js:2072
 #: ../pkg/networkmanager/interfaces.js:2096
 msgid "Priority $priority"
-msgstr ""
+msgstr "Prioritat $priority"
 
 #: ../pkg/networkmanager/interfaces.js:2074
 msgid "Forward delay $forward_delay"
-msgstr ""
+msgstr "Retard del reenviament $forward_delay"
 
 #: ../pkg/networkmanager/interfaces.js:2076
 msgid "Hello time $hello_time"
-msgstr ""
+msgstr "Hello time $hello_time"
 
 #: ../pkg/networkmanager/interfaces.js:2078
 msgid "Maximum message age $max_age"
-msgstr ""
+msgstr "Envelliment màxim del missatge $max_age"
 
 #: ../pkg/networkmanager/interfaces.js:2098
 msgid "Path cost $path_cost"
-msgstr ""
+msgstr "Cost del camí $path_cost"
 
 #: ../pkg/networkmanager/interfaces.js:2100
 msgid "Hairpin mode"
-msgstr ""
+msgstr "Mode hairpin"
 
 #: ../pkg/networkmanager/interfaces.js:2102
 msgid "Bridge port"
-msgstr ""
+msgstr "Port del pont"
 
 #: ../pkg/networkmanager/interfaces.js:2116
 msgid "Parent $parent"
-msgstr ""
+msgstr "Pare $parent"
 
 #: ../pkg/networkmanager/interfaces.js:2117
 msgid "Id $id"
-msgstr ""
+msgstr "Id. $id"
 
 #: ../pkg/networkmanager/interfaces.js:2125
 msgid "General"
-msgstr ""
+msgstr "General"
 
 #: ../pkg/networkmanager/interfaces.js:2134
 msgid "Connect automatically"
-msgstr ""
+msgstr "Connecta automàticament"
 
 #: ../pkg/networkmanager/interfaces.js:2135
 msgid "IPv4"
-msgstr ""
+msgstr "IPv4"
 
 #: ../pkg/networkmanager/interfaces.js:2136
 msgid "IPv6"
-msgstr ""
+msgstr "IPv6"
 
 #: ../pkg/networkmanager/interfaces.js:2437
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../pkg/networkmanager/interfaces.js:2449
 msgid "Prefix length or Netmask"
-msgstr ""
+msgstr "Longitud del prefix o Màscara de xarxa"
 
 #: ../pkg/networkmanager/interfaces.js:2449
 msgid "Prefix length"
-msgstr ""
+msgstr "Longitud del prefix"
 
 #: ../pkg/networkmanager/interfaces.js:2452
 msgid "Addresses"
-msgstr ""
+msgstr "Adreces"
 
 #: ../pkg/networkmanager/interfaces.js:2459
 msgid "DNS"
-msgstr ""
+msgstr "DNS"
 
 #: ../pkg/networkmanager/interfaces.js:2463
 msgid "DNS Search Domains"
-msgstr ""
+msgstr "Dominis de cerca DNS"
 
 #: ../pkg/networkmanager/interfaces.js:2468
 msgid "Routes"
-msgstr ""
+msgstr "Rutes"
 
 #: ../pkg/networkmanager/interfaces.js:2502
 msgid "IPv4 Settings"
-msgstr ""
+msgstr "Ajustos d'IPv4"
 
 #: ../pkg/networkmanager/interfaces.js:2502
 msgid "IPv6 Settings"
-msgstr ""
+msgstr "Ajustos d'IPv6"
 
 #: ../pkg/realmd/operation.html.h:1
 msgid "Domain Address"
-msgstr ""
+msgstr "Adreça del domini"
 
 #: ../pkg/realmd/operation.html.h:2
 msgid "Computer OU"
-msgstr ""
+msgstr "OU de l'ordinador"
 
 #: ../pkg/realmd/operation.html.h:3
 msgid "Authentication"
-msgstr ""
+msgstr "Autenticació"
 
 #: ../pkg/realmd/operation.html.h:5 ../pkg/realmd/operation.js:235
 msgid "User Password"
-msgstr ""
+msgstr "Contrasenya d'usuari"
 
 #: ../pkg/realmd/operation.html.h:6
 msgid "Domain Administrator Name"
-msgstr ""
+msgstr "Nom de l'administrador del domini"
 
 #: ../pkg/realmd/operation.html.h:7
 msgid "Domain Administrator Password"
-msgstr ""
+msgstr "Contrasenya de l'administrador del domini"
 
 #: ../pkg/realmd/operation.html.h:8 ../pkg/realmd/operation.js:236
 msgid "One Time Password"
@@ -1186,7 +1254,7 @@ msgstr ""
 
 #: ../pkg/realmd/operation.html.h:9
 msgid "This may take a while"
-msgstr ""
+msgstr "Això pot trigar una estona"
 
 #: ../pkg/realmd/operation.js:90 ../pkg/realmd/operation.js:95
 msgid "page-title"
@@ -1194,63 +1262,64 @@ msgstr ""
 
 #: ../pkg/realmd/operation.js:91
 msgid "Join"
-msgstr ""
+msgstr "Uneix-te"
 
 #: ../pkg/realmd/operation.js:96
 msgid "Leave"
-msgstr ""
+msgstr "Abandona"
 
 #: ../pkg/realmd/operation.js:143
 msgid "Domain $0 could not be contacted"
-msgstr ""
+msgstr "No s'ha pogut contactar amb el domini $0"
 
 #: ../pkg/realmd/operation.js:202 ../pkg/realmd/operation.js:208
 msgid "e.g. \"$0\""
-msgstr ""
+msgstr "p. ex. \"$0\""
 
 #: ../pkg/realmd/operation.js:234
 msgid "Administrator Password"
-msgstr ""
+msgstr "Contrasenya de l'administrador"
 
 #: ../pkg/realmd/operation.js:325
 msgid "More"
-msgstr ""
+msgstr "Més"
 
 #: ../pkg/realmd/operation.js:378
 msgid "Cannot join a domain because realmd is not available on this system"
 msgstr ""
+"No es pot unir a un domini perquè realmd no està disponible en aquest sistema"
 
 #: ../pkg/realmd/operation.js:397
 msgid "The user <b>$0</b> is not permitted to modify realms"
-msgstr ""
+msgstr "A l'usuari <b>$0</b> no se li permet modificar els reialmes"
 
 #: ../pkg/realmd/operation.js:414
 msgid "Join Domain"
-msgstr ""
+msgstr "Uneix-te al domini"
 
 #: ../pkg/shell/index.html.h:2
 msgid "Ooops!"
-msgstr ""
+msgstr "Ooops!"
 
 #: ../pkg/shell/index.html.h:3
 msgid "Display Language"
-msgstr ""
+msgstr "Idioma de la pantalla"
 
 #: ../pkg/shell/index.html.h:4
 msgid "About Cockpit"
-msgstr ""
+msgstr "Quant a Cockpit"
 
 #: ../pkg/shell/index.html.h:5
 msgid "Account Settings"
-msgstr ""
+msgstr "Paràmetres dels comptes"
 
 #: ../pkg/shell/index.html.h:6
 msgid "Drop extra privileges"
-msgstr ""
+msgstr "Treu els privilegis extres"
 
 #: ../pkg/shell/index.html.h:7
 msgid "Log out"
-msgstr ""
+msgstr "Tanca la sessió"
 
 #: ../pkg/shell/index.html.h:8
 msgid ""
@@ -1258,14 +1327,18 @@ msgid ""
 "              Cockpit is an interactive Linux server admin interface.\n"
 "            "
 msgstr ""
+"\n"
+"              Cockpit és una interfície d'administració de servidor Linux "
+"interactiva.\n"
+"            "
 
 #: ../pkg/shell/index.html.h:11 ../pkg/subscriptions/index.html.h:43
 msgid "Version"
-msgstr ""
+msgstr "Versió"
 
 #: ../pkg/shell/index.html.h:12
 msgid "Choose the language to be used in the application"
-msgstr ""
+msgstr "Seleccioneu l'idioma per utilitzar amb l'aplicació"
 
 #: ../pkg/shell/index.html.h:13 ../pkg/storaged/index.html.h:64
 #: ../pkg/subscriptions/index.html.h:34
@@ -1274,6 +1347,9 @@ msgid ""
 "              Cancel\n"
 "            "
 msgstr ""
+"\n"
+"              Cancel·la\n"
+"            "
 
 #: ../pkg/shell/index.html.h:16
 msgid ""
@@ -1281,10 +1357,13 @@ msgid ""
 "              Select\n"
 "            "
 msgstr ""
+"\n"
+"              Selecciona\n"
+"            "
 
 #: ../pkg/shell/index.html.h:19
 msgid "Disconnected"
-msgstr ""
+msgstr "Desconnectat"
 
 #: ../pkg/shell/index.html.h:20
 msgid ""
@@ -1292,6 +1371,9 @@ msgid ""
 "              Try to reconnect\n"
 "            "
 msgstr ""
+"\n"
+"              Prova a tornar a connectar\n"
+"            "
 
 #: ../pkg/shell/index.html.h:23
 msgid ""
@@ -1299,6 +1381,9 @@ msgid ""
 "              Log in again\n"
 "            "
 msgstr ""
+"\n"
+"              Torna a iniciar la sessió\n"
+"            "
 
 #: ../pkg/shell/index.html.h:26
 msgid ""
@@ -1306,6 +1391,9 @@ msgid ""
 "              Close\n"
 "            "
 msgstr ""
+"\n"
+"              Tanca\n"
+"            "
 
 #: ../pkg/shell/index.html.h:29
 msgid ""
@@ -1313,630 +1401,642 @@ msgid ""
 "                Tools\n"
 "              "
 msgstr ""
+"\n"
+"                Eines\n"
+"              "
 
 #: ../pkg/shell/index.html.h:32
+#, fuzzy
 msgid "Reconnect"
-msgstr ""
+msgstr "Desconnectat"
 
 #: ../pkg/shell/index.js:51
 msgid "Cockpit had an unexpected internal error. <br/><br/>"
-msgstr ""
+msgstr "Cockpit va tenir un error intern inesperat. <br/><br/>"
 
 #: ../pkg/shell/index.js:52
 msgid "You can try restarting Cockpit by pressing refresh in your browser. "
 msgstr ""
+"Podeu provar de tornar a iniciar Cockpit, en prémer refresca al vostre "
+"navegador. "
 
 #: ../pkg/shell/index.js:53
 msgid "The javascript console contains details about this error "
-msgstr ""
+msgstr "La consola javascript conté els detalls sobre aquest error."
 
 #: ../pkg/shell/index.js:54
 msgid "(<b>Ctrl-Shift-J</b> in most browsers)."
-msgstr ""
+msgstr "(<b>Ctrl-Maj-J</b> en la majoria dels navegadors)."
 
 #: ../pkg/shell/index.js:484
 msgid "Machines"
-msgstr ""
+msgstr "Màquines"
 
 #: ../pkg/shell/index.js:542
 msgid "The machine is restarting"
 msgstr ""
 
 #: ../pkg/shell/index.js:545
+#, fuzzy
 msgid "Connecting to the machine"
-msgstr ""
+msgstr "S'està connectant al Docker"
 
 #: ../pkg/shell/index.js:548
+#, fuzzy
 msgid "Couldn't connect to the machine"
-msgstr ""
+msgstr "No es va poder connectar al servidor Kubernetes"
 
 #: ../pkg/shell/index.js:550
+#, fuzzy
 msgid "Cannot connect to an unknown machine"
-msgstr ""
+msgstr "No es pot connectar a Docker"
 
 #: ../pkg/storaged/overview.js:150
 msgctxt "storage"
 msgid "Hard Disk"
-msgstr "Festplatte"
+msgstr "Disc dur"
 
 #: ../pkg/storaged/overview.js:152
 msgctxt "storage"
 msgid "Solid-State Disk"
-msgstr "Solid-State Platte"
+msgstr "Disc d'estat sòlid"
 
 #: ../pkg/storaged/overview.js:155 ../pkg/storaged/overview.js:157
 msgctxt "storage"
 msgid "Removable Drive"
-msgstr "Entfernbares Speichergerät"
+msgstr "Disc extraïble"
 
 #: ../pkg/storaged/overview.js:159
 msgctxt "storage"
 msgid "Optical Drive"
-msgstr "Optisches Speichergerät"
+msgstr "Unitat òptica"
 
 #: ../pkg/storaged/overview.js:162 ../pkg/storaged/overview.js:164
 msgctxt "storage"
 msgid "Drive"
-msgstr "Speichergerät"
+msgstr "Unitat"
 
 #: ../pkg/storaged/overview.js:223
 msgid "$0 Block Device"
-msgstr ""
+msgstr "Dispositiu de blocs $0"
 
 #: ../pkg/storaged/overview.js:385 ../pkg/storaged/index.html.h:26
 msgid "Create RAID Device"
-msgstr ""
+msgstr "Crea un dispositiu RAID"
 
 #: ../pkg/storaged/overview.js:391
 msgid "RAID Level"
-msgstr "RAID Ebene"
+msgstr "Nivell RAID"
 
 #: ../pkg/storaged/overview.js:393
 msgid "RAID 0 (Stripe)"
-msgstr "RAID 0 (Gestreift)"
+msgstr "RAID 0 (segmentació)"
 
 #: ../pkg/storaged/overview.js:394
 msgid "RAID 1 (Mirror)"
-msgstr "RAID 1 (Gespiegelt)"
+msgstr "RAID 1 (rèplica)"
 
 #: ../pkg/storaged/overview.js:395
 msgid "RAID 4 (Dedicated Parity)"
-msgstr "RAID 4 (Dedizierte Parität)"
+msgstr "RAID 4 (paritat dedicada)"
 
 #: ../pkg/storaged/overview.js:396
 msgid "RAID 5 (Distributed Parity)"
-msgstr "RAID 5 (Verteilte Parität)"
+msgstr "RAID 5 (paritat distribuïda)"
 
 #: ../pkg/storaged/overview.js:397
 msgid "RAID 6 (Double Distributed Parity)"
-msgstr "RAID 6 (Doppelt Verteilte Parität)"
+msgstr "RAID 5 (doble paritat distribuïda)"
 
 #: ../pkg/storaged/overview.js:398
 msgid "AID 10 (Stripe of Mirrors)"
-msgstr ""
+msgstr "RAID 10 (fraccionament de rèpliques)"
 
 #: ../pkg/storaged/overview.js:402
 msgid "Chunk Size"
-msgstr "Happengröße"
+msgstr "Mida del tros"
 
 #: ../pkg/storaged/overview.js:404
 msgid "4 KB"
-msgstr ""
+msgstr "4 KB"
 
 #: ../pkg/storaged/overview.js:405
 msgid "8 KB"
-msgstr ""
+msgstr "8 KB"
 
 #: ../pkg/storaged/overview.js:406
 msgid "16 KB"
-msgstr ""
+msgstr "16 KB"
 
 #: ../pkg/storaged/overview.js:407
 msgid "32 KB"
-msgstr ""
+msgstr "32 KB"
 
 #: ../pkg/storaged/overview.js:408
 msgid "64 KB"
-msgstr ""
+msgstr "64 KB"
 
 #: ../pkg/storaged/overview.js:409
 msgid "128 KB"
-msgstr ""
+msgstr "128 KB"
 
 #: ../pkg/storaged/overview.js:410
 msgid "512 KB"
-msgstr ""
+msgstr "512 KB"
 
 #: ../pkg/storaged/overview.js:411
 msgid "1 MB"
-msgstr ""
+msgstr "1 MB"
 
 #: ../pkg/storaged/overview.js:412
 msgid "2 MB"
-msgstr ""
+msgstr "2 MB"
 
 #: ../pkg/storaged/overview.js:416 ../pkg/storaged/overview.js:447
 #: ../pkg/storaged/details.js:520 ../pkg/storaged/details.js:801
 #: ../pkg/storaged/index.html.h:54
 msgid "Disks"
-msgstr "Platten"
+msgstr "Discs"
 
 #: ../pkg/storaged/overview.js:423
 msgid "At least $0 disks are needed."
-msgstr ""
+msgstr "Com a mínim es necessiten $0 discs."
 
 #: ../pkg/storaged/overview.js:429 ../pkg/storaged/overview.js:458
 #: ../pkg/storaged/details.js:648 ../pkg/storaged/details.js:681
 #: ../pkg/storaged/details.js:704 ../pkg/storaged/details.js:757
 #: ../pkg/storaged/details.js:786
 msgid "Create"
-msgstr ""
+msgstr "Crea"
 
 #: ../pkg/storaged/overview.js:440 ../pkg/storaged/index.html.h:27
 msgid "Create Volume Group"
-msgstr ""
+msgstr "Crea un grup de volums"
 
 #: ../pkg/storaged/overview.js:453 ../pkg/storaged/details.js:532
 #: ../pkg/storaged/details.js:816
 msgid "At least one disk is needed."
-msgstr ""
+msgstr "Com a mínim es necessita un disc."
 
 #. Translators: Used in "42.5 KB (42399 bytes)"
 #: ../pkg/storaged/utils.js:65
 msgctxt "format-bytes"
 msgid "bytes"
-msgstr "Bytes"
+msgstr "bytes"
 
 #: ../pkg/storaged/utils.js:106
 msgid "Name can not be empty."
-msgstr ""
+msgstr "El nom no pot estar en blanc."
 
 #: ../pkg/storaged/utils.js:108
 msgid "Name can not be longer than 127 characters."
-msgstr ""
+msgstr "El nom no pot ser superior als 127 caràcters."
 
 #: ../pkg/storaged/utils.js:112
 msgid "Name can not contain the character '$0'."
-msgstr ""
+msgstr "El nom no pot contenir el caràcter «$0»."
 
 #: ../pkg/storaged/utils.js:114
 msgid "Name can not contain whitespace."
-msgstr ""
+msgstr "El nom no pot contenir cap espai en blanc."
 
 #: ../pkg/storaged/utils.js:134
 msgid "$name (from $host)"
-msgstr ""
+msgstr "$name (del $host)"
 
 #: ../pkg/storaged/utils.js:143
 msgid "Pool for Thin Logical Volumes"
-msgstr ""
+msgstr "Agrupació per als volums lògics disgregats"
 
 #: ../pkg/storaged/utils.js:145
 msgid "Thin Logical Volume"
-msgstr ""
+msgstr "Volums lògics disgregats"
 
 #: ../pkg/storaged/utils.js:147
 msgid "Logical Volume (Snapshot)"
-msgstr ""
+msgstr "Volum lògic (instantània)"
 
 #: ../pkg/storaged/utils.js:149
 msgid "Logical Volume"
-msgstr ""
+msgstr "Volum lògic"
 
 #: ../pkg/storaged/utils.js:189
 msgid "<span>Encrypted Logical Volume of $0</span>"
-msgstr ""
+msgstr "<span>Volum lògic xifrat de $0</span>"
 
 #: ../pkg/storaged/utils.js:191
 msgid "<span>Encrypted Partition of $0</span>"
-msgstr ""
+msgstr "<span>Partició xifrada de $0</span>"
 
 #: ../pkg/storaged/utils.js:193
 msgid "<span>Logical Volume of $0</span>"
-msgstr ""
+msgstr "<span>Volum lògic de $0</span>"
 
 #: ../pkg/storaged/utils.js:195
 msgid "<span>Partition of $0</span>"
-msgstr ""
+msgstr "<span>Partició de $0</span>"
 
 #: ../pkg/storaged/utils.js:197
 msgid "<span>Encrypted $0</span>"
-msgstr ""
+msgstr "<span>Xifrat $0</span>"
 
 #: ../pkg/storaged/utils.js:210
 msgid "RAID Device $0"
-msgstr ""
+msgstr "Dispositiu RAID $0"
 
 #: ../pkg/storaged/utils.js:216
 msgid "Volume Group $0"
-msgstr ""
+msgstr "Grup de volums $0"
 
 #: ../pkg/storaged/details.js:81
 msgid "Device $0 is mounted on $1"
-msgstr ""
+msgstr "El dispositiu $0 està muntat a $1"
 
 #: ../pkg/storaged/details.js:87
 msgid "Device $0 is a member of RAID Array $1"
-msgstr ""
+msgstr "El dispositiu $0 és un membre de la matriu RAID $1"
 
 #: ../pkg/storaged/details.js:93
 msgid "Device $0 is a physical volume of $1"
-msgstr ""
+msgstr "El dispositiu $0 és un volum físic de $1"
 
 #: ../pkg/storaged/details.js:109
 msgid "Create partition on $0"
-msgstr ""
+msgstr "Crea una partició a $0"
 
 #: ../pkg/storaged/details.js:111
 msgid "Format $0"
-msgstr ""
+msgstr "Formata $0"
 
 #: ../pkg/storaged/details.js:125 ../pkg/storaged/details.js:585
 #: ../pkg/storaged/details.js:640 ../pkg/storaged/details.js:676
 #: ../pkg/storaged/details.js:752 ../pkg/storaged/details.js:781
 #: ../pkg/storaged/index.html.h:14
 msgid "Size"
-msgstr ""
+msgstr "Mida"
 
 #: ../pkg/storaged/details.js:133
 msgid "Size must be specified."
-msgstr ""
+msgstr "S'ha d'especificar la mida."
 
 #: ../pkg/storaged/details.js:135
 msgid "Size can not be zero."
-msgstr ""
+msgstr "La mida no pot ser 0."
 
 #: ../pkg/storaged/details.js:139 ../pkg/storaged/details.js:288
 msgid "Erase"
-msgstr "Säubern"
+msgstr "Esborra"
 
 #: ../pkg/storaged/details.js:141 ../pkg/storaged/details.js:290
 msgid "Don't overwrite existing data"
-msgstr ""
+msgstr "No sobreescriguis les dades existents"
 
 #: ../pkg/storaged/details.js:142 ../pkg/storaged/details.js:291
 msgid "Overwrite existing data with zeros"
-msgstr ""
+msgstr "Sobreescriu les dades existents amb zeros"
 
 #: ../pkg/storaged/details.js:146
 msgid "Type"
-msgstr "Typ"
+msgstr "Tipus"
 
 #: ../pkg/storaged/details.js:148
 msgid "XFS - Red Hat Enterprise Linux 7 default"
-msgstr ""
+msgstr "XFS - per defecte Red Hat Enterprise Linux 7"
 
 #: ../pkg/storaged/details.js:149
 msgid "ext4 - Red Hat Enterprise Linux 6 default"
-msgstr ""
+msgstr "ext4 - per defecte a Red Hat Enterprise Linux 6"
 
 #: ../pkg/storaged/details.js:150
 msgid "Encrypted XFS (LUKS)"
-msgstr "Verschlüsseltes XFS (LUKS)"
+msgstr "XFS xifrat (LUKS)"
 
 #: ../pkg/storaged/details.js:151
 msgid "Encrypted EXT4 (LUKS)"
-msgstr "Verschlüsseltes EXT4 (LUKS)"
+msgstr "EXT4 xifrat (LUKS)"
 
 #: ../pkg/storaged/details.js:152
 msgid "VFAT - Compatible with all systems and devices"
-msgstr ""
+msgstr "VFAT - Compatible amb tots els sistemes i dispositius"
 
 #: ../pkg/storaged/details.js:153
 msgid "NTFS - Compatible with most systems"
-msgstr ""
+msgstr "NTFS - Compatible amb la majoria dels sistemes"
 
 #: ../pkg/storaged/details.js:154
 msgid "Extended Partition"
-msgstr "Erweiterte Partition"
+msgstr "Partició estesa"
 
 #: ../pkg/storaged/details.js:157
 msgid "No Filesystem"
-msgstr ""
+msgstr "Sense sistema de fitxers"
 
 #: ../pkg/storaged/details.js:158
 msgid "Custom (Enter filesystem type)"
-msgstr ""
+msgstr "Personalitzat (introduïu el tipus del sistema de fitxers)"
 
 #: ../pkg/storaged/details.js:166
 msgid "Filesystem type"
-msgstr ""
+msgstr "Tipus de sistema de fitxers"
 
 #: ../pkg/storaged/details.js:172 ../pkg/storaged/details.js:425
 msgid "Passphrase"
-msgstr "Passwort"
+msgstr "Contrasenya"
 
 #: ../pkg/storaged/details.js:175
 msgid "Passphrase can not be empty"
-msgstr ""
+msgstr "La contrasenya no pot estar en blanc"
 
 #: ../pkg/storaged/details.js:180
 msgid "Confirm passphrase"
-msgstr ""
+msgstr "Confirmació de la contrasenya"
 
 #: ../pkg/storaged/details.js:183
 msgid "Passphrases do not match"
-msgstr ""
+msgstr "Les contrasenyes no coincideixen"
 
 #: ../pkg/storaged/details.js:188
 msgid "Store passphrase"
-msgstr ""
+msgstr "Emmagatzema la contrasenya"
 
 #: ../pkg/storaged/details.js:192 ../pkg/storaged/details.js:473
 #: ../pkg/storaged/details.js:962
 msgid "Encryption Options"
-msgstr "Verschlüsselungsoptionen"
+msgstr "Opcions de xifrat"
 
 #: ../pkg/storaged/details.js:196 ../pkg/storaged/details.js:382
 msgid "Mounting"
-msgstr ""
+msgstr "S'està muntant"
 
 #: ../pkg/storaged/details.js:198 ../pkg/storaged/details.js:384
 #: ../pkg/subscriptions/index.html.h:26
 msgid "Default"
-msgstr ""
+msgstr "Predeterminat"
 
 #: ../pkg/storaged/details.js:199 ../pkg/storaged/details.js:385
 msgid "Custom"
-msgstr ""
+msgstr "Personalitzat"
 
 #: ../pkg/storaged/details.js:204 ../pkg/storaged/details.js:389
 #: ../pkg/storaged/index.html.h:13
 msgid "Mount Point"
-msgstr "Einhängestelle"
+msgstr "Punt de muntatge"
 
 #: ../pkg/storaged/details.js:210 ../pkg/storaged/details.js:396
 msgid "Mount Options"
-msgstr "Einhängoptionen"
+msgstr "Opcions de muntatge"
 
 #: ../pkg/storaged/details.js:217
 msgid "Create partition"
-msgstr ""
+msgstr "Crea una partició"
 
 #: ../pkg/storaged/details.js:217 ../pkg/storaged/details.js:306
 #: ../pkg/storaged/details.js:989 ../pkg/storaged/details.js:1457
 msgid "Format"
-msgstr "Formatieren"
+msgstr "Format"
 
 #: ../pkg/storaged/details.js:219
 msgid "Formatting a storage device will erase all data on it."
 msgstr ""
+"La formatació d'un dispositiu d'emmagatzematge eliminarà totes les dades "
+"contingudes."
 
 #: ../pkg/storaged/details.js:284
 msgid "Format Disk $0"
-msgstr ""
+msgstr "Formata el disc $0"
 
 #: ../pkg/storaged/details.js:295
 msgid "Partitioning"
-msgstr "Partitionierung"
+msgstr "Particionatge"
 
 #: ../pkg/storaged/details.js:297
 msgid "Compatible with all systems and devices (MBR)"
-msgstr ""
+msgstr "Compatible amb tots els sistemes i dispositius (MBR)"
 
 #: ../pkg/storaged/details.js:298
 msgid "Compatible with modern system and hard disks > 2TB (GPT)"
-msgstr ""
+msgstr "Compatible amb els sistemes moderns i els discs durs > 2TB (GPT)"
 
 #: ../pkg/storaged/details.js:301
 msgid "No partitioning"
-msgstr ""
+msgstr "Sense particionatge"
 
 #: ../pkg/storaged/details.js:307
 msgid "Formatting a disk will erase all data on it."
-msgstr ""
+msgstr "La formatació d'un disc eliminarà totes les dades contingudes."
 
 #: ../pkg/storaged/details.js:375 ../pkg/storaged/details.js:956
 msgid "Filesystem Options"
-msgstr "Dateisystemoptionen"
+msgstr "Opcions del sistema de fitxers"
 
 #: ../pkg/storaged/details.js:404 ../pkg/storaged/details.js:485
 msgid "Apply"
-msgstr ""
+msgstr "Aplica"
 
 #: ../pkg/storaged/details.js:422 ../pkg/storaged/details.js:429
 #: ../pkg/storaged/details.js:961
 msgid "Unlock"
-msgstr "Öffnen"
+msgstr "Desbloqueja"
 
 #: ../pkg/storaged/details.js:476
 msgid "Stored Passphrase"
-msgstr "Gespeichertes Passwort"
+msgstr "Contrasenya emmagatzemada"
 
 #: ../pkg/storaged/details.js:480
 msgid "Options"
-msgstr "Einstellungen"
+msgstr "Opcions"
 
 #: ../pkg/storaged/details.js:517 ../pkg/storaged/details.js:798
 msgid "Add Disks"
-msgstr ""
+msgstr "Afegeix discs"
 
 #: ../pkg/storaged/details.js:564
 msgid "Deleting a RAID device will erase all data on it."
-msgstr ""
+msgstr "L'eliminació d'un dispositiu RAID n'eliminarà totes les dades."
 
 #: ../pkg/storaged/details.js:582
 msgid "Resize Logical Volume"
-msgstr ""
+msgstr "Redimensiona el volum lògic"
 
 #: ../pkg/storaged/details.js:590
 msgid "Resize Filesystem"
-msgstr ""
+msgstr "Redimensiona el sistema de fitxers"
 
 #: ../pkg/storaged/details.js:598 ../pkg/storaged/details.js:966
 msgid "Resize"
-msgstr ""
+msgstr "Redimensiona"
 
 #: ../pkg/storaged/details.js:613
 msgid "Renamee Logical Volume"
-msgstr ""
+msgstr "Reanomena el volum lògic"
 
 #: ../pkg/storaged/details.js:621 ../pkg/storaged/details.js:967
 #: ../pkg/storaged/details.js:1617
 msgid "Rename"
-msgstr ""
+msgstr "Reanomena"
 
 #: ../pkg/storaged/details.js:633 ../pkg/storaged/details.js:971
 msgid "Create Snapshot"
-msgstr ""
+msgstr "Crea una instantània"
 
 #: ../pkg/storaged/details.js:669 ../pkg/storaged/details.js:983
 msgid "Create Thin Volume"
-msgstr ""
+msgstr "Crea un volum disgregat"
 
 #: ../pkg/storaged/details.js:695
 msgid "Rename Volume Group"
-msgstr ""
+msgstr "Reanomena un grup de volums"
 
 #: ../pkg/storaged/details.js:726
 msgid "Deleting a volume group will erase all data on it."
 msgstr ""
+"L'eliminació d'un grup de volums eliminarà totes les dades contingudes."
 
 #: ../pkg/storaged/details.js:745
 msgid "Create Plain Volume"
-msgstr ""
+msgstr "Crea un volum pla"
 
 #: ../pkg/storaged/details.js:765
 msgid "Sorry"
-msgstr ""
+msgstr "Ho sentim"
 
 #: ../pkg/storaged/details.js:774 ../pkg/storaged/details.js:1558
 msgid "Create Pool for Thin Logical Volumes"
-msgstr ""
+msgstr "Crea una agrupació per als volums lògics disgregats"
 
 #: ../pkg/storaged/details.js:874
 msgid "Deleting a logical volume will delete all data in it."
-msgstr ""
+msgstr "L'eliminació d'un volum lògic n'eliminarà totes les dades."
 
 #: ../pkg/storaged/details.js:877
 msgid "Deleting a partition will delete all data in it."
-msgstr ""
+msgstr "L'eliminació d'una partició eliminarà totes les dades contingudes."
 
 #: ../pkg/storaged/details.js:918 ../pkg/storaged/devices.js:109
 #: ../pkg/systemd/services.html.h:13 ../pkg/users/local.js:1113
 msgid "Error"
-msgstr "Fehler"
+msgstr "Error"
 
 #: ../pkg/storaged/details.js:954
 msgid "Mount"
-msgstr "Einhängen"
+msgstr "Munta"
 
 #: ../pkg/storaged/details.js:955
 msgid "Unmount"
-msgstr "Aushängen"
+msgstr "Desmunta"
 
 #: ../pkg/storaged/details.js:960
 msgid "Lock"
-msgstr "Schließen"
+msgstr "Bloqueja"
 
 #: ../pkg/storaged/details.js:974
 msgid "Activate"
-msgstr ""
+msgstr "Activa"
 
 #: ../pkg/storaged/details.js:977
 msgid "Deactivate"
-msgstr ""
+msgstr "Desactiva"
 
 #: ../pkg/storaged/details.js:1059
 msgctxt "storage-id-desc"
 msgid "$0 File System"
-msgstr ""
+msgstr "Sistema de fitxers $0"
 
 #: ../pkg/storaged/details.js:1062
 msgctxt "storage-id-desc"
 msgid "Linux MD-RAID Component"
-msgstr "Linux MD-RAID Komponente"
+msgstr "Component MD-RAID de Linux"
 
 #: ../pkg/storaged/details.js:1064
 msgctxt "storage-id-desc"
 msgid "LVM2 Physical Volume"
-msgstr "LVM2 Physikalischer Behälter"
+msgstr "Volum físic LVM2"
 
 #: ../pkg/storaged/details.js:1066
 msgctxt "storage-id-desc"
 msgid "RAID Member"
-msgstr "RAID Mitglied"
+msgstr "Membre RAID"
 
 #: ../pkg/storaged/details.js:1083
 msgctxt "storage-id-desc"
 msgid "LUKS Encrypted"
-msgstr "LUKS Verschlüsselt"
+msgstr "LUKS xifrat"
 
 #: ../pkg/storaged/details.js:1085
 msgctxt "storage-id-desc"
 msgid "Encrypted"
-msgstr "Verschlüsselt"
+msgstr "Xifrat"
 
 #: ../pkg/storaged/details.js:1089
 msgctxt "storage-id-desc"
 msgid "Swap Space"
-msgstr "Auslagerungsspeicher"
+msgstr "Espai d'intercanvi"
 
 #: ../pkg/storaged/details.js:1091
 msgctxt "storage-id-desc"
 msgid "Other Data"
-msgstr "Andere Daten"
+msgstr "Altres dades"
 
 #: ../pkg/storaged/details.js:1094
 msgctxt "storage-id-desc"
 msgid "Unrecognized Data"
-msgstr "Unerkannte Daten"
+msgstr "Dades no reconegudes"
 
 #: ../pkg/storaged/details.js:1099 ../pkg/storaged/details.js:1105
 msgid "$size $partition"
-msgstr ""
+msgstr "$size $partition"
 
 #: ../pkg/storaged/details.js:1116
 msgid "mounted on $0"
-msgstr ""
+msgstr "es va muntar a $0"
 
 #: ../pkg/storaged/details.js:1118
 msgid "not mounted"
-msgstr "nicht eingehängt"
+msgstr "no muntat"
 
 #: ../pkg/storaged/details.js:1122
 msgid "unlocked"
-msgstr "offen"
+msgstr "desbloquejat"
 
 #: ../pkg/storaged/details.js:1124
 msgid "locked"
-msgstr "verschlossen"
+msgstr "bloquejat"
 
 #: ../pkg/storaged/details.js:1193
 msgid "$0 Free Space for Logical Partitions"
-msgstr ""
+msgstr "$0 d'espai lliure per a les particions lògiques"
 
 #: ../pkg/storaged/details.js:1196
 msgid "$0 Free Space for Primary Partitions"
-msgstr ""
+msgstr "$0 d'espai lliure per a les particions primàries"
 
 #: ../pkg/storaged/details.js:1201
 msgid "$0 Free Space"
-msgstr ""
+msgstr "$0 d'espai lliure"
 
 #: ../pkg/storaged/details.js:1205
 msgid "Create Partition"
-msgstr ""
+msgstr "Crea una partició"
 
 #: ../pkg/storaged/details.js:1213
 msgid "$0 Extended Partition"
-msgstr ""
+msgstr "Partició estesa $0"
 
 #: ../pkg/storaged/details.js:1250
 msgid "Logical Partition"
-msgstr "Logische Partition"
+msgstr "Partició lògica"
 
 #: ../pkg/storaged/details.js:1252
 msgid "Primary Partition"
-msgstr "Primäre Partition"
+msgstr "Partició primària"
 
 #: ../pkg/storaged/details.js:1254
 msgid "Partition"
-msgstr "Partition"
+msgstr "Partició"
 
 #: ../pkg/storaged/details.js:1337 ../pkg/storaged/details.js:1481
 msgid "Content"
-msgstr ""
+msgstr "Contingut"
 
 #: ../pkg/storaged/details.js:1354
 msgid "RAID 0"
@@ -1964,106 +2064,106 @@ msgstr "RAID 10"
 
 #: ../pkg/storaged/details.js:1360
 msgid "RAID ($0)"
-msgstr ""
+msgstr "RAID ($0)"
 
 #: ../pkg/storaged/details.js:1365
 msgid "$0 Disks"
-msgstr ""
+msgstr "$0 discs"
 
 #: ../pkg/storaged/details.js:1367
 msgid "$0 Chunk Size"
-msgstr ""
+msgstr "$0 de mida del tros"
 
 #: ../pkg/storaged/details.js:1378
 msgid "Data Scrubbing"
-msgstr "Am Daten Schrubben"
+msgstr "Tractament de neteja de les dades"
 
 #: ../pkg/storaged/details.js:1379
 msgid "Data Scrubbing and Repair"
-msgstr "Am Daten Schrubben und Reparieren"
+msgstr "Tractament de neteja i de correcció de les dades"
 
 #: ../pkg/storaged/details.js:1380
 msgid "Resyncing"
-msgstr "Am Synchronisieren"
+msgstr "En re-sincronització"
 
 #: ../pkg/storaged/details.js:1381
 msgid "Recovering "
-msgstr "Am Erholen"
+msgstr "En recuperació"
 
 #: ../pkg/storaged/details.js:1382
 msgid "Frozen"
-msgstr "Eingefroren"
+msgstr "Congelat"
 
 #: ../pkg/storaged/details.js:1389
 #, javascript-format
 msgid "$action, ${percent}% complete at $rate"
-msgstr ""
+msgstr "$action, ${percent}% completat de $rate"
 
 #: ../pkg/storaged/details.js:1393
 #, javascript-format
 msgid "$action, ${percent}% complete"
-msgstr ""
+msgstr "$action, ${percent}% completat"
 
 #: ../pkg/storaged/details.js:1398
 msgid ", $0 remaining"
-msgstr ""
+msgstr ", $0 restants"
 
 #: ../pkg/storaged/details.js:1415
 msgid "$0 disks are missing"
-msgstr ""
+msgstr "falten $0 discs"
 
 #: ../pkg/storaged/details.js:1416
 msgid "Not running"
-msgstr "Läuft nicht"
+msgstr "Sense execució"
 
 #: ../pkg/storaged/details.js:1435
 msgid "FAILED"
-msgstr "KAPUTT"
+msgstr "FALLAT"
 
 #: ../pkg/storaged/details.js:1436
 msgid "In Sync"
-msgstr "Synchron"
+msgstr "En sincronització"
 
 #: ../pkg/storaged/details.js:1437
 msgid "Spare"
-msgstr "Ersatz"
+msgstr "Recanvi"
 
 #: ../pkg/storaged/details.js:1437
 msgid "Recovering"
-msgstr "Am Erholen"
+msgstr "Recuperació"
 
 #: ../pkg/storaged/details.js:1438
 msgid "Write-mostly"
-msgstr "Hauptsächlich Schreiben"
+msgstr "Escriptura-majoritària"
 
 #: ../pkg/storaged/details.js:1439
 msgid "Blocked"
-msgstr "Gesperrt"
+msgstr "Bloquejat"
 
 #: ../pkg/storaged/details.js:1440
 msgid "Unknown ($0)"
-msgstr ""
+msgstr "Desconegut ($0)"
 
 #. <method>:<mode>
 #: ../pkg/storaged/details.js:1455 ../pkg/systemd/init.js:464
 msgid "Start"
-msgstr "Starten"
+msgstr "Inicia"
 
 #: ../pkg/storaged/details.js:1456 ../pkg/systemd/init.js:465
 msgid "Stop"
-msgstr "Stoppen"
+msgstr "Atura"
 
 #: ../pkg/storaged/details.js:1458
 msgid "Start Scrubbing"
-msgstr "Schrubben Starten"
+msgstr "Inicia el tractament de neteja"
 
 #: ../pkg/storaged/details.js:1459
 msgid "Stop Scrubbing"
-msgstr "Schrubben Stoppen"
+msgstr "Atura el tractament de neteja"
 
 #: ../pkg/storaged/details.js:1492
 msgid "$size $desc"
-msgstr ""
+msgstr "$size $desc"
 
 #: ../pkg/storaged/details.js:1508
 #, javascript-format
@@ -2076,51 +2176,51 @@ msgstr ""
 #. "unsupported".
 #: ../pkg/storaged/details.js:1528
 msgid "$size $desc<br/>($state)"
-msgstr ""
+msgstr "$size $desc<br/>($state)"
 
 #: ../pkg/storaged/details.js:1531
 msgid "active, but unsupported"
-msgstr ""
+msgstr "actiu, però no suportat"
 
 #: ../pkg/storaged/details.js:1531
 msgid "inactive"
-msgstr "Inaktiv"
+msgstr "inactiu"
 
 #: ../pkg/storaged/details.js:1550
 msgid "$0 Free Space for Logical Volumes"
-msgstr ""
+msgstr "$0 d'espai lliure per als volums lògics"
 
 #: ../pkg/storaged/details.js:1552
 msgid "Create Plain Logical Volume"
-msgstr ""
+msgstr "Crea un volum lògic pla"
 
 #: ../pkg/storaged/details.js:1555
 msgid "Create RAID Logical Volume"
-msgstr ""
+msgstr "Crea un volum lògic RAID"
 
 #: ../pkg/storaged/details.js:1598
 msgid "Remove"
-msgstr "Entfernen"
+msgstr "Treu"
 
 #: ../pkg/storaged/details.js:1599
 msgid "Empty"
-msgstr ""
+msgstr "Buida"
 
 #: ../pkg/storaged/details.js:1605
 msgid "$0, $1 free"
-msgstr ""
+msgstr "$0, $1 lliures"
 
 #: ../pkg/storaged/details.js:1630
 msgid "Logical Volumes"
-msgstr ""
+msgstr "Volums lògics"
 
 #: ../pkg/storaged/index.html.h:1
 msgid "Storage"
-msgstr ""
+msgstr "Emmagatzematge"
 
 #: ../pkg/storaged/index.html.h:2
 msgid "The \"storaged\" API is not available on this system."
-msgstr ""
+msgstr "L'API «storaged» no està disponible en aquest sistema."
 
 #: ../pkg/storaged/index.html.h:3
 msgid "Start Multipath"
@@ -2136,43 +2236,44 @@ msgstr ""
 
 #: ../pkg/storaged/index.html.h:7
 msgid "RAID Devices"
-msgstr ""
+msgstr "Dispositius RAID"
 
 #: ../pkg/storaged/index.html.h:8
 msgid "Volume Groups"
-msgstr ""
+msgstr "Grups de volums"
 
 #: ../pkg/storaged/index.html.h:9
 msgid "Drives"
-msgstr ""
+msgstr "Unitats"
 
 #: ../pkg/storaged/index.html.h:10
 msgid "Other Devices"
-msgstr "Andere Geräte"
+msgstr "Altres dispositius"
 
 #: ../pkg/storaged/index.html.h:11
 msgid "Filesystems"
-msgstr ""
+msgstr "Sistemes de fitxers"
 
 #: ../pkg/storaged/index.html.h:15
 msgid "Jobs"
-msgstr ""
+msgstr "Treballs"
 
 #: ../pkg/storaged/index.html.h:23
 msgid "Reading"
-msgstr ""
+msgstr "Lectura"
 
 #: ../pkg/storaged/index.html.h:24
 msgid "Writing"
-msgstr ""
+msgstr "Escriptura"
 
 #: ../pkg/storaged/index.html.h:25
+#, fuzzy
 msgid "Storage Logs"
-msgstr ""
+msgstr "Registre de l'emmagatzematge"
 
 #: ../pkg/storaged/index.html.h:28
 msgid "Drive"
-msgstr ""
+msgstr "Unitat"
 
 #: ../pkg/storaged/index.html.h:29
 msgid ""
@@ -2180,77 +2281,80 @@ msgid ""
 "          Format\n"
 "        "
 msgstr ""
+"\n"
+"          Formata\n"
+"        "
 
 #: ../pkg/storaged/index.html.h:32
 msgid "Block Device"
-msgstr ""
+msgstr "Dispositiu de blocs"
 
 #: ../pkg/storaged/index.html.h:33
 msgctxt "storage"
 msgid "Model"
-msgstr "Modell"
+msgstr "Model"
 
 #: ../pkg/storaged/index.html.h:34
 msgctxt "storage"
 msgid "Firmware Version"
-msgstr "Firmware Version"
+msgstr "Versió del microprogramari"
 
 #: ../pkg/storaged/index.html.h:35
 msgctxt "storage"
 msgid "Serial Number"
-msgstr "Seriennummer"
+msgstr "Número de sèrie"
 
 #: ../pkg/storaged/index.html.h:36
 msgctxt "storage"
 msgid "World Wide Name"
-msgstr "Weltweiter Name"
+msgstr "WWN (World Wide Name)"
 
 #: ../pkg/storaged/index.html.h:37
 msgctxt "storage"
 msgid "Capacity"
-msgstr "Kapazität"
+msgstr "Capacitat"
 
 #: ../pkg/storaged/index.html.h:38
 msgid "No media inserted"
-msgstr ""
+msgstr "Cap mitjà inserit"
 
 #: ../pkg/storaged/index.html.h:39
 msgctxt "storage"
 msgid "Assessment"
-msgstr "Beurteilung"
+msgstr "Avaluació"
 
 #: ../pkg/storaged/index.html.h:40
 msgid "DISK IS FAILING"
-msgstr ""
+msgstr "EL DISC ESTÀ FALLANT"
 
 #: ../pkg/storaged/index.html.h:41
 msgid "Disk is OK"
-msgstr ""
+msgstr "El disc està bé"
 
 #: ../pkg/storaged/index.html.h:42
 msgctxt "storage"
 msgid "Device File"
-msgstr "Gerätedatei"
+msgstr "Fitxer de dispositiu"
 
 #: ../pkg/storaged/index.html.h:43
 #, fuzzy
 msgctxt "storage"
 msgid "Multipath Devices"
-msgstr "Andere Geräte"
+msgstr "Altres dispositius"
 
 #: ../pkg/storaged/index.html.h:44
 msgid "RAID Device"
-msgstr ""
+msgstr "Dispositiu RAID"
 
 #: ../pkg/storaged/index.html.h:45
 msgctxt "storage"
 msgid "Device"
-msgstr "Gerät"
+msgstr "Dispositiu"
 
 #: ../pkg/storaged/index.html.h:46
 msgctxt "storage"
 msgid "Name"
-msgstr "Name"
+msgstr "Nom"
 
 #: ../pkg/storaged/index.html.h:47
 msgctxt "storage"
@@ -2260,21 +2364,21 @@ msgstr "UUID"
 #: ../pkg/storaged/index.html.h:48
 msgctxt "storage"
 msgid "RAID Level"
-msgstr "RAID Ebene"
+msgstr "Nivell RAID"
 
 #: ../pkg/storaged/index.html.h:49
 msgctxt "storage"
 msgid "Bitmap"
-msgstr "Bitmap"
+msgstr "Mapa de bits"
 
 #: ../pkg/storaged/index.html.h:52
 msgctxt "storage"
 msgid "State"
-msgstr "Status"
+msgstr "Estat"
 
 #: ../pkg/storaged/index.html.h:53
 msgid "ARRAY IS DEGRADED"
-msgstr "ANORDNUNG IST DEGRADIERT"
+msgstr "MATRIU DEGRADADA"
 
 #: ../pkg/storaged/index.html.h:55
 msgid ""
@@ -2282,14 +2386,17 @@ msgid ""
 "                  Remove\n"
 "                "
 msgstr ""
+"\n"
+"                  Treu\n"
+"                "
 
 #: ../pkg/storaged/index.html.h:58
 msgid "Volume Group"
-msgstr ""
+msgstr "Grup de volums"
 
 #: ../pkg/storaged/index.html.h:59
 msgid "Physical Volumes"
-msgstr ""
+msgstr "Volums físics"
 
 #: ../pkg/storaged/index.html.h:60
 msgid ""
@@ -2297,159 +2404,162 @@ msgid ""
 "          Add\n"
 "        "
 msgstr ""
+"\n"
+"          Afegeix\n"
+"        "
 
 #: ../pkg/storaged/index.html.h:63
 msgid "Storage Log"
-msgstr ""
+msgstr "Registre de l'emmagatzematge"
 
 #: ../pkg/storaged/jobs.js:105
 msgid "SMART self-test of $target"
-msgstr ""
+msgstr "Autotest SMART de $target."
 
 #: ../pkg/storaged/jobs.js:106
 msgid "Ejecting $target"
-msgstr ""
+msgstr "S'està expulsant $target"
 
 #: ../pkg/storaged/jobs.js:107
 msgid "Unlocking $target"
-msgstr ""
+msgstr "S'està desbloquejant $target"
 
 #: ../pkg/storaged/jobs.js:108
 msgid "Locking $target"
-msgstr ""
+msgstr "S'està bloquejant $target"
 
 #: ../pkg/storaged/jobs.js:109 ../pkg/storaged/jobs.js:114
 #: ../pkg/storaged/jobs.js:118
 msgid "Modifying $target"
-msgstr ""
+msgstr "S'està modificant $target"
 
 #: ../pkg/storaged/jobs.js:110
 msgid "Starting swapspace $target"
-msgstr ""
+msgstr "S'està iniciant l'espai d'intercanvi $target"
 
 #: ../pkg/storaged/jobs.js:111
 msgid "Stopping swapspace $target"
-msgstr ""
+msgstr "S'està aturant l'espai d'intercanvi $target"
 
 #: ../pkg/storaged/jobs.js:112
 msgid "Mounting $target"
-msgstr ""
+msgstr "S'està muntat $target"
 
 #: ../pkg/storaged/jobs.js:113
 msgid "Unmounting $target"
-msgstr ""
+msgstr "S'està desmuntat $target"
 
 #: ../pkg/storaged/jobs.js:115
 msgid "Erasing $target"
-msgstr ""
+msgstr "S'està esborrant $target"
 
 #: ../pkg/storaged/jobs.js:116
 msgid "Creating filesystem on $target"
-msgstr ""
+msgstr "S'està creat el sistema de fitxers a $target"
 
 #: ../pkg/storaged/jobs.js:117
 msgid "Setting up loop device $target"
-msgstr ""
+msgstr "S'està preparant el dispositiu de bucles $target"
 
 #: ../pkg/storaged/jobs.js:119 ../pkg/storaged/jobs.js:129
 msgid "Deleting $target"
-msgstr ""
+msgstr "S'està eliminant $target"
 
 #: ../pkg/storaged/jobs.js:120
 msgid "Creating partition $target"
-msgstr ""
+msgstr "S'està creant la partició $target"
 
 #: ../pkg/storaged/jobs.js:121
 msgid "Cleaning up for $target"
-msgstr ""
+msgstr "Neteja de $target"
 
 #: ../pkg/storaged/jobs.js:122
 msgid "Securely erasing $target"
-msgstr ""
+msgstr "S'està eliminant de forma segura $target"
 
 #: ../pkg/storaged/jobs.js:123
 msgid "Very securely erasing $target"
-msgstr ""
+msgstr "S'està eliminant de forma molt segura $target"
 
 #: ../pkg/storaged/jobs.js:124
 msgid "Stopping RAID Device $target"
-msgstr ""
+msgstr "S'està aturant el dispositiu RAID $target"
 
 #: ../pkg/storaged/jobs.js:125
 msgid "Starting RAID Device $target"
-msgstr ""
+msgstr "S'està iniciant el dispositiu RAID $target"
 
 #: ../pkg/storaged/jobs.js:126
 msgid "Marking $target as faulty"
-msgstr ""
+msgstr "S'està ficant $target com a defectuós"
 
 #: ../pkg/storaged/jobs.js:127
 msgid "Removing $target from RAID Device"
-msgstr ""
+msgstr "S'està eliminant $target  del dispositiu RAID"
 
 #: ../pkg/storaged/jobs.js:128
 msgid "Creating RAID Device $target"
-msgstr ""
+msgstr "S'està creant el dispositiu RAID $target"
 
 #: ../pkg/storaged/jobs.js:130
 msgid "Activating $target"
-msgstr ""
+msgstr "S'està activant $target"
 
 #: ../pkg/storaged/jobs.js:131
 msgid "Deactivating $target"
-msgstr ""
+msgstr "S'està desactivant $target"
 
 #: ../pkg/storaged/jobs.js:132
 msgid "Creating snapshot of $target"
-msgstr ""
+msgstr "S'està creant una instantània de $target"
 
 #: ../pkg/storaged/jobs.js:133
 msgid "Creating volume group $target"
-msgstr ""
+msgstr "S'està creant el grup de volums $target"
 
 #: ../pkg/storaged/jobs.js:134
 msgid "Deleting volume group $target"
-msgstr ""
+msgstr "S'està eliminant el grup de volums $target"
 
 #: ../pkg/storaged/jobs.js:135
 msgid "Adding physical volume to $target"
-msgstr ""
+msgstr "S'està afegint el volum físic a $target"
 
 #: ../pkg/storaged/jobs.js:136
 msgid "Removing physical volume from $target"
-msgstr ""
+msgstr "S'està eliminant el volum físic de $target"
 
 #: ../pkg/storaged/jobs.js:137
 msgid "Emptying $target"
-msgstr ""
+msgstr "S'està buidant $target"
 
 #: ../pkg/storaged/jobs.js:138
 msgid "Creating logical volume $target"
-msgstr ""
+msgstr "S'està creant el volum lògic $target"
 
 #: ../pkg/storaged/jobs.js:139
 msgid "Renaming $target"
-msgstr ""
+msgstr "S'està reanomenant $target"
 
 #: ../pkg/storaged/jobs.js:140
 msgid "Resizing $target"
-msgstr ""
+msgstr "S'està redimensionant $target"
 
 #: ../pkg/storaged/jobs.js:146
 msgid "Operation '$operation' on $target"
-msgstr ""
+msgstr "L'operació '$operation' en $target"
 
 #: ../pkg/storaged/jobs.js:160
 msgid "unknown target"
-msgstr ""
+msgstr "objectiu desconegut"
 
 #: ../pkg/storaged/permissions.js:59
 msgid "The user <b>$0</b> is not permitted to manage storage"
-msgstr ""
+msgstr "A l'usuari <b>$0</b> no se li permet gestionar l'emmagatzematge"
 
 #: ../pkg/subscriptions/index.html.h:1
 msgid "Subscriptions"
-msgstr ""
+msgstr "Subscripcions"
 
 #: ../pkg/subscriptions/index.html.h:2
 msgid ""
@@ -2457,6 +2567,9 @@ msgid ""
 "          System successfully subscribed.\n"
 "        "
 msgstr ""
+"\n"
+"          El sistema s'ha subscrit correctament.\n"
+"        "
 
 #: ../pkg/subscriptions/index.html.h:5
 msgid ""
@@ -2464,6 +2577,9 @@ msgid ""
 "          You will now receive software updates.\n"
 "        "
 msgstr ""
+"\n"
+"          No rebreu les actualitzacions de programari.\n"
+"        "
 
 #: ../pkg/subscriptions/index.html.h:8
 msgid ""
@@ -2472,6 +2588,10 @@ msgid ""
 "subscription-manager is installed.\n"
 "      "
 msgstr ""
+"\n"
+"        Per gestionar les subscripcions d'aquest sistema, si us plau, "
+"comproveu que subscription-manager estigui instal·lat.\n"
+"      "
 
 #: ../pkg/subscriptions/index.html.h:11
 msgid ""
@@ -2480,6 +2600,10 @@ msgid ""
 "system.\n"
 "      "
 msgstr ""
+"\n"
+"        L'usuari actual no està autoritzat a gestionar les subscripcions en "
+"aquest sistema.\n"
+"      "
 
 #: ../pkg/subscriptions/index.html.h:14
 msgid ""
@@ -2488,6 +2612,10 @@ msgid ""
 "registered.\n"
 "      "
 msgstr ""
+"\n"
+"        Perquè el sistema pugui rebre les actualitzacions, el sistema ha "
+"d'estar registrat.\n"
+"      "
 
 #: ../pkg/subscriptions/index.html.h:17
 msgid ""
@@ -2495,18 +2623,21 @@ msgid ""
 "        Register system\n"
 "      "
 msgstr ""
+"\n"
+"        Registra el sistema\n"
+"      "
 
 #: ../pkg/subscriptions/index.html.h:20
 msgid "Installed Products"
-msgstr ""
+msgstr "Productes instal·lats"
 
 #: ../pkg/subscriptions/index.html.h:21
 msgid "No subscriptions on the system."
-msgstr ""
+msgstr "No hi ha subscripcions al sistema."
 
 #: ../pkg/subscriptions/index.html.h:22
 msgid "Register system"
-msgstr ""
+msgstr "Registra el sistema"
 
 #: ../pkg/subscriptions/index.html.h:23
 msgid ""
@@ -2514,10 +2645,13 @@ msgid ""
 "                    URL\n"
 "                  "
 msgstr ""
+"\n"
+"                    URL\n"
+"                  "
 
 #: ../pkg/subscriptions/index.html.h:27
 msgid "Custom URL"
-msgstr ""
+msgstr "URL personalitzat"
 
 #: ../pkg/subscriptions/index.html.h:28
 msgid ""
@@ -2525,6 +2659,9 @@ msgid ""
 "                    Login\n"
 "                  "
 msgstr ""
+"\n"
+"                    Usuari\n"
+"                  "
 
 #: ../pkg/subscriptions/index.html.h:31
 msgid ""
@@ -2532,6 +2669,9 @@ msgid ""
 "                    Password\n"
 "                  "
 msgstr ""
+"\n"
+"                    Contrasenya\n"
+"                  "
 
 #: ../pkg/subscriptions/index.html.h:37
 msgid ""
@@ -2539,183 +2679,201 @@ msgid ""
 "              Register\n"
 "            "
 msgstr ""
+"\n"
+"              Registra\n"
+"            "
 
 #: ../pkg/subscriptions/index.html.h:40
 msgid "Installed Product ({{product_name}})"
-msgstr ""
+msgstr "Producte instal·lat ({{product_name}})"
 
 #: ../pkg/subscriptions/index.html.h:41
 msgid "Product name"
-msgstr ""
+msgstr "Nom del producte"
 
 #: ../pkg/subscriptions/index.html.h:42
 msgid "Product ID"
-msgstr ""
+msgstr "Id. del producte"
 
 #: ../pkg/subscriptions/index.html.h:44
 msgid "Architecture"
-msgstr ""
+msgstr "Arquitectura"
 
 #: ../pkg/subscriptions/index.html.h:46
 msgid "Starts"
-msgstr ""
+msgstr "Comença"
 
 #: ../pkg/subscriptions/index.html.h:47
 msgid "Ends"
-msgstr ""
+msgstr "Acaba"
 
 #: ../pkg/subscriptions/subscriptions.js:50
 msgid "Login cannot be empty"
-msgstr ""
+msgstr "L'usuari no pot estar en blanc"
 
 #: ../pkg/subscriptions/subscriptions.js:56
 msgid "Password cannot be empty"
-msgstr ""
+msgstr "La contrasenya no pot estar en blanc"
 
 #: ../pkg/subscriptions/subscriptions.js:394
 msgid "Registering system..."
-msgstr ""
+msgstr "S'està registrant el sistema..."
 
 #: ../pkg/subscriptions/subscriptions.js:453
 msgid "Failed to register the system"
-msgstr ""
+msgstr "Ha fallat el registre del sistema"
 
 #: ../pkg/subscriptions/subscriptions.js:472
 msgid ""
 "Unable to register at this time because a call to subscription manager is "
 "already in progress. Please try again."
 msgstr ""
+"No es pot registrar el sistema en aquest moment perquè encara hi ha en "
+"progrés una crida al gestor de les subscripcions . Si us plau, torneu-ho a "
+"intentar."
 
 #: ../pkg/subscriptions/subscriptions.js:496
 msgid "Invalid login or password."
-msgstr ""
+msgstr "El nom d'usuari o la contrasenya no són vàlids. "
 
 #: ../pkg/systemd/index.html.h:2
 msgid "Power Options"
-msgstr ""
+msgstr "Opcions d'alimentació"
 
 #: ../pkg/systemd/index.html.h:3
 msgid "Store performance data"
-msgstr ""
+msgstr "Emmagatzema les dades del rendiment"
 
 #: ../pkg/systemd/index.html.h:6
 msgid "Pretty Host Name"
-msgstr ""
+msgstr "Nom de l'amfitrió de nivell  superior"
 
 #: ../pkg/systemd/index.html.h:7
 msgid "Real Host Name"
-msgstr ""
+msgstr "Nom real de l'amfitrió"
 
 #: ../pkg/systemd/index.html.h:8
 msgid "Set time"
-msgstr ""
+msgstr "Estableix l'hora"
 
 #: ../pkg/systemd/index.html.h:9
 msgid "Time Zone"
-msgstr ""
+msgstr "Zona horària"
 
 #: ../pkg/systemd/index.html.h:10
+#, fuzzy
 msgid ""
 "\n"
 "                                    Invalid time zone\n"
 "                                "
 msgstr ""
+"\n"
+"                     zona horària no vàlida\n"
+"                  "
 
 #: ../pkg/systemd/index.html.h:13
+#, fuzzy
 msgid ""
 "\n"
 "                        Cancel\n"
 "                    "
 msgstr ""
+"\n"
+"                    Usuari\n"
+"                  "
 
 #: ../pkg/systemd/index.html.h:16
+#, fuzzy
 msgid ""
 "\n"
 "                    "
 msgstr ""
+"\n"
+"            Executa\n"
+"          "
 
 #: ../pkg/systemd/index.html.h:18
 msgid "Delay"
-msgstr "Verzögerung"
+msgstr "Retard"
 
 #: ../pkg/systemd/host.js:47
 msgid "The user <b>$0</b> is not permitted to modify hostnames"
-msgstr ""
+msgstr "A l'usuari <b>$0</b> no se li permet modificar el noms dels amfitrions"
 
 #: ../pkg/systemd/host.js:172 ../pkg/systemd/host.js:862
 #: ../pkg/systemd/host.js:864 ../pkg/systemd/init.js:466
 msgid "Restart"
-msgstr "Neustarten"
+msgstr "Reinicia"
 
 #: ../pkg/systemd/host.js:173 ../pkg/systemd/host.js:858
 #: ../pkg/systemd/host.js:860
 msgid "Shutdown"
-msgstr ""
+msgstr "Atura"
 
 #: ../pkg/systemd/host.js:440
 msgid "Set Host name"
-msgstr ""
+msgstr "Estableix el nom de l'amfitrió"
 
 #: ../pkg/systemd/host.js:771
 msgid "Invalid date format and invalid time format"
-msgstr ""
+msgstr "format no vàlid de la data i l'hora"
 
 #: ../pkg/systemd/host.js:773
 msgid "Invalid time format"
-msgstr ""
+msgstr "format d'hora no vàlid"
 
 #: ../pkg/systemd/host.js:775
 msgid "Invalid date format"
-msgstr ""
+msgstr "format de data no vàlid"
 
 #: ../pkg/systemd/host.js:836
 msgid "1 Minute"
-msgstr ""
+msgstr "1 minut"
 
 #: ../pkg/systemd/host.js:837
 msgid "5 Minutes"
-msgstr ""
+msgstr "5 minuts"
 
 #: ../pkg/systemd/host.js:838
 msgid "20 Minutes"
-msgstr ""
+msgstr "20 minuts"
 
 #: ../pkg/systemd/host.js:839
 msgid "40 Minutes"
-msgstr ""
+msgstr "40 minuts"
 
 #: ../pkg/systemd/host.js:840
 msgid "60 Minutes"
-msgstr ""
+msgstr "60 minuts"
 
 #: ../pkg/systemd/host.js:841
 msgid "No Delay"
-msgstr ""
+msgstr "Sense retard"
 
 #: ../pkg/systemd/host.js:842
 msgid "Specific Time"
-msgstr ""
+msgstr "Temps específic"
 
 #: ../pkg/systemd/host.js:852
 msgid "Message to logged in users"
-msgstr ""
+msgstr "Missatge als usuaris que hagin iniciat la sessió"
 
 #: ../pkg/systemd/host.js:932
 msgctxt "page-title"
 msgid "CPU Status"
-msgstr "CPU Status"
+msgstr "Estat de la CPU"
 
 #: ../pkg/systemd/host.js:965
 msgid "I/O Wait"
-msgstr ""
+msgstr "Espera d'E/S"
 
 #: ../pkg/systemd/host.js:966
 msgid "Kernel"
-msgstr ""
+msgstr "Nucli del sistema operatiu"
 
 #: ../pkg/systemd/host.js:967
 msgid "User"
-msgstr ""
+msgstr "Usuari"
 
 #: ../pkg/systemd/host.js:968
 msgid "Nice"
@@ -2724,233 +2882,236 @@ msgstr ""
 #: ../pkg/systemd/host.js:1018
 msgctxt "page-title"
 msgid "Memory"
-msgstr "Speicher"
+msgstr "Memòria"
 
 #: ../pkg/systemd/host.js:1052
 msgid "Swap Used"
-msgstr ""
+msgstr "Intercanvi utilitzat"
 
 #: ../pkg/systemd/host.js:1053
 msgid "Cached"
-msgstr ""
+msgstr "Emmagatzemat temporalment"
 
 #: ../pkg/systemd/host.js:1054
 msgid "Used"
-msgstr ""
+msgstr "Utilitzat"
 
 #: ../pkg/systemd/host.js:1055
 msgid "Free"
-msgstr ""
+msgstr "Lliure"
 
 #: ../pkg/systemd/services.html.h:1
 msgid "Services"
-msgstr ""
+msgstr "Serveis"
 
 #: ../pkg/systemd/services.html.h:2
 msgid "Targets"
-msgstr ""
+msgstr "Objectius"
 
 #: ../pkg/systemd/services.html.h:3
 msgid "System Services"
-msgstr "System Dienste"
+msgstr "Serveis del sistema"
 
 #: ../pkg/systemd/services.html.h:4
 msgid "Sockets"
-msgstr ""
+msgstr "Sockets"
 
 #: ../pkg/systemd/services.html.h:5
 msgid "Timers"
-msgstr ""
+msgstr "Rellotges"
 
 #: ../pkg/systemd/services.html.h:6
 msgid "Paths"
-msgstr ""
+msgstr "Camins"
 
 #: ../pkg/systemd/services.html.h:7
 msgid "Instantiate"
-msgstr "Instanzieren"
+msgstr "Instancia"
 
 #: ../pkg/systemd/services.html.h:8
 msgid "Service Journal"
-msgstr ""
+msgstr "Publicacions del servei"
 
 #: ../pkg/systemd/services.html.h:9
 msgid "Note"
-msgstr ""
+msgstr "Nota"
 
 #: ../pkg/systemd/services.html.h:10
 msgid ""
 "This unit is not designed to be enabled explicitly.\n"
 "          "
 msgstr ""
+"Aquesta unitat no està dissenyada perquè s'habiliti de forma explícita.\n"
+"          "
 
 #: ../pkg/systemd/init.js:251
 msgid "Enabled"
-msgstr ""
+msgstr "Habilitat"
 
 #: ../pkg/systemd/init.js:253
 msgid "Static"
-msgstr ""
+msgstr "Estàtic"
 
 #: ../pkg/systemd/init.js:325 ../pkg/systemd/init.js:608
 msgid "$0 Template"
-msgstr ""
+msgstr "Plantilla $0"
 
 #: ../pkg/systemd/init.js:467
 msgid "Reload"
-msgstr "Neu Laden"
+msgstr "Recarrega"
 
 #: ../pkg/systemd/init.js:468
 msgid "Reload or Restart"
-msgstr "Neu Laden oder Neu Starten"
+msgstr "Recarrega o reinicia"
 
 #: ../pkg/systemd/init.js:469
 msgid "Try Restart"
-msgstr "Neustart Versuchen"
+msgstr "Prova de reiniciar"
 
 #: ../pkg/systemd/init.js:470
 msgid "Reload or Try Restart"
-msgstr "Neu Laden oder Neustart Versuchen"
+msgstr "Recarrega o prova de reiniciar"
 
 #: ../pkg/systemd/init.js:471
 msgid "Isolate"
-msgstr "Isolieren"
+msgstr "Aïlla"
 
 #. <method>:<force>
 #: ../pkg/systemd/init.js:489
 msgid "Enable"
-msgstr "Einschalten"
+msgstr "Habilita"
 
 #: ../pkg/systemd/init.js:490
 msgid "Enable Forcefully"
-msgstr "Gewaltsam Einschalten"
+msgstr "Habilita-ho forçosament"
 
 #: ../pkg/systemd/init.js:491
 msgid "Disable"
-msgstr "Ausschalten"
+msgstr "Inhabilita"
 
 #: ../pkg/systemd/init.js:492
 msgid "Preset"
-msgstr "Voreinstellen"
+msgstr "Preajust"
 
 #: ../pkg/systemd/init.js:493
 msgid "Preset Forcefully"
-msgstr "Gewaltsam Voreinstellen"
+msgstr "Preajust forçós"
 
 #: ../pkg/systemd/init.js:494
 msgid "Mask"
-msgstr "Sperren"
+msgstr "Emmascara"
 
 #: ../pkg/systemd/init.js:495
 msgid "Mask Forcefully"
-msgstr ""
+msgstr "Emmascara forçosament"
 
 #: ../pkg/systemd/init.js:496
 msgid "Unmask"
-msgstr "Freigeben"
+msgstr "Desemmascara"
 
 #: ../pkg/systemd/init.js:568
 msgid "Since $0"
-msgstr ""
+msgstr "Des de $0"
 
 #: ../pkg/systemd/init.js:586
 msgid "This unit is an instance of the $0 template."
-msgstr ""
+msgstr "Aquesta unitat és una instantània de la plantilla $0."
 
 #: ../pkg/systemd/logs.html.h:1
 msgid "Journal"
-msgstr ""
+msgstr "Publicacions"
 
 #: ../pkg/systemd/logs.html.h:2
 msgid "Recent"
-msgstr ""
+msgstr "Recent"
 
 #: ../pkg/systemd/logs.html.h:3
 msgid "Current boot"
-msgstr ""
+msgstr "Arrencada actual"
 
 #: ../pkg/systemd/logs.html.h:4
 msgid "Last 24 hours"
-msgstr ""
+msgstr "Les darreres 24 hores"
 
 #: ../pkg/systemd/logs.html.h:5
 msgid "Last 7 days"
-msgstr ""
+msgstr "Els darrers 7 dies"
 
 #: ../pkg/systemd/logs.html.h:6
 msgid "Errors"
-msgstr ""
+msgstr "Errors"
 
 #: ../pkg/systemd/logs.html.h:7
 msgid "Warnings"
-msgstr ""
+msgstr "Advertències"
 
 #: ../pkg/systemd/logs.html.h:8
 msgid "Notices"
-msgstr ""
+msgstr "Anuncis"
 
 #: ../pkg/systemd/logs.html.h:10
 msgid "Entry"
-msgstr ""
+msgstr "Entrada"
 
 #: ../pkg/systemd/journal.js:91
 msgid "Journal entry"
-msgstr ""
+msgstr "Entrada de les publicacions"
 
 #: ../pkg/systemd/journal.js:119
 msgid "Journal entry not found"
-msgstr ""
+msgstr "Entrada no trobada de les publicacions"
 
 #: ../pkg/systemd/renderer.js:57
 msgid "Reboot"
-msgstr ""
+msgstr "Reinicia"
 
 #: ../pkg/systemd/renderer.js:121
 msgid "Load earlier entries"
-msgstr "Frühere Einträge laden"
+msgstr "Carrega les entrades anteriors"
 
 #: ../pkg/systemd/renderer.js:127 ../pkg/systemd/renderer.js:142
 #: ../pkg/systemd/renderer.js:186 ../pkg/systemd/renderer.js:227
 msgid "Loading..."
-msgstr ""
+msgstr "S'està carregant..."
 
 #. No visible day headers
 #.
 #: ../pkg/systemd/renderer.js:182
 msgid "Go to"
-msgstr ""
+msgstr "Vés a"
 
 #: ../pkg/systemd/terminal.html.h:1
 msgid "Terminal"
-msgstr ""
+msgstr "Terminal"
 
 #: ../pkg/systemd/terminal.html.h:2
 msgid "Reset"
-msgstr ""
+msgstr "Restableix"
 
 #: ../pkg/users/authorized-keys.js:99
 msgid "Validating key"
-msgstr ""
+msgstr "S'està validant la clau"
 
 #: ../pkg/users/authorized-keys.js:104
 msgid "Adding key"
-msgstr ""
+msgstr "S'està afegint la clau"
 
 #: ../pkg/users/authorized-keys.js:111
 msgid "Error saving authorized keys: "
-msgstr ""
+msgstr "S'ha produït un error en desar les claus autoritzades:"
 
 #: ../pkg/users/authorized-keys.js:114
 msgid "The key you provided was not valid."
-msgstr ""
+msgstr "La clau que heu proporcionat no era vàlida."
 
 #: ../pkg/users/index.html.h:1
+#, fuzzy
 msgid "Local Accounts"
-msgstr ""
+msgstr "Bloqueja el compte"
 
 #: ../pkg/users/index.html.h:2
 msgid "Create New Account"
-msgstr ""
+msgstr "Crea un nou compte"
 
 #: ../pkg/users/index.html.h:3
 msgid "Account not available or cannot be edited."
@@ -2959,40 +3120,40 @@ msgstr ""
 #: ../pkg/users/index.html.h:4
 #, fuzzy
 msgid "Accounts"
-msgstr "Einhängen"
+msgstr "Comptes"
 
 #: ../pkg/users/index.html.h:5
 #, fuzzy
 msgid "Terminate Session"
-msgstr "Firmware Version"
+msgstr "Versió del microprogramari"
 
 #: ../pkg/users/index.html.h:7
 msgid "Full Name"
-msgstr ""
+msgstr "Nom complet"
 
 #: ../pkg/users/index.html.h:9
 msgid "Roles"
-msgstr ""
+msgstr "Rols"
 
 #: ../pkg/users/index.html.h:10
 msgid "Last Login"
-msgstr ""
+msgstr "Darrer inici de sessió"
 
 #: ../pkg/users/index.html.h:11
 msgid "Access"
-msgstr ""
+msgstr "Accés"
 
 #: ../pkg/users/index.html.h:12
 msgid "Lock Account"
-msgstr ""
+msgstr "Bloqueja el compte"
 
 #: ../pkg/users/index.html.h:14
 msgid "Set Password"
-msgstr ""
+msgstr "Estableix la contrasenya"
 
 #: ../pkg/users/index.html.h:15
 msgid "Authorized Public SSH Keys"
-msgstr ""
+msgstr "Claus SSH públiques autoritzades"
 
 #: ../pkg/users/index.html.h:16
 msgid "Change Picture"
@@ -3000,190 +3161,206 @@ msgstr ""
 
 #: ../pkg/users/index.html.h:23
 msgid "Confirm"
-msgstr ""
+msgstr "Confirmació"
 
 #: ../pkg/users/index.html.h:24
+#, fuzzy
 msgid ""
 "\n"
 "            Create\n"
 "          "
 msgstr ""
+"\n"
+"              Crea\n"
+"            "
 
 #: ../pkg/users/index.html.h:27
 msgid "Old Password"
-msgstr "Altes Passwort"
+msgstr "Contrasenya antiga"
 
 #: ../pkg/users/index.html.h:28
 msgid "New Password"
-msgstr "Neues Passwort"
+msgstr "Contrasenya nova"
 
 #: ../pkg/users/index.html.h:29
 msgid "Confirm New Password"
-msgstr "Neues Passwort wiederholen"
+msgstr "Confirmació de la nova contrasenya"
 
 #: ../pkg/users/index.html.h:30
+#, fuzzy
 msgid ""
 "\n"
 "            Set\n"
 "          "
 msgstr ""
+"\n"
+"              Estableix\n"
+"            "
 
 #: ../pkg/users/index.html.h:33
 msgid "Delete Files"
-msgstr ""
+msgstr "Elimina els fitxers"
 
 #: ../pkg/users/index.html.h:37
 msgid "Unnamed"
-msgstr ""
+msgstr "Sense nom"
 
 #: ../pkg/users/index.html.h:38
 msgid "Invalid key"
-msgstr ""
+msgstr "Clau no vàlida"
 
 #: ../pkg/users/index.html.h:39
 msgid "There are no authorized public keys for this account."
-msgstr ""
+msgstr "No hi ha cap clau pública autoritzada per aquest compte."
 
 #: ../pkg/users/index.html.h:40
 msgid ""
 "You do not have permission to view the authorized public keys for this "
 "account."
 msgstr ""
+"No teniu el permís per visualitzar les claus públiques autoritzades per "
+"aquest compte."
 
 #: ../pkg/users/index.html.h:41
 msgid "Failed to load authorized keys."
-msgstr ""
+msgstr "Ha fallat la càrrega de les claus autoritzades."
 
 #: ../pkg/users/index.html.h:42
 msgid "Add public key"
-msgstr ""
+msgstr "Afegeix una clau pública"
 
 #: ../pkg/users/index.html.h:43
+#, fuzzy
 msgid ""
 "\n"
 "            Add key\n"
 "          "
 msgstr ""
+"\n"
+"              Afegeix la clau\n"
+"            "
 
 #: ../pkg/users/local.js:44
 msgid "The user <b>$0</b> is not permitted to modify accounts"
-msgstr ""
+msgstr "A l'usuari <b>$0</b> no se li permet modificar els comptes"
 
 #: ../pkg/users/local.js:61
 msgid "Unable to delete root account"
-msgstr ""
+msgstr "No es pot eliminar el compte de root"
 
 #: ../pkg/users/local.js:64
 msgid "Unable to rename root account"
-msgstr ""
+msgstr "No es pot reanomenar el compte de root"
 
 #: ../pkg/users/local.js:83
 msgid "Old password not accepted"
-msgstr ""
+msgstr "Contrasenya antiga no acceptada"
 
 #: ../pkg/users/local.js:87
 msgid "Prompting via passwd timed out"
-msgstr ""
+msgstr "Expiració de temps en la deferència a través passwd"
 
 #: ../pkg/users/local.js:117 ../pkg/users/local.js:149
 msgid "Failed to change password"
-msgstr ""
+msgstr "Ha fallat el canvi de contrasenya"
 
 #: ../pkg/users/local.js:125
 msgid "New password was not accepted"
-msgstr ""
+msgstr "No es va acceptar la nova contrasenya"
 
 #: ../pkg/users/local.js:249
 msgid "Password is too weak"
-msgstr ""
+msgstr "La contrasenya és massa feble"
 
 #: ../pkg/users/local.js:261
 msgid "Password is not acceptable"
-msgstr ""
+msgstr "La contrasenya no és acceptable"
 
 #: ../pkg/users/local.js:286 ../pkg/users/local.js:592
 msgctxt "page-title"
 msgid "Accounts"
-msgstr ""
+msgstr "Comptes"
 
 #: ../pkg/users/local.js:396 ../pkg/users/local.js:1042
 msgid "The passwords do not match"
-msgstr ""
+msgstr "Les contrasenyes no coincideixen"
 
 #: ../pkg/users/local.js:401
 msgid "No user name specified"
-msgstr ""
+msgstr "No s'ha especificat cap nom d'usuari"
 
 #: ../pkg/users/local.js:406
 msgid "No real name specified"
-msgstr ""
+msgstr "No s'ha especificat cap nom real"
 
 #: ../pkg/users/local.js:430 ../pkg/users/local.js:1064
 msgid "Excellent password"
-msgstr ""
+msgstr "Contrasenya excel·lent"
 
 #: ../pkg/users/local.js:501
 msgid ""
 "The user name can only consist of lettersfrom a-z, digits, dots, dashes and "
 "underscores."
 msgstr ""
+"El nom d'usuari només pot contenir lletres de a-z, dígits, punts, guions i "
+"guions baixos."
 
 #: ../pkg/users/local.js:509
 msgid "This user name already exists"
-msgstr ""
+msgstr "Aquest nom d'usuari ja existeix"
 
 #: ../pkg/users/local.js:689
 msgid "Server Administrator"
-msgstr ""
+msgstr "Administrador del servidor"
 
 #: ../pkg/users/local.js:690
 msgid "Container Administrator"
-msgstr ""
+msgstr "Administrador del contenidor"
 
 #: ../pkg/users/local.js:821
 msgid "Logged In"
-msgstr ""
+msgstr "Autenticat"
 
 #: ../pkg/users/local.js:823
 msgid "Never"
-msgstr ""
+msgstr "Mai"
 
 #: ../pkg/users/local.js:980
 msgid "Delete $0"
-msgstr ""
+msgstr "Elimina $0"
 
 #: ../src/bridge/cockpitdbussetup.c:215 ../src/bridge/cockpitdbussetup.c:353
 #, c-format
 msgid "Unsupported setup mechanism: %s"
-msgstr ""
+msgstr "Mecanisme de configuració no suportat: %s"
 
 #: ../src/bridge/cockpitdbussetup.c:229
 msgid "Couldn't list users"
-msgstr ""
+msgstr "No es van poder llistar els usuaris"
 
 #: ../src/bridge/cockpitdbussetup.c:359
 msgid "Bad data passed for passwd1 mechanism"
-msgstr ""
+msgstr "Es van passar dades dolentes al mecanisme del passwd1"
 
 #: ../src/bridge/cockpitdbussetup.c:374
 msgid "Couldn't load user data"
-msgstr ""
+msgstr "No es van poder carregar les dades de l'usuari"
 
 #: ../src/bridge/cockpitdbussetup.c:459
 msgid "Couldn't change user groups"
-msgstr ""
+msgstr "No es van poder canviar els grups de l'usuari"
 
 #: ../src/bridge/cockpitdbussetup.c:512
 msgid "Couldn't change user password"
-msgstr ""
+msgstr "No es va poder canviar la contrasenya de l'usuari"
 
 #: ../src/bridge/cockpitdbussetup.c:536
 msgid "Couldn't create new users"
-msgstr ""
+msgstr "No es van poder crear els nous usuaris"
 
 #: ../src/bridge/cockpitdbussetup.c:618
 msgid "Couldn't list local users"
-msgstr ""
+msgstr "No es van poder llistar els usuaris locals"
 
 #: ../src/ws/cockpit.appdata.xml.in.h:1
 msgid ""
@@ -3193,6 +3370,12 @@ msgid ""
 "Likewise, if an error occurs in the terminal, it can be seen in the Cockpit "
 "journal interface."
 msgstr ""
+"Cockpit és una eina de gestió de servidors que facilita l'administració dels "
+"vostres servidors Linux a través d'un navegador web. Saltar entre el "
+"terminal i l'eina web no és cap problema. Un servei iniciat a través de "
+"Cockpit es pot aturar a través del terminal. De la mateixa manera, si es "
+"produeix un error en el terminal, es pot observar en la interfície de les "
+"publicacions de Cockpit."
 
 #: ../src/ws/cockpit.appdata.xml.in.h:2
 msgid ""
@@ -3202,11 +3385,128 @@ msgid ""
 "same time. Just add them with a single click and your machines will look "
 "after its buddies."
 msgstr ""
+"Cockpit és perfecte per als nous administradors de sistemes, els permet "
+"realitzar fàcilment les tasques senzilles com ara l'administració de "
+"l'emmagatzematge, la inspecció de les publicacions i iniciar i aturar els "
+"serveis. Podeu monitorar i administrar diversos servidors a la vegada. Només "
+"heu d'afegir-los amb tan sols un clic i les vostres màquines es veuran al "
+"cantó de les altres."
 
 #: ../src/ws/cockpit.desktop.in.h:2
 msgid "A user interface for GNU/Linux servers"
-msgstr ""
+msgstr "Una interfície d'usuari per als servidors GNU/Linux"
 
 #: ../src/ws/cockpit.desktop.in.h:3
 msgid "Remote;Administration;"
 msgstr ""
+
+#~ msgid "Deploy"
+#~ msgstr "Desplega"
+
+#~ msgid "Kubernetes Services"
+#~ msgstr "Serveis del Kubernetes"
+
+#~ msgid "Could not list services"
+#~ msgstr "No es van poder llistar els serveis"
+
+#~ msgid "You can deploy an application to your cluster."
+#~ msgstr "Podeu desplegar una aplicació al vostre clúster."
+
+#~ msgid "Kubernetes Nodes"
+#~ msgstr "Nodes Kubernetes"
+
+#~ msgid "Labels"
+#~ msgstr "Etiquetes"
+
+#~ msgid "Select an object to see more details."
+#~ msgstr "Seleccioneu un objecte per veure'n més detalls. "
+
+#~ msgid "Pod"
+#~ msgstr "Pod"
+
+#~ msgid ""
+#~ "Pods contain one or more containers that run\n"
+#~ "                    together on a node, containing your application code."
+#~ msgstr ""
+#~ "Els pods contenen un o més contenidors que s'executen\n"
+#~ "                    junts en un node i contenen el codi de la vostra "
+#~ "aplicació."
+
+#~ msgid "Service"
+#~ msgstr "Servei"
+
+#~ msgid ""
+#~ "Services group pods and provide a common DNS\n"
+#~ "                    name and an optional, load-balanced IP address to "
+#~ "access them."
+#~ msgstr ""
+#~ "Els serveis agrupen els pods i proporcionen un nom DNS\n"
+#~ "                    comú i una adreça IP amb càrrega balancejada per "
+#~ "accedir-hi."
+
+#~ msgid ""
+#~ "Replication controllers dynamically create instances of\n"
+#~ "                    pods from templates, and remove pods when necessary."
+#~ msgstr ""
+#~ "Els controladors de replicació creen dinàmicament les instàncies dels\n"
+#~ "                    pods des de plantilles, i treuen els pods quan calgui."
+
+#~ msgid "Node"
+#~ msgstr "Node"
+
+#~ msgid "Nodes are the machines that run your containers."
+#~ msgstr "Els nodes són les màquines que executen els vostres contenidors."
+
+#~ msgid "Nodes"
+#~ msgstr "Nodes"
+
+#~ msgid "System Info"
+#~ msgstr "Informació del sistema"
+
+#~ msgid "Replication Controllers"
+#~ msgstr "Controladors de replicació"
+
+#~ msgid "Pods"
+#~ msgstr "Pods"
+
+#~ msgid ""
+#~ "\n"
+#~ "                  Namespace\n"
+#~ "                  "
+#~ msgstr ""
+#~ "\n"
+#~ "                  Espai de noms\n"
+#~ "                  "
+
+#~ msgid "$0 CPU $1 RAM"
+#~ msgstr "$0 CPU $1 RAM"
+
+#~ msgid "$0 of $1"
+#~ msgstr "$0 de $1"
+
+#~ msgid "Cluster: $0"
+#~ msgstr "Clúster: $0"
+
+#~ msgid "Endpoint: $0"
+#~ msgstr "Destí: $0"
+
+#~ msgid "Networking Journal"
+#~ msgstr "Publicacions de la xarxa"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Cancel\n"
+#~ "              "
+#~ msgstr ""
+#~ "\n"
+#~ "                Cancel·la\n"
+#~ "              "
+
+#~ msgid "Toggle navigation"
+#~ msgstr "Alterna la navegació"
+
+#~ msgid "Trying to reconnect to the system"
+#~ msgstr "S'està intentant de tornar a connectar al servidor"
+
+#~ msgid "Storage Journal"
+#~ msgstr "Publicacions de l'emmagatzematge"

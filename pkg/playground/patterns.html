@@ -7,6 +7,19 @@
     <link href="../base1/cockpit.css" type="text/css" rel="stylesheet">
     <script src="../base1/require.js"></script>
     <script src="../base1/bundle.js"></script>
+    <script>
+    require([
+        'jquery',
+        "base1/bootstrap-select",
+    ], function($) {
+        "use strict";
+
+        $(document).ready(function() {
+            $('.selectpicker').selectpicker();
+            $("body").show();
+        });
+    });
+    </script>
 </head>
 <body hidden>
 
@@ -197,18 +210,371 @@ require([
     $("#my-switch3").onoff("disabled", true);
 });
 </script>
+
+<div class="container-fluid">
+
+    <table class="listing">
+        <thead>
+            <tr>
+                <td colspan="4">
+                    <h3>Listing with Panels</h3>
+                </td>
+            </tr>
+            <tr>
+                <th>Name</th>
+                <th>Project</th>
+                <th>Address</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="listing-item">
+                <th>frontend</th>
+                <td>aoeuaoeu</td>
+                <td>127.30.168.10</td>
+                <td>Running</td>
+            </tr>
+            <tr class="listing-panel">
+                <td colspan="4">
+                    <div class="listing-head">
+                        <div class="listing-actions">
+                            <button title="Adjust" class="btn btn-default pficon pficon-edit"></button>
+                        </div>
+                        <h3>
+                            <i class="fa fa-cubes"></i>
+                            frontend
+                        </h3>
+                        <div class="listing-status">
+                            Running
+                        </div>
+                        <ul class="nav nav-tabs nav-tabs-pf">
+                            <li class="active"><a href="#">Pod</a></li>
+                            <li><a href="#">Containers</a></li>
+                            <li><a href="#">Logs</a></li>
+                            <li><a href="#">Shell</a></li>
+                        </ul>
+                    </div>
+                    <div class="listing-body">
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <dl>
+                                    <dt>Project</dt>
+                                    <dd>aoeuaoeu</dd>
+                                    <dt>Created</dt>
+                                    <dd title="2015-09-26 15:33">14 days ago</dd>
+                                    <dt>Restart Policy</dt>
+                                    <dd>Always</dd>
+                                    <dt>Service Account</dt>
+                                    <dd>default</dd>
+                                    <dt>DNS Policy</dt>
+                                    <dd>ClusterFirst</dd>
+                                    <dt>Phase</dt>
+                                    <dd>running</dd>
+                                    <dt>Node</dt>
+                                    <dd>openshiftdev.local</dd>
+                                    <dt>Pod Address</dt>
+                                    <dd>1.2.3.4</dd>
+                                </dl>
+                            </div>
+                            <div class="col-sm-6">
+                                <dl class="full">
+                                    <dt>Labels</dt>
+                                    <dd>name=frontend</dd>
+                                    <dd>template=ruby-hello-world</dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+        <tbody>
+            <tr class="listing-item">
+                <th>redis-master</th>
+                <td>aoeuaoeu</td>
+                <td>127.30.173.79:6379</td>
+                <td>Ready</td>
+            </tr>
+            <tr class="listing-panel">
+                <td colspan="4">
+                    <div class="listing-head">
+                        <div class="listing-actions">
+                            <button title="Adjust" class="btn btn-default pficon pficon-edit"></button>
+                        </div>
+                        <h3>
+                            <i class="fa fa-cubes"></i>
+                            redis-master
+                        </h3>
+                        <div class="listing-status">
+                            Running
+                        </div>
+                        <ul class="nav nav-tabs nav-tabs-pf">
+                            <li class="active"><a href="#">Pod</a></li>
+                            <li><a href="#">Containers</a></li>
+                            <li><a href="#">Logs</a></li>
+                            <li><a href="#">Shell</a></li>
+                        </ul>
+                    </div>
+                    <div class="listing-body">
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <dl>
+                                    <dt>Project</dt>
+                                    <dd>aoeuaoeu</dd>
+                                    <dt>Created</dt>
+                                    <dd title="2015-09-26 15:33">10 days ago</dd>
+                                    <dt>Restart Policy</dt>
+                                    <dd>Always</dd>
+                                    <dt>Service Account</dt>
+                                    <dd>default</dd>
+                                    <dt>DNS Policy</dt>
+                                    <dd>ClusterFirst</dd>
+                                    <dt>Phase</dt>
+                                    <dd>running</dd>
+                                    <dt>Node</dt>
+                                    <dd>openshiftdev.local</dd>
+                                    <dt>Pod Address</dt>
+                                    <dd>1.2.3.5</dd>
+                                </dl>
+                            </div>
+                            <div class="col-sm-6">
+                                <dl class="full">
+                                    <dt>Labels</dt>
+                                    <dd>name=redis-master</dd>
+                                    <dd>template=ruby-hello-world</dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <table class="listing">
+        <thead>
+            <tr>
+                <td colspan="2">
+                    <h3>Expandable Listing: Panel header is row</h3>
+                </td>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="listing-item listing-head">
+                <th>id_rsa</th>
+                <td></td>
+                <td class="listing-tight listing-actions">
+                    <div class="btn-group btn-onoff" data-toggle="buttons">
+                        <label class="btn"><input type="radio" autocomplete="off">On</label>
+                        <label class="btn active"><input type="radio" autocomplete="off" checked>Off</label>
+                    </div>
+                </td>
+            </tr>
+            <tr class="listing-body">
+                <td colspan="3">
+                    the body
+                </td>
+            </tr>
+        </tbody>
+        <tbody>
+            <tr class="listing-item listing-head">
+                <th>id_rsa</th>
+                <td></td>
+                <td class="listing-tight listing-actions">
+                    <div class="btn-group btn-onoff" data-toggle="buttons">
+                        <label class="btn"><input type="radio" autocomplete="off">On</label>
+                        <label class="btn active"><input type="radio" autocomplete="off" checked>Off</label>
+                    </div>
+                </td>
+            </tr>
+            <tr class="listing-head">
+                <td colspan="3">
+                    <ul class="nav nav-tabs nav-tabs-pf">
+                        <li><a href="#">Tree</a></li>
+                        <li class="active"><a href="#">Packages</a></li>
+                    </ul>
+                </td>
+            </tr>
+            <tr class="listing-body">
+                <td colspan="3">
+                    The body
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <table class="listing">
+        <thead>
+            <tr>
+                <td colspan="2">
+                    <h3>Listing with Timeline</h3>
+                </td>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>
+                    <div class="timeline timeline-end">
+                        <i class="fa fa-caret-up timeline-point timeline-md"></i>
+                        <div class="listing-panel listing-maybe">
+                            <div class="listing-head">
+                                <div class="listing-actions">
+                                    <button class="btn btn-default">Check for updates</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+        <tbody>
+            <tr>
+                <td>
+                    <div class="timeline">
+                        <i class="fa fa-circle timeline-point"></i>
+                        <div class="listing-panel">
+                            <div class="listing-head">
+                                <div class="listing-actions">
+                                    <button class="btn btn-primary">Update and reboot</button>
+                                </div>
+                                <h3>fedora-atomic: 24.2</h3>
+                                <div class="listing-status">
+                                    Available
+                                </div>
+                                <ul class="nav nav-tabs nav-tabs-pf">
+                                    <li><a href="#">Tree</a></li>
+                                    <li class="active"><a href="#">Packages</a></li>
+                                </ul>
+                            </div>
+                            <div class="listing-body">
+                                <div class="row">
+                                    <div class="col-sm-6">
+                                        <dl>
+                                            <dt>Operating System</dt>
+                                            <dd>fedora-atomic</dd>
+                                            <dt>Revision Number</dt>
+                                            <dd>24.2</dd>
+                                            <dt>Released</dt>
+                                            <dd title="2015-09-26 15:33">3 days ago</dd>
+                                        </dl>
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <dl>
+                                            <dt>Additions</dt>
+                                            <dd>10 packages</dd>
+                                            <dt>Removals</dt>
+                                            <dd>3 packages</dd>
+                                            <dt>Changes</dt>
+                                            <dd>18 packages</dd>
+                                        </dl>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+        <tbody class="active">
+            <tr>
+                <td>
+                    <div class="timeline">
+                        <i class="fa fa-check-circle-o timeline-point timeline-lg active"></i>
+                        <div class="listing-panel">
+                            <div class="listing-head">
+                                <div class="listing-actions">
+                                </div>
+                                <div class="listing-status">
+                                    Installed
+                                </div>
+                                <h3>fedora-atomic: 24.1</h3>
+                                <ul class="nav nav-tabs nav-tabs-pf">
+                                    <li class="active"><a href="#">Tree</a></li>
+                                    <li><a href="#">Packages</a></li>
+                                </ul>
+                            </div>
+                            <div class="listing-body">
+                                <div class="row">
+                                    <div class="col-sm-6">
+                                        <dl>
+                                            <dt>Operating System</dt>
+                                            <dd>fedora-atomic</dd>
+                                            <dt>Revision Number</dt>
+                                            <dd>24.1</dd>
+                                            <dt>Released</dt>
+                                            <dd title="2015-08-29 15:33">1 month ago</dd>
+                                        </dl>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+        <tbody>
+            <tr>
+                <td>
+                    <div class="timeline">
+                        <div class="timeline-point timeline-md">
+                            <div class="spinner"></div>
+                        </div>
+                        <div class="listing-panel">
+                            <div class="listing-head">
+                                <div class="listing-actions">
+                                </div>
+                                <div class="listing-status">
+                                    Downloading manifests 85%
+                                </div>
+                                <h3>fedora-atomic: 24.0</h3>
+                                <ul class="nav nav-tabs nav-tabs-pf">
+                                    <li class="active"><a href="#">Tree</a></li>
+                                    <li><a href="#">Packages</a></li>
+                                </ul>
+                            </div>
+                            <div class="listing-body">
+                                <div class="row">
+                                    <div class="col-sm-6">
+                                        <dl>
+                                            <dt>Operating System</dt>
+                                            <dd>fedora-atomic</dd>
+                                            <dt>Revision Number</dt>
+                                            <dd>24.1</dd>
+                                            <dt>Released</dt>
+                                            <dd title="2015-08-29 15:33">1 month ago</dd>
+                                        </dl>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+</div>
+
 <script>
 require([
-    'jquery',
-    "base1/bootstrap-select",
+    'jquery'
 ], function($) {
     "use strict";
 
-    $(document).ready(function() {
-        $('.selectpicker').selectpicker();
-        $("body").show();
-    });
+    $("body")
+        .on("click", ".listing-item, .listing-head", function(ev) {
+            /* Only proceed if a .btn a li or .timeline was not clicked on */
+            if($(ev.target).parents().addBack().filter(".btn, a, li, .timeline").length === 0)
+                $(this).parents("tbody").toggleClass("open");
+        })
+        .on("mouseenter", ".listing-head", function(ev) {
+            $(ev.target).parents("tbody").find(".listing-head").addClass("highlight");
+        })
+        .on("mouseleave", ".listing-head", function(ev) {
+            $(ev.target).parents("tbody").find(".listing-head").removeClass("highlight");
+        });
 });
 </script>
+
 </body>
 </html>

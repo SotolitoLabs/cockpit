@@ -3,8 +3,12 @@
 
     "linguas": {
         "en": "English",
+        "ca": "Catalan",
         "de": "Deutsch",
         "da": "Dansk",
-        "pl": "Polski"
+        "pl": "Polski",
+        "pt_BR": "Portugueses",
+        "tr": "Türk",
+        "uk": "Українська"
     }
 }

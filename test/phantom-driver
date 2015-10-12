@@ -24,7 +24,7 @@
  * This program reads a line from stdin, executes the command
  * specified by it, and replies back with a line on stdout.
  *
- * The two main commands are "do" and "wait". "Do" will execute
+ * The two main commands are "eval" and "wait". "eval" will execute
  * arbitrary JavaScript in the context of the web page.  "Wait" will
  * run the event loop of the browser until the given condition is
  * true.
@@ -48,46 +48,17 @@ var page = require('webpage').create();
 var sys = require('system');
 
 var onCheckpoint;
-var lastError;
 var waitTimeout;
 var didTimeout;
 
-function arm_timeout(timeout) {
-    if (waitTimeout)
-        return false;
-
-    didTimeout = false;
-    waitTimeout = setTimeout (function () {
-        waitTimeout = null;
-        didTimeout = true;
-        if (onCheckpoint)
-            onCheckpoint();
-    }, timeout || 5000);
-    return true;
-}
-
-function disarm_timeout() {
-    if (!waitTimeout)
-        return false;
-
-    clearTimeout(waitTimeout);
-    waitTimeout = null;
-    didTimeout = false;
-    return true;
-}
-
 page.viewportSize = { width: 800, height: 480 };
 
-function result(out) {
-    if (lastError) {
-        out = { error: lastError };
-        lastError = null;
-    }
-    sys.stdout.writeLine(JSON.stringify(out));
+var unique = 1;
+function slot() {
+    return "phantom-slot-" + (unique++);
 }
 
-var canary = "phantom-canary" + -(Date());
-
+var canary = slot();
 function inject_basics() {
     var i, len;
     if (!page.evaluate(function(x) { return x in window; }, canary)) {
@@ -103,34 +74,52 @@ function inject_basics() {
     }
 }
 
-function step ()
-{
-    function wait_reload(callback, timeout) {
+var driver = {
+    open: function(respond, url) {
         var failure = null;
-        var result = null;
-        var timer = null;
-
-        function finish() {
-            page.onResourceError = null;
-            page.onLoadFinished = null;
-            clearTimeout(wait);
-            clearTimeout(timer);
-            callback(result);
-        }
-
-        timer = setTimeout(function() {
-            timer = null;
-            result = "timeout";
-            finish();
-        }, timeout || 10000);
 
         page.onResourceError = function(ex) {
             failure = ex.errorString + " " + ex.url;
         };
 
-	/*
-	 * HACK: phantomjs fires the page.onLoadFinished() handler
-	 * for each iframe, sometimes with the iframe triggering the
+        page.onLoadFinished = function(status) {
+            page.onLoadFinished = null;
+            page.onResourceError = null;
+            if (status == "success")
+                respond({ result: null });
+            else
+                respond({ error: failure || status });
+        };
+
+	page.open(url);
+    },
+
+    reload: function(respond) {
+        this.expect_load(respond);
+        page.reload();
+    },
+
+    expect_load: function(respond) {
+        var failure = null;
+        var res = null;
+
+        function finish() {
+            page.onResourceError = null;
+            page.onLoadFinished = null;
+            clearTimeout(wait);
+            if (res === "success")
+                respond({ result: res });
+            else
+                respond({ error: res });
+        }
+
+        page.onResourceError = function(ex) {
+            failure = ex.errorString + " " + ex.url;
+        };
+
+        /*
+         * HACK: phantomjs fires the page.onLoadFinished() handler
+         * for each iframe, sometimes with the iframe triggering the
          * event first. This leads to race conditions.
          *
          * The only work around is to use a timeout.
@@ -142,174 +131,232 @@ function step ()
             if (status != "success" && failure)
                 status = failure;
             failure = null;
-            if (!result || result != "success")
-                result = status;
-	    clearTimeout(wait);
-	    wait = setTimeout(function() {
+            if (!res || res != "success")
+                res = status;
+            clearTimeout(wait);
+            wait = setTimeout(function() {
                 wait = null;
                 finish();
-            }, 200);
+            }, 500);
         };
-    }
+    },
 
-    function wait_open(callback) {
-        var failure = null;
+    switch_frame: function(respond, name) {
+        if (page.switchToFrame(name))
+            respond({ result: null });
+        else
+            respond({ error: "Can't switch to frame: " + name });
+    },
 
-        page.onResourceError = function(ex) {
-            failure = ex.errorString + " " + ex.url;
+    switch_top: function(respond) {
+        page.switchToMainFrame();
+        respond({ result: null });
+    },
+
+    show: function(respond, file) {
+        if (!file)
+            file = "page.png"
+        page.render(file);
+        sys.stderr.writeLine("Wrote " + file)
+        respond({ result: null });
+    },
+
+    quit: function(respond) {
+        sys.stdout.writeLine(JSON.stringify({ result: true }));
+        phantom.exit(0);
+    },
+
+    sit: function(respond) {
+        sys.stdout.writeLine(JSON.stringify({ result: true }));
+        // fall through to the phantom event loop
+    },
+
+    eval: function(respond, code) {
+	var x = slot();
+
+        /* Execute the code and put result in slot */
+        inject_basics();
+        page.evaluate("function(x) { window[x] = (" + code + ") }", x);
+
+        /* Check for value in the slot and/or wait for it if promise */
+        return function check() {
+            inject_basics();
+            var result = page.evaluate(function(x) {
+                var res = null, val;
+
+                if (!(x in window))
+                    return null; /* not ready */
+
+                val = window[x];
+                delete window[x];
+
+                /* A promise */
+                if (val && typeof(val.always) === "function") {
+                    val.always(function(v) {
+                        if (this.state() === "rejected")
+                            throw v;
+                        else
+                            window[x] = v;
+                        phantom_checkpoint();
+                    });
+
+                    /* Not yet ready */
+                    return null;
+
+                /* Any other value besides a promise */
+                } else {
+                    res = { result: val === undefined ? null : val };
+                }
+
+                return res;
+            }, x);
+
+            if (result)
+                respond(result);
         };
+    },
 
-        page.onLoadFinished = function(status) {
-            if (status != "success" && failure)
-                status = failure;
-            page.onLoadFinished = null;
-            page.onResourceError = null;
-            callback(status);
-        };
-    }
+    wait: function(respond, cond) {
+        var func = "function () { return " + cond + "}";
+        return function check() {
+            inject_basics();
+            var val = page.evaluate(func);
+            if (val)
+                respond({ result: val });
+        }
+    },
 
-    setTimeout(function () {
-        if (onCheckpoint)
-            throw "nope";
-
-        var cmdline = sys.stdin.readLine();
-
-        if (cmdline == "" && sys.stdin.atEnd()) {
-            phantom.exit(0);
+    arm_timeout: function(respond, timeout) {
+        if (waitTimeout) {
+            respond({ error: "timeout already armed" });
             return;
         }
 
-        // sys.stderr.writeLine(cmdline);
+        didTimeout = false;
+        waitTimeout = setTimeout(function() {
+            waitTimeout = null;
+            didTimeout = true;
+        }, timeout || 5000);
+        respond({ result: true });
+    },
 
-        var cmd = JSON.parse(cmdline);
+    wait_checkpoint: function(respond) {
+        var first = true;
+        return function check() {
+            if (didTimeout)
+                respond({ error: "timeout happened" });
+            if (!first)
+                respond({ result: null });
+            first = false;
+        };
+    },
 
-        function on_load(status) {
-            sys.stdout.writeLine(JSON.stringify({ result: status }));
-            step();
+    disarm_timeout: function(respond) {
+        if (!waitTimeout) {
+            respond({ error: "no timeout armed" });
+            return;
         }
 
-        if (cmd.cmd == "open") {
-            wait_open(on_load);
-            page.open(cmd.url);
-        } else if (cmd.cmd == "reload") {
-            wait_reload(on_load, cmd.timeout);
-            page.reload();
-        } else if (cmd.cmd == "expect-reload") {
-            wait_reload(on_load, cmd.timeout);
-        } else if (cmd.cmd == "inject") {
-            inject_basics();
-            var ret = page.injectJs(cmd.file);
-            result({ result: ret });
-            step();
-        } else if (cmd.cmd == "switch") {
-            if (page.switchToFrame(cmd.name))
-                result({ result: true });
-            else
-                result({ error: "Can't switch to frame" });
-            step();
-        } else if (cmd.cmd == "switch_top") {
-            page.switchToMainFrame();
-            result({ result: true });
-            step();
-        } else if (cmd.cmd == "switch_parent") {
-            if (page.switchToParentFrame())
-                result({ result: true });
-            else
-                result({ error: "Can't switch to parent frame" });
-            step();
-        } else if (cmd.cmd == "show") {
-            page.render(cmd.file || "page.png");
-            result({ result: true });
-            step();
-        } else if (cmd.cmd == "quit") {
-            result({ result: true });
-            phantom.exit(0);
-        } else if (cmd.cmd == "sit") {
-            result({ result: true });
-            // fall through to the phantom event loop
-        } else if (cmd.cmd == "do") {
-            lastError = null;
-            inject_basics();
-            var func = "function () { " + cmd.code + "}";
-            var val = page.evaluate (func);
-            result({ result: val });
-            step ();
-        } else if (cmd.cmd == "wait") {
-            var func = "function () { return " + cmd.cond + "}";
-            var local_timeout;
+        clearTimeout(waitTimeout);
+        waitTimeout = null;
+        didTimeout = false;
+        respond({ result: true });
+    },
 
-            function respond(val)
-            {
-                onCheckpoint = null;
-                result(val);
-                if (local_timeout)
-                    disarm_timeout();
-                step ();
-            }
-
-            function check() {
-                inject_basics();
-                var val = page.evaluate (func);
-                if (val) {
-                    if (didTimeout)
-                        sys.stderr.writeLine("WARNING: condition '" + cmd.cond + "' was true after timeout, add some more checkpoints");
-                    respond ({result: val});
-                } else if (didTimeout)
-                    respond ({timeout: true});
-            }
-
-            onCheckpoint = check;
-
-            local_timeout = arm_timeout(cmd.timeout);
-            check ();
-        } else if (cmd.cmd == "armtimeout") {
-            if (arm_timeout(cmd.timeout))
-                result({ result: true });
-            else
-                result({ error: "timeout already armed" });
-            step();
-        } else if (cmd.cmd == "disarmtimeout") {
-            if (disarm_timeout(cmd.timeout))
-                result({ result: true });
-            else
-                result({ error: "no timeout armed" });
-            step();
-        } else if (cmd.cmd == "waitcheckpoint") {
-            onCheckpoint = function () {
-                onCheckpoint = null;
-                if (didTimeout)
-                    result({ timeout: true });
-                else
-                    result({ result: true });
-                step();
-            }
-        } else if (cmd.cmd == "keys") {
-            var i;
-            if (typeof cmd.keys == "string")
-                page.sendEvent (cmd.type, cmd.keys, null, null, cmd.modifier || 0);
-            else {
-                for (i = 0; i < cmd.keys.length; i++) {
-                    var k = cmd.keys[i];
-                    if (typeof k == "string" && k.length > 1)
-                        k = page.event.key[k];
-                    page.sendEvent (cmd.type, k, null, null, cmd.modifier || 0);
-                }
-            }
-            result({ result: true });
-            step ();
-        } else if (cmd.cmd == "upload") {
-            page.uploadFile(cmd.selector, cmd.file);
-            result({ result: true });
-            step();
-        } else if (cmd.cmd == "ping") {
-            result({ result: "pong" });
-            step();
+    keys: function(respond, type, keys, modifier) {
+        var i;
+        if (typeof keys == "string") {
+            page.sendEvent(type, keys, null, null, modifier || 0);
         } else {
-            result({ error: "?" });
-            step ();
+            for (i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                if (typeof k == "string" && k.length > 1)
+                    k = page.event.key[k];
+                page.sendEvent(type, k, null, null, modifier || 0);
+            }
+        }
+        respond({ result: null });
+    },
+
+    upload_file: function(respond, selector, file) {
+        page.uploadFile(selector, file);
+        respond({ result: null });
+    },
+
+    ping: function(respond) {
+        respond({ result: "pong" });
+    },
+};
+
+function step() {
+    var line = sys.stdin.readLine();
+    var cmd = null, args;
+
+    var responded = false;
+    var timeout = null;
+    var check = null;
+
+    try {
+        cmd = JSON.parse(line || "null");
+    } catch(ex) {
+        sys.stderr.writeLine("ERROR: Couldn't parse message: " + String(ex));
+    }
+
+    if (!cmd) {
+        phantom.exit(0);
+        return;
+    }
+
+    /* Timeout is cleared when responding */
+    timeout = window.setTimeout(function() {
+        if (check)
+            check();
+        if (responded)
+            sys.stderr.writeLine("WARNING: " + line + " was true after timeout, add more checkpoints");
+        else
+            respond({ error: "timeout" });
+    }, cmd.timeout || 60 * 1000);
+
+    /* This function is called when functions want to respond */
+    function respond(out) {
+        var line = JSON.stringify(out);
+        if (responded) {
+            sys.stderr.writeLine("WARNING: Already responded, discarding result: " + line);
+            return;
         }
 
-    }, 0);
+        window.clearTimeout(timeout);
+        page.onError = null;
+        timeout = null;
+        responded = true;
+        onCheckpoint = null;
+
+        sys.stdout.writeLine(line);
+        step();
+    };
+
+    page.onError = function(msg, trace) {
+        var i, backtrace = "";
+        for (i = 0; i < trace.length; i++)
+            backtrace += "\n" + trace[i].file + " " + trace[i].line + " " + trace[i].function;
+        sys.stderr.writeLine("Page error: " + msg + backtrace);
+        respond({ error: msg });
+    }
+
+    if (cmd.cmd in driver) {
+        args = (cmd.args || []).slice();
+        args.unshift(respond);
+        check = driver[cmd.cmd].apply(driver, args);
+    } else {
+        respond({ error: "No such method defined: " + cmd.cmd });
+    }
+
+    /* Caller has not responded */
+    if (!responded && check) {
+        check();
+        if (!responded)
+            onCheckpoint = check;
+    }
 }
 
 page.onConsoleMessage = function(msg, lineNum, sourceId) {
@@ -320,14 +367,5 @@ page.onConsoleMessage = function(msg, lineNum, sourceId) {
     } else
         sys.stderr.writeLine('> ' + msg);
 };
-
-page.onError = function(msg, trace) {
-    var i;
-    var backtrace = "";
-    for (i = 0; i < trace.length; i++)
-        backtrace += "\n" + trace[i].file + " " + trace[i].line + " " + trace[i].function;
-    sys.stderr.writeLine("Page error: " + msg + backtrace);
-    lastError = msg;
-}
 
 step();

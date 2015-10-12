@@ -214,10 +214,6 @@ install-data-local:: install-doc-local
 
 dist-hook: dist-doc-hook
 	echo $(VERSION) > $(distdir)/.tarball
-	ln -s networkmanager $(distdir)/pkg/network
-	ln -s realmd $(distdir)/pkg/domain
-	ln -s storaged $(distdir)/pkg/storage
-	ln -s systemd $(distdir)/pkg/system
 
 distcheck-hook: dist-doc-hook
 	$(srcdir)/tools/check-dist $(distdir)
@@ -226,7 +222,7 @@ upload-pot:
 	zanata-cli push --project-config "$(srcdir)/tools/zanata.xml" -s "$(builddir)/po" -t "$(srcdir)/po"
 
 download-po:
-	zanata-cli pull --project-config "$(srcdir)/tools/zanata.xml" -s "$(builddir)/po" -t "$(srcdir)/po"
+	zanata-cli -B pull --min-doc-percent 30 --project-config "$(srcdir)/tools/zanata.xml" -s "$(builddir)/po" -t "$(srcdir)/po"
 
 BOWER = $(srcdir)/tools/bower_components
 

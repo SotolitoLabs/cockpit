@@ -11,10 +11,34 @@ a production system.  And last but not least, it is easier to add more
 virtual hardware to a virtual machine for testing, such as more hard
 disks or network adapters.
 
-## Dependencies
+## Using Vagrant
 
-Currently the x86_64 architectures of Fedora 21 and Rawhide are most
-often used for development.
+It's possible to test and work on on Cockpit web assets by just using
+Vagrant. In the top level directory of the repository, you can run:
+
+    $ sudo vagrant up
+
+Cockpit will listen on port 9090 of the vagrant VM started, and also
+port 9090 of localhost if cockpit is not running locally. Any changes
+you make to the system in the Vagrant VM won't affect the host machine.
+
+You can edit files in the `pkg/` subdirectory of the Cockpit sources
+and the changes should take effect immediately in the Vagrant VM.
+
+The Vagrant VM is in debug mode, which means that resources will load
+into your web browser more slowly than in a production install of
+Cockpit.
+
+You may need to rebuild the Vagrant VM periodically, by running:
+
+    $ sudo vagrant destroy
+    $ sudo vagrant up
+
+## Development Dependencies
+
+For more complex hacking no Cockpit, you need to build Cockpit locally
+and install the relevant dependencies. Currently recent x86_64
+architectures of Fedora are most often used for development.
 
 Check `tools/cockpit.spec` for the concrete Fedora build dependencies.
 The following should work in a fresh Git clone:
@@ -24,9 +48,9 @@ The following should work in a fresh Git clone:
 
 In addition for testing the following dependencies are required:
 
-    $ sudo yum install trickle nbd-server python-libguestfs qemu \
-         mock qemu-kvm python curl libvirt-client libvirtd qemu-nbd \
-         krb5-workstation krb5-server
+    $ sudo yum install python-libguestfs qemu mock qemu-kvm rpm-build \
+         curl libvirt-client libvirt-python libvirt python-lxml \
+         krb5-workstation krb5-server selinux-policy-devel
     $ sudo npm install -g phantomjs
 
 ## Building and installing

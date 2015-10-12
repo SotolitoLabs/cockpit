@@ -516,7 +516,7 @@ class VirtEventHandler():
 
     # reboot flag should have probably been reset before this
     # returns whether domain has rebooted
-    def wait_for_reboot(self, domain, timeout_sec=60):
+    def wait_for_reboot(self, domain, timeout_sec=120):
         start_time = time.time()
         end_time = start_time + timeout_sec
         key = (domain.name(), domain.ID())
@@ -545,7 +545,7 @@ class VirtEventHandler():
                                                                              {'status': 'Stopped', 'detail': 'Shutdown'}
                                                                             ]
 
-    def wait_for_running(self, domain, timeout_sec=60):
+    def wait_for_running(self, domain, timeout_sec=120):
         start_time = time.time()
         end_time = start_time + timeout_sec
         if self.domain_is_running(domain):
@@ -567,7 +567,7 @@ class VirtEventHandler():
         except:
             return False
 
-    def wait_for_stopped(self, domain, timeout_sec=60):
+    def wait_for_stopped(self, domain, timeout_sec=120):
         start_time = time.time()
         end_time = start_time + timeout_sec
         uuid = domain.UUID()
@@ -618,12 +618,12 @@ class VirtMachine(Machine):
         # it is ESSENTIAL to register the default implementation of the event loop before opening a connection
         # otherwise messages may be delayed or lost
         libvirt.virEventRegisterDefaultImpl()
-        self.virt_connection = libvirt.open("qemu:///session")
+        self.virt_connection = self._libvirt_connection(hypervisor = "qemu:///session")
         self.event_handler = VirtEventHandler(libvirt_connection=self.virt_connection, verbose=self.verbose)
 
         # network names are currently hardcoded into network-cockpit.xml
         self.network_name = self._read_network_name()
-        self.system_connection = libvirt.openReadOnly("qemu:///system")
+        self.system_connection = self._libvirt_connection(hypervisor = "qemu:///system", read_only = True)
         self.dhcp_net = self.system_connection.networkLookupByName(self.network_name)
 
         # we can't see the network itself as non-root, create it using vm-prep as root
@@ -633,6 +633,26 @@ class VirtMachine(Machine):
 
         # init variables needed for running a vm
         self._cleanup()
+
+    def _libvirt_connection(self, hypervisor, read_only = False):
+        tries_left = 5
+        connection = None
+        if read_only:
+            open_function = libvirt.openReadOnly
+        else:
+            open_function = libvirt.open
+        while not connection and (tries_left > 0):
+            try:
+                connection = open_function(hypervisor)
+            except:
+                # wait a bit
+                time.sleep(1)
+                pass
+            tries_left -= 1
+        if not connection:
+            # try again, but if an error occurs, don't catch it
+            connection = open_function(hypervisor)
+        return connection
 
     def _read_network_name(self):
         tree = etree.parse(open("./guest/network-cockpit.xml"))
@@ -801,6 +821,7 @@ class VirtMachine(Machine):
         macs = self._qemu_network_macs()
         if not macs:
             raise Failure("no mac addresses found for created machine")
+        self.message("available mac addresses: %s" % (", ".join(macs)))
         self.macaddr = macs[0]
         if wait_for_ip:
             self.address = self._ip_from_mac(self.macaddr)
@@ -828,26 +849,30 @@ class VirtMachine(Machine):
             self._cleanup()
             raise
 
-    def _wait_for_ip(self, mac, timeout_sec = 180):
-        # our network is defined system wide
-        # luckily we have read access to that
-        # if there are multiple matches for the mac, get the most current one
-        start_time = time.time()
-        while (time.time() - start_time) < timeout_sec:
-            applicable_leases = filter(lambda lease: lease['mac'] == mac, self.dhcp_net.DHCPLeases())
-            if applicable_leases:
-                return sorted(applicable_leases, key=lambda lease: lease['expirytime'], reverse=True)[0]['ipaddr']
-            time.sleep(1)
-
-        raise Failure("Can't resolve IP of %s" % mac)
-
-    def _ip_from_mac(self, mac, timeout_sec = 180):
+    def _ip_from_mac(self, mac, timeout_sec = 300):
         # first see if we use a mac address defined in the network description
         for h in self._network_description.find(".//dhcp"):
             if h.get("mac") == mac:
                 return h.get("ip")
         # we didn't find it in the network description, so get it from the dhcp lease information
-        return self._wait_for_ip(mac, timeout_sec)
+
+        # our network is defined system wide, so we need a different hypervisor connection
+        # if there are multiple matches for the mac, get the most current one
+        start_time = time.time()
+        while (time.time() - start_time) < timeout_sec:
+            try:
+                with stdchannel_redirected(sys.stderr, os.devnull):
+                    applicable_leases = self.dhcp_net.DHCPLeases(mac)
+            except:
+                time.sleep(1)
+                continue
+            if applicable_leases:
+                return sorted(applicable_leases, key=lambda lease: lease['expirytime'], reverse=True)[0]['ipaddr']
+            time.sleep(1)
+
+        macs = self._qemu_network_macs()
+        lease_info = "\n".join(map(lambda lease: str(lease), self.dhcp_net.DHCPLeases()))
+        raise Failure("Can't resolve IP of %s\nAll current addresses: [%s]\nAll leases: %s" % (mac, ", ".join(macs), lease_info))
 
     def reset_reboot_flag(self):
         self.event_handler.reset_domain_reboot_status(self._domain)
@@ -860,7 +885,7 @@ class VirtMachine(Machine):
             raise Failure("system didn't reboot properly")
         self.wait_user_login()
 
-    def wait_boot(self, wait_for_running_timeout = 60):
+    def wait_boot(self, wait_for_running_timeout = 120):
         # we should check for selinux relabeling in progress here
         if not self.event_handler.wait_for_running(self._domain, timeout_sec=wait_for_running_timeout ):
             raise Failure("Machine %s didn't start." % (self.address))
@@ -869,7 +894,7 @@ class VirtMachine(Machine):
             raise Failure("Unable to reach machine %s via ssh." % (self.address))
         self.wait_user_login()
 
-    def stop(self, timeout_sec=60):
+    def stop(self, timeout_sec=120):
         if self._maintaining:
             self.shutdown(timeout_sec=timeout_sec)
         else:
@@ -905,7 +930,7 @@ class VirtMachine(Machine):
                 self._domain.destroy()
         self._cleanup(quick=True)
 
-    def wait_poweroff(self, timeout_sec=60):
+    def wait_poweroff(self, timeout_sec=120):
         # shutdown must have already been triggered
         if self._domain:
             if not self.event_handler.wait_for_stopped(self._domain, timeout_sec=timeout_sec):
@@ -913,7 +938,7 @@ class VirtMachine(Machine):
 
         self._cleanup()
 
-    def shutdown(self, timeout_sec=60):
+    def shutdown(self, timeout_sec=120):
         # shutdown the system gracefully
         # to stop it immediately, use kill()
         try:

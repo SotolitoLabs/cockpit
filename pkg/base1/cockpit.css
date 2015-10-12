@@ -548,3 +548,405 @@ a {
 .alert .btn-default {
     margin-top: -3px;
 }
+
+/* Listing pattern */
+
+table.listing {
+    margin-top: 15px;
+    min-width: 65%;
+}
+
+table.listing > thead h3 {
+    font-size: 22px;
+    padding: 10px 0px 10px;
+    font-weight: 300;
+}
+
+table.listing > thead:first-child h3 {
+    margin-top: 0px;
+}
+
+table.listing thead th {
+    border-top: 1px solid #eee;
+    font-weight: normal;
+    padding: 10px;
+    color: #888;
+}
+
+table.listing thead th:first-child {
+    padding-left: 20px;
+}
+
+table.listing thead th:last-child {
+    text-align: right;
+}
+
+/* A listing item is a row in the table */
+tbody tr.listing-item {
+    border-top: 1px solid #eee;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+
+table.listing tbody:last-child {
+    border-bottom: 1px solid #eee;
+}
+table.listing tbody + thead {
+    border-top: 1px solid #eee;
+}
+table.listing tbody.open:last-child {
+    border-bottom: none;
+}
+table.listing tbody.open + thead {
+    border-top: none;
+}
+
+tr.listing-item:hover {
+    background-color: #d4edfa;
+}
+
+tr.listing-item + tr.listing-panel .listing-head:hover {
+    cursor: pointer;
+    background-color: #d4edfa;
+}
+
+/* Listing items have decent padding ... */
+tr.listing-item td {
+    padding: 10px;
+}
+
+tr.listing-item th {
+    padding: 10px 10px 10px 15px;
+}
+
+/* Listing actions can be used directly as a cell */
+tr.listing-item td.listing-actions,
+td.listing-actions {
+    padding: 5px 10px;
+    text-align: right;
+    float: none;
+}
+
+tr.listing-item td:first-child {
+    padding-left: 20px;
+}
+
+/* The last column of a listing is always right aligned */
+tr.listing-item td:last-child {
+    text-align: right;
+}
+
+div.listing-panel {
+    box-shadow: 1px 1px 1px 1px #f5f5f5;
+    margin-bottom: 15px;
+}
+
+div.listing-maybe {
+    border: 1px dashed #ddd;
+    box-shadow: none;
+}
+
+div.listing-head {
+    padding: 10px 10px 0px 10px;
+    background-color: #f6f6f6;
+    border-color: #ccc;
+    border-style: solid;
+    border-width: 1px 1px 0px 1px;
+    overflow: hidden;
+}
+
+div.listing-head:last-child {
+    padding-bottom: 10px;
+}
+
+div.listing-maybe div.listing-head,
+div.listing-maybe div.listing-body {
+    background-color: white;
+    border: none;
+}
+
+/* When panel is a row of a table: head is white */
+tr.listing-item + tr.listing-panel div.listing-head {
+    background-color: white;
+    border-top: 3px solid #0099d3;
+}
+tr.listing-item + tr.listing-panel div.listing-body {
+    background-color: #f6f6f6;
+}
+
+tbody.active .listing-head {
+    border-top: 3px solid #0099d3;
+}
+
+.listing-head h3 {
+    font-weight: normal;
+    font-size: 18px;
+    margin-top: 0px;
+    margin-left: 5px;
+    margin-bottom: 10px;
+}
+
+.listing-head h3 i {
+    float: left;
+    padding-right: 7px;
+}
+
+.listing-head .nav li a {
+    padding-top: 0px;
+    font-size: 13px;
+}
+
+.listing-head .nav-tabs {
+    border-bottom: none;
+}
+
+.listing-head .nav-tabs-pf {
+    margin-left: -10px;
+}
+
+/* To display info instead of tabs */
+.listing-head dl {
+    display: inline-block;
+    height: 1.6em;
+    margin-bottom: 5px;
+    white-space: nowrap;
+    margin-right: 45px;
+    margin-left: 5px;
+}
+
+.listing-head dt {
+    font-weight: normal;
+    display: inline;
+    margin-right: 0.5em;
+    color: #888;
+}
+
+.listing-head dd {
+    display: inline;
+    color: black;
+}
+
+.listing-body {
+    padding: 20px 25px;
+    font-size: 13px;
+    border: 1px solid #ccc;
+}
+
+.listing-actions {
+    float: right;
+    min-height: 26px;
+}
+
+.listing-status {
+    float: right;
+    clear: right;
+}
+
+.listing-body tt {
+    font-size: 12px
+}
+
+.listing-body dl {
+    margin: 0;
+}
+
+.listing-body dl + dl {
+    margin-top: 26px;
+}
+
+.listing-body dt {
+    clear: left;
+    float: left;
+    width: 35%;
+    min-width: 100px;
+    max-width: 250px;
+    min-height: 26px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+    padding-right: 10px;
+    color: #888;
+    font-weight: normal;
+}
+
+.listing-body dl.full dt {
+    text-align: left;
+    min-width: none;
+    max-width: none;
+    float: none;
+    width: auto;
+}
+
+.listing-body dd {
+    min-height: 26px;
+    max-width: 1000px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+table.listing tbody.open {
+    box-shadow: 1px 1px 1px 1px #f5f5f5;
+}
+
+/* By default these thincgs are hidden */
+tbody.open tr.listing-item,
+tbody tr.listing-head,
+tbody tr.listing-panel,
+tbody tr.listing-body,
+tbody .listing-open {
+    display: none;
+}
+
+/* ... unless they are in the right state */
+tbody tr.listing-item.listing-head,
+tbody.open tr.listing-head,
+tbody.open tr.listing-panel,
+tbody.open tr.listing-body {
+    display: table-row;
+}
+
+tbody.open .listing-open {
+    display: block;
+}
+
+tbody.open tr.listing-head {
+    border-color: #ccc;
+    border-style: solid;
+    border-width: 1px 1px 0px 1px;
+    border-top: 3px solid #0099d3;
+}
+
+tr.listing-head + tr.listing-head {
+    border-top: none;
+}
+
+tr.listing-head + tr.listing-head td {
+    padding: 0px 10px 0px 10px;
+}
+
+tr.listing-body td {
+    padding: 20px 25px;
+    font-size: 13px;
+    background-color: #f6f6f6;
+}
+
+.listing-body .alert {
+    border: none;
+    margin: 0px 0px 10px 0px;
+    padding: 0px;
+    background-color: transparent;
+}
+
+.listing-body .alert .fa {
+    position: relative;
+    left: 0px;
+    top: 3px;
+    padding-right: 5px;
+}
+
+.listing-empty {
+    color: #888;
+    text-align: center;
+    border-top: 1px solid #eee;
+    border-bottom: 1px solid #eee;
+}
+
+/* Used at the end of a group of tbody to show an 'empty' message */
+thead.listing-empty td {
+    padding: 10px;
+}
+
+tbody + thead.listing-empty {
+    display: none;
+}
+
+/* Timelines */
+
+div.timeline {
+    border-left: 6px solid #ccc;
+    position: relative;
+    margin-left: 25px;
+    padding-left: 30px;
+    min-height: 1px;
+    padding-bottom: 15px;
+}
+
+div.timeline .timeline-point {
+    position: absolute;
+    left: -13.5px;
+    font-size: 21px;
+    text-align: center;
+    width: 20px;
+    height: 27px;
+    display: block;
+    line-height: 21px;
+    background-color: white;
+    padding: 3px 0px;
+    color: #ccc;
+}
+
+div.timeline .timeline-point.active {
+    color: #3f9c35;
+}
+
+div.timeline .timeline-md {
+    font-size: 24px;
+    width: 24px;
+    height: 32px;
+    line-height: 24px;
+    padding: 4px 0px;
+    left: -16px;
+}
+
+div.timeline .timeline-lg {
+    font-size: 40px;
+    width: 40px;
+    height: 44px;
+    line-height: 40px;
+    left: -23.5px;
+    padding: 2px 0px;
+}
+
+div.timeline .fa-caret-up {
+    font-size: 30px;
+    line-height: 20px;
+    height: 24px;
+}
+
+div.timeline div.listing-panel {
+    margin-bottom: 0px;
+}
+
+div.timeline.timeline-end {
+    min-height: 30px;
+    padding-left: 40px;
+    background-repeat: repeat-y;
+    background-position: 0% 100%;
+    background-size: 6px 5px;
+    background-image: linear-gradient(#ccc 33%, #fff 0%);
+    border-left: none;
+}
+
+div.timeline.timeline-end .timeline-md {
+    left: -10px;
+}
+
+/* Fix up nav-tabs-pf to work properly */
+
+.nav-tabs-pf > li:first-child a {
+    margin-left: 0px !important;
+    padding-left: 15px !important;
+}
+
+.nav-tabs-pf > li a:before {
+    right: 0px !important;
+}
+
+.nav-tabs-pf > li > a:active:before,
+.nav-tabs-pf > li > a:focus:before,
+.nav-tabs-pf > li > a:hover:before,
+.nav-tabs-pf > li.active a:before {
+    height: 3px;
+    left: 0px;
+}

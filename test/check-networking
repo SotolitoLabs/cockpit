@@ -24,30 +24,41 @@ import os
 
 class TestNetworking(MachineCase):
     def setUp(self):
-        # we need a static ip for this test
-        MachineCase.setUp(self, macaddr='52:54:00:9e:00:F2')
+        MachineCase.setUp(self)
 
     def get_iface(self, m, mac):
         def getit():
             path = m.execute("grep -li '%s' /sys/class/net/*/address" % mac)
             return path.split("/")[-2]
-        return wait(getit).strip()
+        iface = wait(getit).strip()
+        print "%s -> %s" % (mac, iface)
+        return iface
 
     def wait_for_iface(self, iface):
-        self.browser.wait_in_text("#networking-interfaces", iface)
-        start_time = time.time()
+        sel = "#networking-interfaces tr[data-interface='%s']" % iface
+
         valid_states = [
                           "Inactive",
                           "bps",
                           "Configuring IP"
                        ]
-        while (time.time() - start_time) < self.browser.phantom_wait_timeout:
-            element = self.browser.text("#networking-interfaces tr:contains('%s')" % iface)
+
+        def is_valid():
+            row_text = self.browser.text(sel)
             for state in valid_states:
-                if state in element:
-                    return
-            time.sleep(0.5)
-        raise Failure("Interface $s didn't come up" % iface)
+                if state in row_text:
+                    return True
+            return False
+
+        try:
+            self.browser.wait_present(sel)
+            self.browser.wait_visible(sel)
+            self.browser.wait(is_valid)
+        except:
+            print "Interface %s didn't show up." % iface
+            print self.browser.eval_js("$('#networking-interfaces').html()")
+            print self.machine.execute("grep . /sys/class/net/*/address")
+            raise
 
     def switch_off_rp_filter(self, m):
         #
@@ -93,19 +104,24 @@ class TestNetworking(MachineCase):
         # Add interface, wait for it to be recognized and activated by
         # Network Manager, and switch to its page
 
-        mac = "52:54:00:9e:00:F5"
+        mac = "52:54:00:9e:00:F2"
         label = "test"
-        m.execute("echo -e 'TYPE=Ethernet\nHWADDR=%s\nBOOTPROTO=dhcp\n' >/etc/sysconfig/network-scripts/ifcfg-%s" % (mac, label))
+        m.execute("echo -e 'TYPE=Ethernet\nHWADDR=%s\nBOOTPROTO=autoip\n' >/etc/sysconfig/network-scripts/ifcfg-%s" % (mac, label))
         m.execute("nmcli c reload")
         iface = self.get_iface(m, m.add_netiface(mac));
 
         self.wait_for_iface(iface)
-        b.click("#networking-interfaces tr:contains('%s')" % iface)
+        b.click("#networking-interfaces tr[data-interface='%s']" % iface)
         b.wait_visible("#network-interface")
+
+        # Make sure we are working on the settings written above.
+        # "Link local" corresponds to "BOOTPROTO=autoip".
+        #
+        b.wait_present("tr:contains('IPv4')")
+        b.wait_in_text("tr:contains('IPv4')", "Link local")
 
         # Configure a manual IP address
         #
-        b.wait_in_text("#network-interface", "IPv4")
         b.click("tr:contains('IPv4') button")
         b.wait_popup("network-ip-settings-dialog")
         b.click("#network-ip-settings-dialog .btn.dropdown-toggle")
@@ -154,8 +170,8 @@ class TestNetworking(MachineCase):
         # Switching off rp_filter doesn't seem to be enough in the
         # case of bonds.
 
-        iface1 = self.get_iface(m, m.add_netiface(mac="52:54:00:9e:00:f1"));
-        iface2 = self.get_iface(m, m.add_netiface(mac="52:54:00:9e:00:f5", vlan=1))
+        iface1 = self.get_iface(m, m.add_netiface());
+        iface2 = self.get_iface(m, m.add_netiface(vlan=1))
         self.wait_for_iface(iface1)
         self.wait_for_iface(iface2)
 
@@ -163,8 +179,8 @@ class TestNetworking(MachineCase):
         b.click("button:contains('Add Bond')")
         b.wait_popup("network-bond-settings-dialog")
         b.set_val("#network-bond-settings-dialog tr:contains('Name') input", "tbond")
-        b.set_checked("label:contains('%s') input" % iface1, True)
-        b.set_checked("label:contains('%s') input" % iface2, True)
+        b.set_checked("input[data-iface='%s']" % iface1, True)
+        b.set_checked("input[data-iface='%s']" % iface2, True)
         b.click("#network-bond-settings-dialog button:contains('Apply')")
         b.wait_popdown("network-bond-settings-dialog")
         b.wait_in_text("#networking-interfaces", "tbond")
@@ -223,8 +239,8 @@ class TestNetworking(MachineCase):
         b.click("button:contains('Add Bridge')")
         b.wait_popup("network-bridge-settings-dialog")
         b.set_val("#network-bridge-settings-dialog tr:contains('Name') input", "tbridge")
-        b.set_checked("label:contains('%s') input" % iface1, True)
-        b.set_checked("label:contains('%s') input" % iface2, True)
+        b.set_checked("input[data-iface='%s']" % iface1, True)
+        b.set_checked("input[data-iface='%s']" % iface2, True)
         b.click("#network-bridge-settings-dialog button:contains('Apply')")
         b.wait_popdown("network-bridge-settings-dialog")
         b.wait_in_text("#networking-interfaces", "tbridge")
