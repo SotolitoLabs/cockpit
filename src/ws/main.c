@@ -35,6 +35,7 @@
 #include "common/cockpitlog.h"
 #include "common/cockpitmemory.h"
 #include "common/cockpitsystem.h"
+#include "common/cockpittest.h"
 
 #include <libssh/libssh.h>
 #include <libssh/callbacks.h>
@@ -97,9 +98,6 @@ calculate_static_roots (GHashTable *os_release)
 
   while (i > 0)
     g_free (dirs[--i]);
-
-  /* Allow branding symlinks to escape these roots into /usr/share/pixmaps */
-  cockpit_web_exception_escape_root = "/usr/share/pixmaps";
 
   /* Load the fail template */
   g_resources_register (cockpitassets_get_resource ());
@@ -189,12 +187,18 @@ main (int argc,
       goto out;
     }
 
+  cockpit_web_server_set_redirect_tls (server, !cockpit_conf_bool ("WebService", "AllowUnencrypted", FALSE));
+
   if (cockpit_web_server_get_socket_activated (server))
     g_signal_connect_swapped (data.auth, "idling", G_CALLBACK (g_main_loop_quit), loop);
 
   /* Ignores stuff it shouldn't handle */
   g_signal_connect (server, "handle-stream",
                     G_CALLBACK (cockpit_handler_socket), &data);
+
+  /* External channels, ignore stuff they shouldn't handle */
+  g_signal_connect (server, "handle-stream",
+                    G_CALLBACK (cockpit_handler_external), &data);
 
   /* Don't redirect to TLS for /ping */
   g_object_set (server, "ssl-exception-prefix", "/ping", NULL);
@@ -210,6 +214,12 @@ main (int argc,
   /* The fallback handler for everything else */
   g_signal_connect (server, "handle-resource",
                     G_CALLBACK (cockpit_handler_default), &data);
+
+  /* Debugging issues during testing */
+#if WITH_DEBUG
+  signal (SIGABRT, cockpit_test_signal_backtrace);
+  signal (SIGSEGV, cockpit_test_signal_backtrace);
+#endif
 
   g_main_loop_run (loop);
 

@@ -85,6 +85,17 @@ $ cockpit-bridge --packages
 
     <variablelist>
       <varlistentry>
+        <term>content-security-policy</term>
+        <listitem>
+          <para>By default Cockpit serves packages using a strict
+            <ulink url="https://en.wikipedia.org/wiki/Content_Security_Policy">Content Security Policy</ulink>,
+            which among other things does not allow inline styles or scripts. This can
+            be overriden on a per-package basis, with this setting.</para>
+          <para>If the overriden content security policy does not contain a <code>default-src</code> or
+            <code>connect-src</code> these will be added to the policy from the manifest.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
         <term>menu</term>
         <listitem><para>An optional JSON object containing any main menu items that this package
           provides. These will be added into the Cockpit user interface on the side bar.
@@ -138,6 +149,10 @@ $ cockpit-bridge --packages
   }
 }
 </programlisting>
+
+    <para>A file called <filename>override.json</filename> may be placed next to the manifest.
+      containing overrides to the information in the manifest. These override files are in the
+      simple <ulink url="https://tools.ietf.org/html/rfc7386">JSON Merge Patch</ulink> format.</para>
 
   </section>
 

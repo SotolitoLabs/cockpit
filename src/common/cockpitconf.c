@@ -21,6 +21,8 @@
 
 #include "cockpitconf.h"
 
+#include "cockpithash.h"
+
 static GHashTable *cockpit_conf = NULL;
 static GHashTable *cached_strvs = NULL;
 const gchar *cockpit_config_file = PACKAGE_SYSCONF_DIR "/cockpit/cockpit.conf";
@@ -51,7 +53,7 @@ load_key_file (const gchar *file_path,
       section = g_hash_table_lookup (cockpit_conf, groups[i]);
       if (section == NULL)
         {
-          section = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+          section = g_hash_table_new_full (cockpit_str_case_hash, cockpit_str_case_equal, g_free, g_free);
           g_hash_table_insert (cockpit_conf, g_strdup (groups[i]), section);
         }
 
@@ -77,9 +79,9 @@ cockpit_conf_init (void)
 {
   GError *error = NULL;
 
-  cockpit_conf = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+  cockpit_conf = g_hash_table_new_full (cockpit_str_case_hash, cockpit_str_case_equal, g_free,
                                         (GDestroyNotify)g_hash_table_unref);
-  cached_strvs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+  cached_strvs = g_hash_table_new_full (cockpit_str_case_hash, cockpit_str_case_equal, g_free,
                                         (GDestroyNotify)g_strfreev);
 
   if (cockpit_config_file)
@@ -137,6 +139,34 @@ cockpit_conf_string (const gchar *section,
     return g_hash_table_lookup (sect, field);
 
   return NULL;
+}
+
+gboolean
+cockpit_conf_bool (const gchar *section,
+                   const gchar *field,
+                   gboolean defawlt)
+{
+  GHashTable *sect = NULL;
+  gchar *cmp = NULL;
+  const gchar *value;
+  gboolean ret = defawlt;
+
+  ensure_cockpit_conf ();
+  sect = g_hash_table_lookup (cockpit_conf, section);
+  if (sect != NULL)
+    {
+      value = g_hash_table_lookup (sect, field);
+      if (value)
+        {
+          cmp = g_ascii_strdown (value, -1);
+          ret = g_strcmp0 (cmp, "yes") == 0 ||
+                g_strcmp0 (cmp, "true") == 0 ||
+                g_strcmp0 (cmp, "1") == 0;
+        }
+    }
+
+  g_free (cmp);
+  return ret;
 }
 
 static const gchar **

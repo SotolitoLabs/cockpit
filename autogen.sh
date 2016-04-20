@@ -35,10 +35,8 @@ PKG_NAME="Cockpit"
 olddir=$(pwd)
 cd $srcdir
 
-(
-	cd tools
-	npm install # see tools/package.json
-)
+npm install # see package.json
+find node_modules -name test | xargs rm -rf
 
 rm -rf autom4te.cache
 
@@ -60,10 +58,19 @@ if test -z "${NOCONFIGURE:-}"; then
     fi
 fi
 
-if test -z "${NOCONFIGURE:-}"; then
-    cd $olddir
-    $srcdir/configure --enable-maintainer-mode ${AUTOGEN_CONFIGURE_ARGS:-} "$@" || exit $?
-
-    echo
-    echo "Now type 'make' to compile $PKG_NAME."
+if test -n "${NOCONFIGURE:-}"; then
+    exit 0
 fi
+
+cd $olddir
+rm -f $srcdir/Makefile
+$srcdir/configure --enable-maintainer-mode ${AUTOGEN_CONFIGURE_ARGS:-} "$@" || exit $?
+
+# Put a redirect makefile here
+if [ -z "${NOREDIRECTMAKEFILE:-}" -a ! -f $srcdir/Makefile ]; then
+    cat $srcdir/tools/Makefile.redirect > $srcdir/Makefile
+    printf "\nREDIRECT = %s\n" "$(realpath $olddir)" >> $srcdir/Makefile
+fi
+
+echo
+echo "Now type 'make' to compile $PKG_NAME."

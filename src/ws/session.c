@@ -56,11 +56,13 @@
 #define MAX_BUFFER 64 * 1024
 #define AUTH_FD 3
 #define EX 127
+#define DEFAULT_PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 static struct passwd *pwd;
 const char *rhost;
 static pid_t child;
 static int want_session = 1;
+static char *auth_delimiter = "";
 static FILE *authf;
 
 #if DEBUG_SESSION
@@ -121,7 +123,7 @@ write_auth_string (const char *field,
   const unsigned char *at;
   char buf[8];
 
-  fprintf (authf, ", \"%s\": \"", field);
+  fprintf (authf, "%s \"%s\": \"", auth_delimiter, field);
   for (at = (const unsigned char *)str; *at; at++)
     {
       if (*at == '\\' || *at == '\"' || *at < 0x1f)
@@ -135,6 +137,7 @@ write_auth_string (const char *field,
         }
     }
   fputc_unlocked ('\"', authf);
+  auth_delimiter = ",";
 }
 
 static void
@@ -145,7 +148,7 @@ write_auth_hex (const char *field,
   static const char hex[] = "0123456789abcdef";
   size_t i;
 
-  fprintf (authf, ", \"%s\": \"", field);
+  fprintf (authf, "%s \"%s\": \"", auth_delimiter, field);
   for (i = 0; i < len; i++)
     {
       unsigned char byte = src[i];
@@ -153,6 +156,7 @@ write_auth_hex (const char *field,
       fputc_unlocked (hex[byte & 0xf], authf);
     }
   fputc_unlocked ('\"', authf);
+  auth_delimiter = ",";
 }
 
 static void
@@ -166,13 +170,29 @@ write_auth_begin (int result_code)
    * The use of JSON here is not coincidental. It allows the cockpit-ws
    * to detect whether it received the entire result or not. Partial
    * JSON objects do not parse.
-   *
-   * In addition this is not a cross platform message. We are sending
-   * to cockpit-ws running on the same machine. PAM codes will be
-   * identical and should all be understood by cockpit-ws.
    */
 
-  fprintf (authf, "{ \"result-code\": %d", result_code);
+  fprintf (authf, "{ ");
+
+  if (result_code == PAM_AUTH_ERR || result_code == PAM_USER_UNKNOWN)
+    {
+      write_auth_string ("error", "authentication-failed");
+    }
+  else if (result_code == PAM_PERM_DENIED)
+    {
+      write_auth_string ("error", "permission-denied");
+    }
+  else if (result_code == PAM_AUTHINFO_UNAVAIL)
+    {
+      write_auth_string ("error", "authentication-unavailable");
+    }
+  else if (result_code != PAM_SUCCESS)
+    {
+      write_auth_string ("error", "pam-error");
+    }
+
+  if (result_code != PAM_SUCCESS)
+    write_auth_string ("message", pam_strerror (NULL, result_code));
 
   debug ("wrote result %d to cockpit-ws", result_code);
 }
@@ -479,11 +499,7 @@ perform_basic (void)
 
   write_auth_begin (res);
   if (res == PAM_SUCCESS && pwd)
-    {
-      write_auth_string ("user", pwd->pw_name);
-      if (pwd->pw_gecos)
-        write_auth_string ("full-name", pwd->pw_gecos);
-    }
+    write_auth_string ("user", pwd->pw_name);
   write_auth_end ();
 
   if (res != PAM_SUCCESS)
@@ -504,6 +520,7 @@ perform_gssapi (void)
   struct pam_conv conv = { pam_conv_func, };
   OM_uint32 major, minor;
   gss_cred_id_t client = GSS_C_NO_CREDENTIAL;
+  gss_cred_id_t server = GSS_C_NO_CREDENTIAL;
   gss_buffer_desc input = GSS_C_EMPTY_BUFFER;
   gss_buffer_desc output = GSS_C_EMPTY_BUFFER;
   gss_buffer_desc local = GSS_C_EMPTY_BUFFER;
@@ -513,6 +530,7 @@ perform_gssapi (void)
   gss_OID mech_type = GSS_C_NO_OID;
   pam_handle_t *pamh = NULL;
   OM_uint32 flags = 0;
+  const char *msg;
   char *str = NULL;
   OM_uint32 caps = 0;
   int res;
@@ -521,11 +539,25 @@ perform_gssapi (void)
 
   /* We shouldn't be writing to kerberos caches here */
   setenv ("KRB5CCNAME", "FILE:/dev/null", 1);
+  setenv ("KRB5RCACHETYPE", "none", 1);
 
   debug ("reading kerberos auth from cockpit-ws");
   input.value = read_fd_until_eof (AUTH_FD, "gssapi data", &input.length);
 
-  major = gss_accept_sec_context (&minor, &context, GSS_C_NO_CREDENTIAL, &input,
+  debug ("acquiring server credentials");
+  major = gss_acquire_cred (&minor, GSS_C_NO_NAME, GSS_C_INDEFINITE, GSS_C_NO_OID_SET,
+                            GSS_C_ACCEPT, &server, NULL, NULL);
+  if (GSS_ERROR (major))
+    {
+      /* This is a routine error message, don't litter */
+      msg = gssapi_strerror (major, minor);
+      if (input.length == 0 && !strstr (msg, "nonexistent or empty"))
+        warnx ("couldn't acquire server credentials: %s", msg);
+      res = PAM_AUTHINFO_UNAVAIL;
+      goto out;
+    }
+
+  major = gss_accept_sec_context (&minor, &context, server, &input,
                                   GSS_C_NO_CHANNEL_BINDINGS, &name, &mech_type,
                                   &output, &flags, &caps, &client);
 
@@ -601,11 +633,7 @@ perform_gssapi (void)
 out:
   write_auth_begin (res);
   if (pwd)
-    {
-      write_auth_string ("user", pwd->pw_name);
-      if (pwd->pw_gecos)
-        write_auth_string ("full-name", pwd->pw_gecos);
-    }
+    write_auth_string ("user", pwd->pw_name);
   if (output.value)
     write_auth_hex ("gssapi-output", output.value, output.length);
 
@@ -638,6 +666,8 @@ out:
     gss_release_buffer (&minor, &local);
   if (client != GSS_C_NO_CREDENTIAL)
     gss_release_cred (&minor, &client);
+  if (server != GSS_C_NO_CREDENTIAL)
+    gss_release_cred (&minor, &server);
   if (name != GSS_C_NO_NAME)
      gss_release_name (&minor, &name);
   if (context != GSS_C_NO_CONTEXT)
@@ -853,7 +883,8 @@ fork_session (char **env)
 static void
 pass_to_child (int signo)
 {
-  kill (child, signo);
+  if (child > 0)
+    kill (child, signo);
 }
 
 /* Environment variables to transfer */
@@ -861,6 +892,7 @@ static const char *env_names[] = {
   "G_DEBUG",
   "G_MESSAGES_DEBUG",
   "G_SLICE",
+  "PATH",
   NULL
 };
 
@@ -872,6 +904,9 @@ save_environment (void)
 {
   const char *value;
   int i, j;
+
+  /* Force save our default path */
+  setenv ("PATH", DEFAULT_PATH, 1);
 
   for (i = 0, j = 0; env_names[i] != NULL; i++)
     {
@@ -920,7 +955,7 @@ main (int argc,
         }
 
       /* set a minimal environment */
-      setenv ("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1);
+      setenv ("PATH", DEFAULT_PATH, 1);
 
       if (setgid (0) != 0 || setuid (0) != 0)
         err (1, "couldn't switch permissions correctly");

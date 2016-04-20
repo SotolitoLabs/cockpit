@@ -46,15 +46,16 @@ define([
         }
 
         var message;
-        if (error.message) {
+        if (error.message)
             message = $("<div class='dialog-error help-block'>").text(error.message);
-            wrapper.addClass("has-error").append(message);
-        }
+        wrapper.addClass("has-error").append(message);
 
-        wrapper.on("keypress.dialog-error change.dialog-error", function() {
-            wrapper.removeClass("has-error")
-                .find(".dialog-error.help-block").css("visibility", "hidden");
-        });
+        if (!wrapper.hasClass("error-keep")) {
+            wrapper.on("keypress.dialog-error change.dialog-error", function() {
+                wrapper.removeClass("has-error")
+                    .find(".dialog-error.help-block").css("visibility", "hidden");
+            });
+        }
     }
 
     function global_error(sel, error) {
@@ -150,7 +151,7 @@ define([
         /* Disable everything and stash previous disabled state */
         var controls = sel.find(".form-control").add(".btn", sel);
         if (cancellation)
-            controls = controls.not("[data-dismiss]");
+            controls = controls.not("[data-dismiss]").not(".btn-cancel");
         controls.each(function() {
             var ctl = $(this);
             if (!ctl.attr("disabled")) {
@@ -159,7 +160,7 @@ define([
             }
         });
 
-        sel.find(".btn[data-dismiss]").on("click.dialog-wait", function() {
+        sel.find(".btn[data-dismiss], .btn-cancel").on("click.dialog-wait", function() {
             cancelled = true;
             if (cancellation)
                 cancellation.apply(promise);
@@ -167,7 +168,7 @@ define([
         });
 
         /* When dialog is shown again, remove all mods */
-        sel.on("show.bs.modal.dialog-wait", function() {
+        sel.on("hide.bs.modal.dialog-wait", function() {
             clear_wait(sel);
         });
 
@@ -215,6 +216,10 @@ define([
             console.warn("unknown dialog action: " + action);
     };
 
+    window.addEventListener("hashchange", function() {
+        $(".modal").modal("hide");
+    });
+
     /*
      * OnOff switch pattern
      */
@@ -230,12 +235,13 @@ define([
             var name = self.find("input").first().attr("name") || unique();
             var i, input, text;
             for (i = buttons.length; i < 2; i++) {
-                input = $('<input type="radio" autocomplete="off">').attr("name", name);
+                input = $('<input type="radio" autocomplete="off">');
                 text = document.createTextNode(i === 0 ? _("On") : _("Off"));
                 self.append($('<label class="btn">').append(input, text));
                 buttons = null;
             }
             buttons = buttons || self.find(".btn");
+            buttons.find("input").attr("name", name);
             onoff_change(self, !!value);
         });
         return sel;

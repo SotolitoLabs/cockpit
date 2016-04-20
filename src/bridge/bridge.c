@@ -18,6 +18,8 @@
  */
 #include "config.h"
 
+#include "cockpitbridge.h"
+
 #include "cockpitchannel.h"
 #include "cockpitdbusinternal.h"
 #include "cockpitdbusjson.h"
@@ -34,8 +36,7 @@
 #include "cockpitinternalmetrics.h"
 #include "cockpitpolkitagent.h"
 #include "cockpitportal.h"
-
-#include "deprecated/cockpitdbusjson1.h"
+#include "cockpitwebsocketstream.h"
 
 #include "common/cockpitassets.h"
 #include "common/cockpitjson.h"
@@ -44,6 +45,8 @@
 #include "common/cockpittest.h"
 #include "common/cockpitunixfd.h"
 #include "common/cockpitwebresponse.h"
+
+#include <sys/prctl.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -60,49 +63,12 @@
    of the user that is logged into the Server Console.
 */
 
-static GHashTable *channels;
-static gboolean init_received;
 static CockpitPackages *packages;
 
-static void
-on_channel_closed (CockpitChannel *channel,
-                   const gchar *problem,
-                   gpointer user_data)
-{
-  g_hash_table_remove (channels, cockpit_channel_get_id (channel));
-}
-
-static void
-process_init (CockpitTransport *transport,
-              JsonObject *options)
-{
-  gint64 version = -1;
-
-  if (!cockpit_json_get_int (options, "version", -1, &version))
-    {
-      g_warning ("invalid version field in init message");
-      cockpit_transport_close (transport, "protocol-error");
-    }
-
-  if (version == 1)
-    {
-      g_debug ("received init message");
-      init_received = TRUE;
-    }
-  else
-    {
-      g_message ("unsupported version of cockpit protocol: %" G_GINT64_FORMAT, version);
-      cockpit_transport_close (transport, "not-supported");
-    }
-}
-
-static struct {
-  const gchar *name;
-  GType (* function) (void);
-} payload_types[] = {
-  { "dbus-json1", cockpit_dbus_json1_get_type },
+static CockpitPayloadType payload_types[] = {
   { "dbus-json3", cockpit_dbus_json_get_type },
   { "http-stream1", cockpit_http_stream_get_type },
+  { "http-stream2", cockpit_http_stream_get_type },
   { "stream", cockpit_pipe_channel_get_type },
   { "fsread1", cockpit_fsread_get_type },
   { "fsreplace1", cockpit_fsreplace_get_type },
@@ -111,104 +77,9 @@ static struct {
   { "null", cockpit_null_channel_get_type },
   { "echo", cockpit_echo_channel_get_type },
   { "metrics1", cockpit_internal_metrics_get_type },
+  { "websocket-stream1", cockpit_web_socket_stream_get_type },
   { NULL },
 };
-
-static void
-process_open (CockpitTransport *transport,
-              const gchar *channel_id,
-              JsonObject *options)
-{
-  CockpitChannel *channel;
-  GType channel_type;
-  const gchar *payload;
-  gint i;
-
-  if (!channel_id)
-    {
-      g_warning ("Caller tried to open channel with invalid id");
-      cockpit_transport_close (transport, "protocol-error");
-    }
-  else if (g_hash_table_lookup (channels, channel_id))
-    {
-      g_warning ("Caller tried to reuse a channel that's already in use");
-      cockpit_transport_close (transport, "protocol-error");
-    }
-
-  else
-    {
-      if (!cockpit_json_get_string (options, "payload", NULL, &payload))
-        payload = NULL;
-
-      /* This will close with "not-supported" */
-      channel_type = COCKPIT_TYPE_CHANNEL;
-
-      for (i = 0; payload_types[i].name != NULL; i++)
-        {
-          if (g_strcmp0 (payload, payload_types[i].name) == 0)
-            {
-              channel_type = payload_types[i].function();
-              break;
-            }
-        }
-
-      channel = g_object_new (channel_type,
-                              "transport", transport,
-                              "id", channel_id,
-                              "options", options,
-                              NULL);
-
-      g_hash_table_insert (channels, g_strdup (channel_id), channel);
-      g_signal_connect (channel, "closed", G_CALLBACK (on_channel_closed), NULL);
-    }
-}
-
-static gboolean
-on_transport_control (CockpitTransport *transport,
-                      const char *command,
-                      const gchar *channel_id,
-                      JsonObject *options,
-                      GBytes *message,
-                      gpointer user_data)
-{
-  if (g_str_equal (command, "init"))
-    {
-      process_init (transport, options);
-      return TRUE;
-    }
-
-  if (!init_received)
-    {
-      g_warning ("caller did not send 'init' message first");
-      cockpit_transport_close (transport, "protocol-error");
-      return TRUE;
-    }
-
-  if (g_str_equal (command, "open"))
-    {
-      process_open (transport, channel_id, options);
-      return TRUE;
-    }
-  else if (g_str_equal (command, "close"))
-    {
-      if (!channel_id)
-        {
-          g_warning ("Caller tried to close channel without an id");
-          cockpit_transport_close (transport, "protocol-error");
-        }
-      else
-        {
-          /*
-           * The channel may no longer exist due to a race of the bridge closing
-           * a channel and the web closing it at the same time.
-           */
-
-          g_debug ("already closed channel %s", channel_id);
-        }
-    }
-
-  return FALSE;
-}
 
 static void
 on_closed_set_flag (CockpitTransport *transport,
@@ -258,7 +129,6 @@ static GPid
 start_dbus_daemon (void)
 {
   GError *error = NULL;
-  const gchar *env;
   GString *address = NULL;
   gchar *line;
   gsize len;
@@ -274,14 +144,6 @@ start_dbus_daemon (void)
       "--session",
       NULL
   };
-
-  /* Automatically start a DBus session if necessary */
-  env = g_getenv ("DBUS_SESSION_BUS_ADDRESS");
-  if (env != NULL && env[0] != '\0')
-    {
-      g_debug ("already have session bus: %s", env);
-      goto out;
-    }
 
   if (pipe (addrfd))
     {
@@ -363,6 +225,102 @@ out:
   return pid;
 }
 
+static void
+setup_ssh_agent (gpointer addrfd)
+{
+  g_unsetenv ("G_DEBUG");
+  prctl (PR_SET_PDEATHSIG, SIGTERM);
+  cockpit_unix_fd_close_all (3, GPOINTER_TO_INT (addrfd));
+}
+
+static GPid
+start_ssh_agent (void)
+{
+  GError *error = NULL;
+  GPid pid = 0;
+  gint fd = -1;
+  gint status = -1;
+
+  gchar *pid_line = NULL;
+  gchar *agent_output = NULL;
+  gchar *agent_error = NULL;
+  gchar *bind_address = g_strdup_printf ("%s/ssh-agent.XXXXXX", g_get_user_runtime_dir ());
+
+  gchar *agent_argv[] = {
+      "ssh-agent",
+      "-a",
+      bind_address,
+      NULL
+  };
+
+  fd = g_mkstemp (bind_address);
+  if (fd < 0)
+    {
+      g_warning ("couldn't create temporary socket file: %s", g_strerror (errno));
+      goto out;
+    }
+  if (g_unlink (bind_address) < 0)
+    {
+      g_warning ("couldn't remove temporary socket file: %s", g_strerror (errno));
+      goto out;
+    }
+
+  if (!g_spawn_sync (NULL, agent_argv, NULL,
+                     G_SPAWN_SEARCH_PATH, setup_ssh_agent,
+                     GINT_TO_POINTER (-1),
+                     &agent_output, &agent_error,
+                     &status, &error))
+    {
+      if (g_error_matches (error, G_SPAWN_ERROR, G_SPAWN_ERROR_NOENT))
+        g_debug ("couldn't start %s: %s", agent_argv[0], error->message);
+      else
+        g_warning ("couldn't start %s: %s", agent_argv[0], error->message);
+      goto out;
+    }
+
+  if (!g_spawn_check_exit_status (status, &error))
+    {
+      g_warning ("couldn't start %s: %s: %s", agent_argv[0],
+                 error->message, agent_error);
+      goto out;
+    }
+
+  pid_line = strstr (agent_output, "SSH_AGENT_PID=");
+  if (pid_line)
+    {
+      if (sscanf (pid_line, "SSH_AGENT_PID=%d;", &pid) != 1)
+        {
+            g_warning ("couldn't find pid in %s", pid_line);
+            goto out;
+        }
+    }
+
+  if (pid < 1)
+    {
+      g_warning ("couldn't get agent pid from ssh-agent output: %s", agent_output);
+      goto out;
+    }
+
+  g_debug ("launched %s", agent_argv[0]);
+  g_setenv ("SSH_AUTH_SOCK", bind_address, TRUE);
+
+out:
+  g_clear_error (&error);
+  if (fd >= 0)
+    close (fd);
+  g_free (bind_address);
+  g_free (agent_error);
+  g_free (agent_output);
+  return pid;
+}
+
+static gboolean
+have_env (const gchar *name)
+{
+  const gchar *env = g_getenv (name);
+  return env && env[0];
+}
+
 static gboolean
 on_signal_done (gpointer data)
 {
@@ -397,24 +355,26 @@ getpwuid_a (uid_t uid)
 }
 
 static int
-run_bridge (const gchar *interactive)
+run_bridge (const gchar *interactive,
+            gboolean privileged_slave)
 {
   CockpitTransport *transport;
+  CockpitBridge *bridge;
   gboolean terminated = FALSE;
   gboolean interupted = FALSE;
   gboolean closed = FALSE;
+  gboolean init_received = FALSE;
   CockpitPortal *super = NULL;
   CockpitPortal *pcp = NULL;
   gpointer polkit_agent = NULL;
   const gchar *directory;
   struct passwd *pwd;
   GPid daemon_pid = 0;
+  GPid agent_pid = 0;
   guint sig_term;
   guint sig_int;
   int outfd;
   uid_t uid;
-  const gchar *ssh_auth_sock;
-  GSocketAddress *auth_address = NULL;
 
   cockpit_set_journal_logging (G_LOG_DOMAIN, !isatty (2));
 
@@ -422,11 +382,14 @@ run_bridge (const gchar *interactive)
    * The bridge always runs from within $XDG_RUNTIME_DIR
    * This makes it easy to create user sockets and/or files.
    */
-  directory = g_get_user_runtime_dir ();
-  if (g_mkdir_with_parents (directory, 0700) < 0)
-    g_warning ("couldn't create runtime dir: %s: %s", directory, g_strerror (errno));
-  else if (g_chdir (directory) < 0)
-    g_warning ("couldn't change to runtime dir: %s: %s", directory, g_strerror (errno));
+  if (!privileged_slave)
+    {
+      directory = g_get_user_runtime_dir ();
+      if (g_mkdir_with_parents (directory, 0700) < 0)
+        g_warning ("couldn't create runtime dir: %s: %s", directory, g_strerror (errno));
+      else if (g_chdir (directory) < 0)
+        g_warning ("couldn't change to runtime dir: %s: %s", directory, g_strerror (errno));
+    }
 
   /* Always set environment variables early */
   uid = geteuid();
@@ -463,9 +426,14 @@ run_bridge (const gchar *interactive)
 
   g_type_init ();
 
-  /* Start a session daemon if necessary */
-  if (!interactive)
-    daemon_pid = start_dbus_daemon ();
+  /* Start daemons if necessary */
+  if (!interactive && !privileged_slave)
+    {
+      if (!have_env ("DBUS_SESSION_BUS_ADDRESS"))
+        daemon_pid = start_dbus_daemon ();
+      if (!have_env ("SSH_AUTH_SOCK"))
+        agent_pid = start_ssh_agent ();
+    }
 
   packages = cockpit_packages_new ();
   cockpit_dbus_internal_startup (interactive != NULL);
@@ -474,7 +442,6 @@ run_bridge (const gchar *interactive)
     {
       /* Allow skipping the init message when interactive */
       init_received = TRUE;
-
       transport = cockpit_interact_transport_new (0, outfd, interactive);
     }
   else
@@ -489,33 +456,21 @@ run_bridge (const gchar *interactive)
       super = cockpit_portal_new_superuser (transport);
     }
 
-  ssh_auth_sock = g_getenv ("SSH_AUTH_SOCK");
-  if (ssh_auth_sock != NULL && ssh_auth_sock[0] != '\0')
-      auth_address = g_unix_socket_address_new (ssh_auth_sock);
-
   g_resources_register (cockpitassets_get_resource ());
   cockpit_web_failure_resource = "/org/cockpit-project/Cockpit/fail.html";
 
-  cockpit_channel_internal_address ("ssh-agent", auth_address);
-
-  if (auth_address)
-      g_object_unref (auth_address);
-
   pcp = cockpit_portal_new_pcp (transport);
 
-  cockpit_dbus_time_startup ();
+  bridge = cockpit_bridge_new (transport, payload_types, init_received);
   cockpit_dbus_user_startup (pwd);
   cockpit_dbus_setup_startup ();
+  cockpit_dbus_environment_startup ();
 
   g_free (pwd);
   pwd = NULL;
 
-  g_signal_connect (transport, "control", G_CALLBACK (on_transport_control), NULL);
   g_signal_connect (transport, "closed", G_CALLBACK (on_closed_set_flag), &closed);
   send_init_command (transport);
-
-  /* Owns the channels */
-  channels = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
 
   while (!terminated && !closed && !interupted)
     g_main_context_iteration (NULL, TRUE);
@@ -526,8 +481,8 @@ run_bridge (const gchar *interactive)
     g_object_unref (super);
 
   g_object_unref (pcp);
+  g_object_unref (bridge);
   g_object_unref (transport);
-  g_hash_table_destroy (channels);
 
   cockpit_dbus_internal_cleanup ();
   cockpit_packages_free (packages);
@@ -535,6 +490,8 @@ run_bridge (const gchar *interactive)
 
   if (daemon_pid)
     kill (daemon_pid, SIGTERM);
+  if (agent_pid)
+    kill (agent_pid, SIGTERM);
 
   g_source_remove (sig_term);
   g_source_remove (sig_int);
@@ -588,11 +545,13 @@ main (int argc,
   int ret;
 
   static gboolean opt_packages = FALSE;
+  static gboolean opt_privileged = FALSE;
   static gboolean opt_version = FALSE;
   static gchar *opt_interactive = NULL;
 
   static GOptionEntry entries[] = {
     { "interact", 0, 0, G_OPTION_ARG_STRING, &opt_interactive, "Interact with the raw protocol", "boundary" },
+    { "privileged", 0, 0, G_OPTION_ARG_NONE, &opt_privileged, "Privileged copy of bridge", NULL },
     { "packages", 0, 0, G_OPTION_ARG_NONE, &opt_packages, "Show Cockpit package information", NULL },
     { "version", 0, 0, G_OPTION_ARG_NONE, &opt_version, "Show Cockpit version information", NULL },
     { NULL }
@@ -614,6 +573,7 @@ main (int argc,
   if (!g_getenv ("XDG_DATA_DIRS") && !g_str_equal (DATADIR, "/usr/share"))
     g_setenv ("XDG_DATA_DIRS", DATADIR, TRUE);
 
+  g_setenv ("LANG", "en_US.UTF-8", FALSE);
   g_setenv ("GSETTINGS_BACKEND", "memory", TRUE);
   g_setenv ("GIO_USE_PROXY_RESOLVER", "dummy", TRUE);
   g_setenv ("GIO_USE_VFS", "local", TRUE);
@@ -651,7 +611,7 @@ main (int argc,
       return 2;
     }
 
-  ret = run_bridge (opt_interactive);
+  ret = run_bridge (opt_interactive, opt_privileged);
 
   g_free (opt_interactive);
   return ret;

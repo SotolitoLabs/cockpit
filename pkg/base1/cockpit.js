@@ -43,12 +43,44 @@ function is_array(it) {
     return Object.prototype.toString.call(it) === '[object Array]';
 }
 
-function BasicError(problem, message) {
-    this.problem = problem;
-    this.message = message || cockpit.message(problem);
-    this.toString = function() {
-        return this.message;
-    };
+function is_function(x) {
+    return typeof x === 'function';
+}
+
+function is_object(x) {
+    return x !== null && typeof x === 'object';
+}
+
+function is_plain_object(x) {
+    return is_object(x) && Object.prototype.toString.call(x) === '[object Object]';
+}
+
+/* Also works for negative zero */
+function is_negative(n) {
+    return ((n = +n) || 1 / n) < 0;
+}
+
+/* Object.assign() workalike */
+function extend(to/* , from ... */) {
+    var j, len, key, from;
+    for (j = 1, len = arguments.length; j < len; j++) {
+        from = arguments[j];
+        if (from) {
+            for (key in from) {
+                if (from[key] !== undefined)
+                    to[key] = from[key];
+            }
+        }
+    }
+    return to;
+}
+
+function invoke_functions(functions, self, args) {
+    var length = functions ? functions.length : 0;
+    for (var i = 0; i < length; i++) {
+        if (functions[i])
+            functions[i].apply(self, args);
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -58,6 +90,7 @@ function BasicError(problem, message) {
  */
 
 var default_transport = null;
+var public_transport = null;
 var reload_after_disconnect = false;
 var expect_disconnect = false;
 var init_callback = null;
@@ -66,9 +99,10 @@ var filters = [ ];
 
 var have_array_buffer = !!window.ArrayBuffer;
 
-var origin = window.location.origin;
-if (!origin) {
-    origin = window.location.protocol + "//" + window.location.hostname +
+var transport_origin = window.location.origin;
+
+if (!transport_origin) {
+    transport_origin = window.location.protocol + "//" + window.location.hostname +
         (window.location.port ? ':' + window.location.port: '');
 }
 
@@ -158,31 +192,59 @@ function transport_debug() {
         console.debug.apply(console, arguments);
 }
 
+/*
+ * Extends an object to have the standard DOM style addEventListener
+ * removeEventListener and dispatchEvent methods. The dispatchEvent
+ * method has the additional capability to create a new event from a type
+ * string and arguments.
+ */
 function event_mixin(obj, handlers) {
-    obj.addEventListener = function addEventListener(type, handler) {
-        if (handlers[type] === undefined)
-            handlers[type] = [ ];
-        handlers[type].push(handler);
-    };
-    obj.removeEventListener = function removeEventListener(type, handler) {
-        var length = handlers[type] ? handlers[type].length : 0;
-        for (var i = 0; i < length; i++) {
-            if (handlers[type][i] == handler) {
-                handlers[type][i] = null;
-                break;
+    Object.defineProperties(obj, {
+        addEventListener: {
+            enumerable: false,
+            value: function addEventListener(type, handler) {
+                if (handlers[type] === undefined)
+                    handlers[type] = [ ];
+                handlers[type].push(handler);
+            }
+        },
+        removeEventListener: {
+            enumerable: false,
+            value: function removeEventListener(type, handler) {
+                var length = handlers[type] ? handlers[type].length : 0;
+                for (var i = 0; i < length; i++) {
+                    if (handlers[type][i] === handler) {
+                        handlers[type][i] = null;
+                        break;
+                    }
+                }
+            }
+        },
+        dispatchEvent: {
+            enumerable: false,
+            value: function dispatchEvent(event) {
+                var type, args;
+                if (typeof event === "string") {
+                    type = event;
+                    args = Array.prototype.slice.call(arguments, 1);
+                    event = document.createEvent("CustomEvent");
+                    if (arguments.length == 2)
+                        event.initCustomEvent(type, false, false, arguments[1]);
+                    else if (arguments.length > 2)
+                        event.initCustomEvent(type, false, false, args);
+                    else
+                        event.initCustomEvent(type, false, false, null);
+                    args.unshift(event);
+                } else {
+                    type = event.type;
+                    args = arguments;
+                }
+                if (is_function(obj['on' + type]))
+                    obj['on' + type].apply(obj, args);
+                invoke_functions(handlers[type], obj, args);
             }
         }
-    };
-    obj.dispatchEvent = function dispatchEvent(event) {
-        var type = event.type;
-        if (typeof obj['on' + type] === "function")
-            obj['on' + type].apply(obj, arguments);
-        var length = handlers[type] ? handlers[type].length : 0;
-        for (var i = 0; i < length; i++) {
-            if (handlers[type][i])
-                handlers[type][i].apply(obj, arguments);
-        }
-    };
+    });
 }
 
 function calculate_url() {
@@ -249,7 +311,7 @@ function ParentWebSocket(parent) {
     self.readyState = 0;
 
     window.addEventListener("message", function receive(event) {
-        if (event.origin !== origin || event.source !== parent)
+        if (event.origin !== transport_origin || event.source !== parent)
             return;
         var data = event.data;
         if (data === undefined || data.length === undefined)
@@ -263,12 +325,12 @@ function ParentWebSocket(parent) {
     }, false);
 
     self.send = function send(message) {
-        parent.postMessage(message, origin);
+        parent.postMessage(message, transport_origin);
     };
 
     self.close = function close() {
         self.readyState = 3;
-        parent.postMessage("", origin);
+        parent.postMessage("", transport_origin);
         self.onclose();
     };
 
@@ -351,9 +413,7 @@ function Transport() {
     function ready_for_channels() {
         if (!self.ready) {
             self.ready = true;
-            var event = document.createEvent("CustomEvent");
-            event.initCustomEvent("ready", false, false, null);
-            self.dispatchEvent(event);
+            self.dispatchEvent("ready");
         }
     }
 
@@ -446,8 +506,6 @@ function Transport() {
     };
 
     self.close = function close(options) {
-        if (self === default_transport)
-            default_transport = null;
         if (!options)
             options = { "problem": "disconnected" };
         options.command = "close";
@@ -486,15 +544,20 @@ function Transport() {
             channel_seed = String(options["channel-seed"]);
         if (options["host"])
             default_host = options["host"];
-        cockpit.transport.options = options;
+
+        if (public_transport) {
+            public_transport.options = options;
+            public_transport.csrf_token = options["csrf-token"];
+            public_transport.host = default_host;
+        }
+
+        if (init_callback)
+            init_callback(options);
 
         if (waiting_for_init) {
             waiting_for_init = false;
             ready_for_channels();
         }
-
-        if (init_callback)
-            init_callback(options);
     }
 
     function process_control(data) {
@@ -537,13 +600,11 @@ function Transport() {
     self.send_data = function send_data(data) {
         if (!ws) {
             console.log("transport closed, dropped message: ", data);
-        } else if (ws.readyState != 1) {
-            console.log("transport not ready (" + ws.readyState + "), dropped message: ", data);
+            return false;
         } else {
             ws.send(data);
             return true;
         }
-        return false;
     };
 
     self.send_message = function send_message(channel, payload) {
@@ -566,7 +627,7 @@ function Transport() {
     };
 
     self.send_control = function send_control(data) {
-        if(!ws && data.command == "close")
+        if(!ws && (data.command == "close" || data.command == "kill"))
             return; /* don't complain if closed and closing */
         self.send_message("", JSON.stringify(data));
     };
@@ -629,9 +690,7 @@ function Channel(options) {
         } else {
             if (base64)
                 payload = base64_decode(payload, window.Uint8Array || Array);
-            var event = document.createEvent("CustomEvent");
-            event.initCustomEvent("message", false, false, payload);
-            self.dispatchEvent(event, payload);
+            self.dispatchEvent("message", payload);
         }
     }
 
@@ -639,9 +698,7 @@ function Channel(options) {
         self.valid = valid = false;
         if (transport && id)
             transport.unregister(id);
-        var event = document.createEvent("CustomEvent");
-        event.initCustomEvent("close", false, false, data);
-        self.dispatchEvent(event, data);
+        self.dispatchEvent("close", data);
     }
 
     function on_control(data) {
@@ -658,9 +715,7 @@ function Channel(options) {
         } else {
             if (done)
                 received_done = true;
-            var event = document.createEvent("CustomEvent");
-            event.initCustomEvent("control", false, false, data);
-            self.dispatchEvent(event, data);
+            self.dispatchEvent("control", data);
         }
     }
 
@@ -686,14 +741,11 @@ function Channel(options) {
         transport.register(id, on_control, on_message);
 
         /* Now open the channel */
-        var command = {
-            "command" : "open",
-            "channel": id
-        };
-        for (var i in options) {
-            if (options.hasOwnProperty(i) && command[i] === undefined)
-                command[i] = options[i];
-        }
+        var command = { };
+        for (var i in options)
+            command[i] = options[i];
+        command.command = "open";
+        command.channel = id;
 
         if (!command.host) {
             if (default_host)
@@ -772,7 +824,7 @@ function Channel(options) {
             return join_data(buffers, binary);
         };
 
-        self.addEventListener("message", function(event, data) {
+        function on_message(event, data) {
             var consumed, block;
             buffers.push(data);
             if (buffers.callback) {
@@ -795,7 +847,15 @@ function Channel(options) {
                     }
                 }
             }
-        });
+        }
+
+        function on_close() {
+            self.removeEventListener("message", on_message);
+            self.removeEventListener("close", on_close);
+        }
+
+        self.addEventListener("message", on_message);
+        self.addEventListener("close", on_close);
 
         return buffers;
     };
@@ -825,9 +885,15 @@ function resolve_path_dots(parts) {
     return out;
 }
 
-function basic_scope(cockpit) {
+function basic_scope(cockpit, jquery) {
+
     cockpit.channel = function channel(options) {
         return new Channel(options);
+    };
+
+    cockpit.event_target = function event_target(obj) {
+        event_mixin(obj, { });
+        return obj;
     };
 
     /* ------------------------------------------------------------
@@ -919,21 +985,6 @@ function basic_scope(cockpit) {
     cockpit.base64_encode = base64_encode;
     cockpit.base64_decode = base64_decode;
 
-    cockpit.logout = function logout(reload) {
-        if (reload !== false)
-            reload_after_disconnect = true;
-        ensure_transport(function(transport) {
-            transport.send_control({ "command": "logout", "disconnect": true });
-        });
-    };
-
-    /* Not public API ... yet? */
-    cockpit.drop_privileges = function drop_privileges() {
-        ensure_transport(function(transport) {
-            transport.send_control({ "command": "logout", "disconnect": false });
-        });
-    };
-
     cockpit.kill = function kill(host, group) {
         var options = { "command": "kill" };
         if (host)
@@ -959,7 +1010,7 @@ function basic_scope(cockpit) {
         });
     };
 
-    cockpit.transport = {
+    cockpit.transport = public_transport = {
         wait: ensure_transport,
         inject: function inject(message) {
             if (!default_transport)
@@ -970,1244 +1021,268 @@ function basic_scope(cockpit) {
             filters.push(callback);
         },
         close: function close(problem) {
-            if (!default_transport)
-                return;
             var options;
             if (problem)
                 options = {"problem": problem };
-            default_transport.close(options);
+            if (default_transport)
+                default_transport.close(options);
+            default_transport = null;
+            this.options = { };
         },
-        origin: origin,
+        origin: transport_origin,
         options: { },
         uri: calculate_url,
     };
 
-    Object.defineProperty(cockpit.transport, "host", {
-        enumerable: true,
-        get: function user_get() {
-            return default_host;
-        }
-    });
-}
 
-
-function full_scope(cockpit, $, po) {
-
-    /* ---------------------------------------------------------------------
-     * User and system information
-     */
-
-    cockpit.info = { };
-    init_callback = function(options) {
-        if (options.system)
-            $.extend(cockpit.info, options.system);
-        if (options.system)
-            $(cockpit.info).trigger("changed");
-    };
-
-    function User() {
-        var self = this;
-        self["user"] = null;
-        self["name"] = null;
-
-        var dbus = cockpit.dbus(null, { "bus": "internal" });
-        dbus.call("/user", "org.freedesktop.DBus.Properties",
-                  "GetAll", [ "cockpit.User" ],
-                  { "type": "s" })
-            .done(function(reply) {
-                var user = reply[0];
-                self["user"] = user.Name.v;
-                self["name"] = user.Full.v;
-                self["id"] = user.Id.v;
-                self["groups"] = user.Groups.v;
-                self["home"] = user.Home.v;
-                self["shell"] = user.Shell.v;
-            })
-            .fail(function(ex) {
-                console.warn("couldn't load user info: " + ex.message);
-            })
-            .always(function() {
-                dbus.close();
-                $(self).triggerHandler("changed");
-            });
-    }
-
-    var the_user = null;
-    Object.defineProperty(cockpit, "user", {
-        enumerable: true,
-        get: function user_get() {
-            if (!the_user)
-                the_user = new User();
-            return the_user;
-        }
-    });
-
-    /* ------------------------------------------------------------------------
-     * Override for broken browser behavior
-     */
-
-    document.addEventListener("click", function(ev) {
-        if ($(ev.target).hasClass('disabled'))
-          ev.stopPropagation();
-    }, true);
-
-    /* ------------------------------------------------------------------------
-     * Cockpit location
-     */
-
-    /* HACK: Mozilla will unescape 'window.location.hash' before returning
-     * it, which is broken.
+    /* ------------------------------------------------------------------------------------
+     * Promises.
+     * Based on Q and angular promises, with some jQuery compatibility. See the angular
+     * license in COPYING.bower for license lineage. There are some key differences with
+     * both Q and jQuery.
      *
-     * https://bugzilla.mozilla.org/show_bug.cgi?id=135309
+     *  * Exceptions thrown in handlers are not treated as rejections or failures.
+     *    Exceptions remain actual exceptions.
+     *  * Unlike jQuery callbacks added to an already completed promise don't execute
+     *    immediately. Wait until control is returned to the browser.
      */
 
-    var last_loc = null;
-
-    function get_window_location_hash() {
-        return (window.location.href.split('#')[1] || '');
+    function promise_then(state, fulfilled, rejected, updated) {
+        if (fulfilled === undefined && rejected === undefined && updated === undefined)
+            return null;
+        var result = new Deferred();
+        state.pending = state.pending || [];
+        state.pending.push([result, fulfilled, rejected, updated]);
+        if (state.status > 0)
+            schedule_process_queue(state);
+        return result.promise;
     }
 
-    function Location() {
-        var self = this;
+    function create_promise(state) {
 
-        var href = get_window_location_hash();
-        var options = { };
-        var path = decode(href, options);
-
-        function decode_path(input) {
-            var parts = input.split('/').map(decodeURIComponent);
-            var result;
-            if (input && input[0] !== "/") {
-                result = [].concat(path);
-                result.pop();
-                result = result.concat(parts);
-            } else {
-                result = parts;
+        /* Like jQuery the promise object is callable */
+        var self = function Promise(target) {
+            if (target) {
+                extend(target, self);
+                return target;
             }
-            return resolve_path_dots(result);
-        }
-
-        function encode(path, options) {
-            if (typeof path == "string")
-                path = decode_path(path, self.path);
-            var href = "/" + path.map(encodeURIComponent).join("/");
-
-            /* Undo unnecessary encoding of these */
-            href = href.replace("%40", "@");
-
-            if (options) {
-                var query = [];
-                $.each(options, function(opt, value) {
-                    query.push(encodeURIComponent(opt) + "=" + encodeURIComponent(value));
-                });
-                if (query.length > 0)
-                    href += "?" + query.join("&");
-            }
-            return href;
-        }
-
-        function decode(href, options) {
-            if (href[0] == '#')
-                href = href.substr(1);
-
-            var pos = href.indexOf('?');
-            var first = href;
-            if (pos === -1)
-                first = href;
-            else
-                first = href.substr(0, pos);
-            var path = decode_path(first);
-            if (pos !== -1 && options) {
-                $.each(href.substring(pos + 1).split("&"), function(i, opt) {
-                    var parts = opt.split('=');
-                    options[decodeURIComponent(parts[0])] = decodeURIComponent(parts[1]);
-                });
-            }
-
-            return path;
-        }
-
-        function href_for_go_or_replace(/* ... */) {
-            var href;
-            if (arguments.length == 1 && arguments[0] instanceof Location) {
-                href = String(arguments[0]);
-            } else if (typeof arguments[0] == "string") {
-                var options = arguments[1] || { };
-                href = encode(decode(arguments[0], options), options);
-            } else {
-                href = encode.apply(self, arguments);
-            }
-            return href;
-        }
-
-        function replace(/* ... */) {
-            if (self !== last_loc)
-                return;
-            var href = href_for_go_or_replace.apply(self, arguments);
-            window.location.replace(window.location.pathname + '#' + href);
-        }
-
-        function go(/* ... */) {
-            if (self !== last_loc)
-                return;
-            var href = href_for_go_or_replace.apply(self, arguments);
-            window.location.hash = '#' + href;
-        }
-
-        Object.defineProperties(self, {
-            path: {
-                enumerable: true,
-                writable: false,
-                value: path
-            },
-            options: {
-                enumerable: true,
-                writable: false,
-                value: options
-            },
-            href: {
-                enumerable: true,
-                value: href
-            },
-            go: { value: go },
-            replace: { value: replace },
-            encode: { value: encode },
-            decode: { value: decode },
-            toString: { value: function() { return href; } }
-        });
-    }
-
-    Object.defineProperty(cockpit, "location", {
-        enumerable: true,
-        get: function() {
-            if (!last_loc || last_loc.href !== get_window_location_hash())
-                last_loc = new Location();
-            return last_loc;
-        },
-        set: function(v) {
-            cockpit.location.go(v);
-        }
-    });
-
-    $(window).on("hashchange", function() {
-        last_loc = null;
-        $(cockpit).triggerHandler("locationchanged");
-    });
-
-    /* ------------------------------------------------------------------------
-     * Cockpit jump
-     */
-
-    cockpit.jump = function jump(path, host) {
-        if ($.isArray(path))
-            path = "/" + path.map(encodeURIComponent).join("/").replace("%40", "@");
-        else
-            path = "" + path;
-        var options = { command: "jump", location: path, host: host };
-        cockpit.transport.inject("\n" + JSON.stringify(options));
-    };
-
-    /* ---------------------------------------------------------------------
-     * Spawning
-     *
-     * Public: https://files.cockpit-project.org/guide/api-cockpit.html
-     */
-
-    function ProcessError(options, name) {
-        this.problem = options.problem || null;
-        this.exit_status = options["exit-status"];
-        if (this.exit_status === undefined)
-            this.exit_status = null;
-        this.exit_signal = options["exit-signal"];
-        if (this.exit_signal === undefined)
-            this.exit_signal = null;
-        this.message = options.message;
-
-        if (this.message === undefined) {
-            if (this.problem)
-                this.message = cockpit.message(options.problem);
-            else if (this.exit_signal !== null)
-                this.message = cockpit.format(_("$0 killed with signal $1"), name, this.exit_signal);
-            else if (this.exit_status !== undefined)
-                this.message = cockpit.format(_("$0 exited with code $1"), name, this.exit_status);
-            else
-                this.message = cockpit.format(_("$0 failed"), name);
-        } else {
-            this.message = $.trim(this.message);
-        }
-
-        this.toString = function() {
-            return this.message;
-        };
-    }
-
-    function spawn_debug() {
-        if (window.debugging == "all" || window.debugging == "spawn")
-            console.debug.apply(console, arguments);
-    }
-
-    /* public */
-    cockpit.spawn = function(command, options) {
-        var dfd = new $.Deferred();
-
-        var args = { "payload": "stream", "spawn": [] };
-        if (command instanceof Array) {
-            for (var i = 0; i < command.length; i++)
-                args["spawn"].push(String(command[i]));
-        } else {
-            args["spawn"].push(String(command));
-        }
-        if (options !== undefined)
-            $.extend(args, options);
-
-        var name = args["spawn"][0] || "process";
-        var channel = cockpit.channel(args);
-
-        /* Callback that wants a stream response, see below */
-        var buffer = channel.buffer(null);
-
-        $(channel).
-            on("close", function(event, options) {
-                var data = buffer.squash();
-                spawn_debug("process closed:", JSON.stringify(options));
-                if (data)
-                    spawn_debug("process output:", data);
-                if (options.message !== undefined)
-                    spawn_debug("process error:", options.message);
-
-                if (options.problem)
-                    dfd.reject(new ProcessError(options, name));
-                else if (options["exit-status"] || options["exit-signal"])
-                    dfd.reject(new ProcessError(options, name), data);
-                else if (options.message !== undefined)
-                    dfd.resolve(data, options.message);
-                else
-                    dfd.resolve(data);
-            });
-
-        var jpromise = dfd.promise;
-        dfd.promise = function() {
-            return $.extend(jpromise.apply(this, arguments), {
-                stream: function(callback) {
-                    buffer.callback = callback;
-                    return this;
-                },
-                input: function(message, stream) {
-                    if (message !== null && message !== undefined) {
-                        spawn_debug("process input:", message);
-                        channel.send(message);
-                    }
-                    if (!stream)
-                        channel.control({ command: "done" });
-                    return this;
-                },
-                close: function(problem) {
-                    spawn_debug("process closing:", problem);
-                    if (channel.valid)
-                        channel.close(problem);
-                    return this;
-                },
-                promise: this.promise
-            });
+            return self;
         };
 
-        return dfd.promise();
-    };
+        state.status = 0;
 
-    /* public */
-    cockpit.script = function(script, args, options) {
-        if (!options && $.isPlainObject(args)) {
-            options = args;
-            args = [];
-        }
-        var command = [ "/bin/sh", "-c", script, "--" ];
-        command.push.apply(command, args);
-        return cockpit.spawn(command, options);
-    };
-
-    function dbus_debug() {
-        if (window.debugging == "all" || window.debugging == "dbus")
-            console.debug.apply(console, arguments);
-    }
-
-    function DBusError(arg) {
-        if (typeof(arg) == "string") {
-            this.problem = arg;
-            this.name = null;
-            this.message = cockpit.message(arg);
-        } else {
-            this.problem = null;
-            this.name = arg[0];
-            this.message = arg[1][0] || arg[0];
-        }
-        this.toString = function() {
-            return this.message;
-        };
-    }
-
-    function DBusCache() {
-        var self = this;
-
-        var callbacks = [ ];
-        self.data = { };
-        self.meta = { };
-
-        self.connect = function connect(path, iface, callback, first) {
-            var cb = [path, iface, callback];
-            if (first)
-                callbacks.unshift(cb);
-            else
-                callbacks.push(cb);
-            return {
-                remove: function remove() {
-                    var i, length = callbacks.length;
-                    for (i = 0; i < length; i++) {
-                        var cb = callbacks[i];
-                        if (cb[0] === path && cb[1] === iface && cb[2] === callback) {
-                            delete cb[i];
-                            break;
-                        }
-                    }
-                }
-            };
+        self.then = function then(fulfilled, rejected, updated) {
+            return promise_then(state, fulfilled, rejected, updated) || self;
         };
 
-        function emit(path, iface, props) {
-            var copy = callbacks.slice();
-            var i, length = copy.length;
-            for (i = 0; i < length; i++) {
-                var cb = copy[i];
-                if ((!cb[0] || cb[0] === path) &&
-                    (!cb[1] || cb[1] === iface)) {
-                    cb[2](props, path);
-                }
-            }
-        }
-
-        self.update = function update(path, iface, props) {
-            if (!self.data[path])
-                self.data[path] = { };
-            if (!self.data[path][iface])
-                self.data[path][iface] = props;
-            else
-                props = $.extend(self.data[path][iface], props);
-            emit(path, iface, props);
+        self["catch"] = function catch_(callback) {
+            return promise_then(state, null, callback) || self;
         };
 
-        self.remove = function remove(path, iface) {
-            if (self.data[path]) {
-                delete self.data[path][iface];
-                emit(path, iface, null);
-            }
+        self["finally"] = function finally_(callback, updated) {
+            return promise_then(state, function() {
+                return handle_callback(arguments, true, callback);
+            }, function() {
+                return handle_callback(arguments, false, callback);
+            }, updated) || self;
         };
 
-        self.lookup = function lookup(path, iface) {
-            if (self.data[path])
-                return self.data[path][iface];
-            return undefined;
+        /* Basic jQuery Promise compatibility */
+        self.done = function done(fulfilled) {
+            promise_then(state, fulfilled);
+            return self;
         };
 
-        self.each = function each(iface, callback) {
-            $.each(self.data, function(path, ifaces) {
-                $.each(ifaces, function(iface, props) {
-                    callback(props, path);
-                });
-            });
+        self.fail = function fail(rejected) {
+            promise_then(state, null, rejected);
+            return self;
         };
 
-        self.close = function close() {
-            self.data = { };
-            var copy = callbacks;
-            callbacks = [ ];
-            var i, length = copy.length;
-            for (i = 0; i < length; i++)
-                copy[i].callback();
-        };
-    }
-
-    function DBusProxy(client, cache, iface, path, options) {
-        var self = this;
-
-        var valid = false;
-        var defined = false;
-        var waits = $.Callbacks("once memory");
-
-        /* No enumeration on these properties */
-        Object.defineProperties(self, {
-            "client": { value: client, enumerable: false, writable: false },
-            "path": { value: path, enumerable: false, writable: false },
-            "iface": { value: iface, enumerable: false, writable: false },
-            "valid": { get: function() { return valid; }, enumerable: false },
-            "wait": { value: function(func) { waits.add(func); return this; },
-                      enumerable: false, writable: false },
-            "call": { value: function(name, args) { return client.call(path, iface, name, args); },
-                      enumerable: false, writable: false },
-            "data": { value: { }, enumerable: false }
-        });
-
-        Object.defineProperty(self, $.expando, {
-            value: { }, writable: true, enumerable: false
-        });
-
-        if (!options)
-            options = { };
-
-        function define() {
-            if (!cache.meta[iface])
-                return;
-
-            var meta = cache.meta[iface];
-            defined = true;
-
-            $.each(meta.methods || { }, function(name) {
-                if (name[0].toLowerCase() == name[0])
-                    return; /* Only map upper case */
-
-                /* Again, make sure these don't show up in enumerations */
-                Object.defineProperty(self, name, {
-                    enumerable: false,
-                    value: function() {
-                        var dfd = $.Deferred();
-                        client.call(path, iface, name, Array.prototype.slice.call(arguments)).
-                            done(function(reply) { dfd.resolve.apply(dfd, reply); }).
-                            fail(function(ex) { dfd.reject(ex); });
-                        return dfd.promise();
-                    }
-                });
-            });
-
-            $.each(meta.properties || { }, function(name, prop) {
-                if (name[0].toLowerCase() == name[0])
-                    return; /* Only map upper case */
-
-                var config = {
-                    enumerable: true,
-                    get: function() { return self.data[name]; },
-                    set: function(v) { throw name + "is not writable"; }
-                };
-
-                if (prop.flags && prop.flags.indexOf('w') !== -1) {
-                    config.set = function(v) {
-                        client.call(path, "org.freedesktop.DBus.Properties", "Set",
-                                [ iface, name, cockpit.variant(prop.type, v) ]).
-                            fail(function(ex) {
-                                console.log("Couldn't set " + iface + " " + name +
-                                            " at " + path + ": " + ex);
-                            });
-                    };
-                }
-
-                /* Again, make sure these don't show up in enumerations */
-                Object.defineProperty(self, name, config);
-            });
-        }
-
-        function update(props) {
-            if (props) {
-                $.extend(self.data, props);
-                if (!defined)
-                    define();
-                valid = true;
-            } else {
-                valid = false;
-            }
-            $(self).triggerHandler("changed", [ props ]);
-        }
-
-        cache.connect(path, iface, update, true);
-        update(cache.lookup(path, iface));
-
-        function signal(path, iface, name, args) {
-            $(self).triggerHandler("signal", [name, args]);
-            if (name[0].toLowerCase() != name[0])
-                $(self).triggerHandler(name, args);
-        }
-
-        client.subscribe({ "path": path, "interface": iface }, signal, options.subscribe !== false);
-
-        /* If watching then do a proper watch, otherwise object is done */
-        if (options.watch !== false)
-            client.watch({ "path": path, "interface": iface }).always(function() { waits.fireWith(self); });
-        else
-            waits.fireWith(self);
-    }
-
-    function DBusProxies(client, cache, iface, path_namespace) {
-        var self = this;
-
-        var waits = $.Callbacks("once memory");
-
-        Object.defineProperties(self, {
-            "client": { value: client, enumerable: false, writable: false },
-            "iface": { value: iface, enumerable: false, writable: false },
-            "path_namespace": { value: path_namespace, enumerable: false, writable: false },
-            "wait": { value: function(func) { waits.add(func); return this; },
-                      enumerable: false, writable: false }
-        });
-
-        Object.defineProperty(self, $.expando, {
-            value: { }, writable: true, enumerable: false
-        });
-
-        /* Subscribe to signals once for all proxies */
-        var match = { "interface": iface, "path_namespace": path_namespace };
-
-        /* Callbacks added by proxies */
-        client.subscribe(match);
-
-        /* Watch for property changes */
-        client.watch(match).always(function() { waits.fire(); });
-
-        /* Already added watch/subscribe, tell proxies not to */
-        var options = { watch: false, subscribe: false };
-
-        function update(props, path) {
-            var proxy = self[path];
-            if (!path) {
-                return;
-            } else if (!props && proxy) {
-                delete self[path];
-                $(self).triggerHandler("removed", [ proxy ]);
-            } else if (props) {
-                if (!proxy) {
-                    proxy = self[path] = client.proxy(iface, path, options);
-                    $(self).triggerHandler("added", [ proxy ]);
-                }
-                $(self).triggerHandler("changed", [ proxy ]);
-            }
-        }
-
-        cache.connect(null, iface, update, false);
-        cache.each(iface, update);
-    }
-
-    function DBusClient(name, options) {
-        var self = this;
-        var args = { };
-        var track = false;
-        var owner = null;
-
-        if (options) {
-            if (options.track)
-                track = true;
-
-            delete options['track'];
-            $.extend(args, options);
-        }
-        args.payload = "dbus-json3";
-        args.name = name;
-        self.options = options;
-
-        dbus_debug("dbus open: ", args);
-
-        var channel = cockpit.channel(args);
-        var subscribers = { };
-        var calls = { };
-        var cache;
-
-        /* The problem we closed with */
-        var closed;
-
-        self.constructors = { "*": DBusProxy };
-
-        function ensure_cache() {
-            if (!cache)
-                cache = new DBusCache();
-        }
-
-        function matches(signal, match) {
-            if (match.path && signal[0] !== match.path)
-                return false;
-            if (match.path_namespace && signal[0].indexOf(match.path_namespace) !== 0)
-                return false;
-            if (match["interface"] && signal[1] !== match["interface"])
-                return false;
-            if (match.member && signal[2] !== match.member)
-                return false;
-            if (match.arg0 && signal[3] !== match.arg0)
-                return false;
-            return true;
-        }
-
-        $(channel).on("message", function(event, payload) {
-            dbus_debug("dbus:", payload);
-            var msg;
-            try {
-                msg = JSON.parse(payload);
-            } catch(ex) {
-                console.warn("received invalid dbus json message:", ex);
-            }
-            if (msg === undefined) {
-                channel.close({"problem": "protocol-error"});
-                return;
-            }
-            var dfd;
-            if (msg.id !== undefined)
-                dfd = calls[msg.id];
-            if (msg.reply) {
-                if (dfd) {
-                    var options = { };
-                    if (msg.type)
-                        options.type = msg.type;
-                    if (msg.flags)
-                        options.flags = msg.flags;
-                    dfd.resolve(msg.reply[0] || [], options);
-                    delete calls[msg.id];
-                }
-            } else if (msg.error) {
-                if (dfd) {
-                    dfd.reject(new DBusError(msg.error));
-                    delete calls[msg.id];
-                }
-            } else if (msg.signal) {
-                $.each(subscribers, function(id, subscription) {
-                    if (subscription.callback) {
-                        if (matches(msg.signal, subscription.match))
-                            subscription.callback.apply(self, msg.signal);
-                    }
-                });
-            } else if (msg.notify) {
-                notify(msg.notify);
-            } else if (msg.meta) {
-                ensure_cache();
-                $.extend(cache.meta, msg.meta);
-            } else if (msg.owner !== undefined) {
-                $(self).triggerHandler("owner", [ msg.owner ]);
-
-                // We won't get this signal with the same
-                // owner twice so if we've seen an owner
-                // before that means it has changed.
-                if (track && owner)
-                    self.close();
-
-                owner = msg.owner;
-            } else {
-                dbus_debug("received unexpected dbus json message:", payload);
-            }
-        });
-
-        function notify(data) {
-            ensure_cache();
-            $.each(data, function(path, ifaces) {
-                $.each(ifaces, function(iface, props) {
-                    if (!props)
-                        cache.remove(path, iface);
-                    else
-                        cache.update(path, iface, props);
-                });
-            });
-            $(self).triggerHandler("notify", [ data ]);
-        }
-
-        this.notify = notify;
-
-        function close_perform(options) {
-            closed = options.problem || "disconnected";
-            var outstanding = calls;
-            calls = { };
-            $.each(outstanding, function(id, dfd) {
-                dfd.reject(new DBusError(closed));
-            });
-            $(self).triggerHandler("close", [ options ]);
-        }
-
-        this.close = function close(options) {
-            if (typeof options == "string")
-                options = { "problem": options };
-            if (!options)
-                options = { };
-            if (channel)
-                channel.close(options);
-            else
-                close_perform(options);
+        self.always = function always(callback) {
+            promise_then(state, callback, callback);
+            return self;
         };
 
-        $(channel).on("close", function(event, options) {
-            dbus_debug("dbus close:", options);
-            $(channel).off();
-            channel = null;
-            close_perform(options);
-        });
-
-        var last_cookie = 1;
-
-        this.call = function call(path, iface, method, args, options) {
-            var dfd = $.Deferred();
-            var id = String(last_cookie);
-            last_cookie++;
-            var method_call = {
-                "call": [ path, iface, method, args || [] ],
-                "id": id
-            };
-            if (options) {
-                if (options.type)
-                    method_call.type = options.type;
-                if (options.flags !== undefined)
-                    method_call.flags = options.flags;
-            }
-
-            var msg = JSON.stringify(method_call);
-            dbus_debug("dbus:", msg);
-
-            if (channel) {
-                channel.send(msg);
-                calls[id] = dfd;
-            } else {
-                dfd.reject(new DBusError(closed));
-            }
-
-            return dfd.promise();
+        self.progress = function progress(updated) {
+            promise_then(state, null, null, updated);
+            return self;
         };
 
-        this.subscribe = function subscribe(match, callback, rule) {
-            var subscription = {
-                match: match || { },
-                callback: callback
-            };
-
-            if (rule !== false && channel && channel.valid) {
-                var msg = JSON.stringify({ "add-match": subscription.match });
-                dbus_debug("dbus:", msg);
-                channel.send(msg);
-            }
-
-            var id;
-            if (callback) {
-                id = String(last_cookie);
-                last_cookie++;
-                subscribers[id] = subscription;
-            }
-
-            return {
-                remove: function() {
-                    var prev;
-                    if (id) {
-                        prev = subscribers[id];
-                        if (prev)
-                            delete subscribers[id];
-                    }
-                    if (rule !== false && channel && channel.valid && prev) {
-                        var msg = JSON.stringify({ "remove-match": prev.match });
-                        dbus_debug("dbus:", msg);
-                        channel.send(msg);
-                    }
-                }
-            };
+        self.state = function state_() {
+            if (state.status == 1)
+                return "resolved";
+            if (state.status == 2)
+                return "rejected";
+            return "pending";
         };
 
-        self.watch = function watch(path) {
-            var match;
-            if ($.isPlainObject(path))
-                match = path;
-            else
-                match = { path: String(path) };
-
-            var id = String(last_cookie);
-            last_cookie++;
-            var dfd = $.Deferred();
-            calls[id] = dfd;
-
-            var msg = JSON.stringify({ "watch": match, "id": id });
-            dbus_debug("dbus:", msg);
-            channel.send(msg);
-
-            var jpromise = dfd.promise;
-            dfd.promise = function() {
-                return $.extend(jpromise.apply(this, arguments), {
-                    remove: function remove() {
-                        delete calls[id];
-                        if (channel.valid) {
-                            msg = JSON.stringify({ "unwatch": match });
-                            dbus_debug("dbus:", msg);
-                            channel.send(msg);
-                        }
-                    },
-                    promise: this.promise
-                });
-            };
-
-            return dfd.promise();
-        };
-
-        self.proxy = function proxy(iface, path, options) {
-            if (!iface)
-                iface = name;
-            iface = String(iface);
-            if (!path)
-                path = "/" + iface.replace(/\./g, "/");
-            var Constructor = self.constructors[iface];
-            if (!Constructor)
-                Constructor = self.constructors["*"];
-            if (!options)
-                options = { };
-            ensure_cache();
-            return new Constructor(self, cache, iface, String(path), options);
-        };
-
-        self.proxies = function proxies(iface, path_namespace) {
-            if (!iface)
-                iface = name;
-            if (!path_namespace)
-                path_namespace = "/";
-            ensure_cache();
-            return new DBusProxies(self, cache, String(iface), String(path_namespace));
-        };
-
-    }
-
-    /* public */
-    cockpit.dbus = function dbus(name, options) {
-        return new DBusClient(name, options);
-    };
-
-    cockpit.variant = function variant(type, value) {
-        return { 'v': value, 't': type };
-    };
-
-    cockpit.byte_array = function byte_array(string) {
-        return window.btoa(string);
-    };
-
-    /* File access
-     */
-
-    cockpit.file = function file(path, options) {
-        options = options || { };
-        var binary = options.binary;
-
-        var self = {
-            path: path,
-            read: read,
-            replace: replace,
-            modify: modify,
-
-            watch: watch,
-
-            close: close
-        };
-
-        var base_channel_options = $.extend({ }, options);
-        delete base_channel_options.syntax;
-
-        function parse(str) {
-            if (options.syntax && options.syntax.parse)
-                return options.syntax.parse(str);
-            else
-                return str;
-        }
-
-        function stringify(obj) {
-            if (options.syntax && options.syntax.stringify)
-                return options.syntax.stringify(obj);
-            else
-                return obj;
-        }
-
-        var read_promise = null;
-        var read_channel;
-
-        function read() {
-            if (read_promise)
-                return read_promise;
-
-            var dfd = $.Deferred();
-            var opts = $.extend({ }, base_channel_options, {
-                payload: "fsread1",
-                path: path
-            });
-
-            function try_read() {
-                read_channel = cockpit.channel(opts);
-                var content_parts = [ ];
-                $(read_channel).on("message", function (event, message) {
-                    content_parts.push(message);
-                });
-                $(read_channel).on("close", function (event, message) {
-                    read_channel = null;
-
-                    if (message.problem == "change-conflict") {
-                        try_read();
-                        return;
-                    }
-
-                    read_promise = null;
-
-                    if (message.problem) {
-                        var error = new BasicError(message.problem, message.message);
-                        fire_watch_callbacks(null, null, error);
-                        dfd.reject(error);
-                        return;
-                    }
-
-                    var content;
-                    if (message.tag == "-")
-                        content = null;
-                    else {
-                        try {
-                            content = parse(join_data(content_parts, binary));
-                        } catch (e) {
-                            fire_watch_callbacks(null, null, e);
-                            dfd.reject(e);
-                            return;
-                        }
-                    }
-
-                    fire_watch_callbacks(content, message.tag);
-                    dfd.resolve(content, message.tag);
-                });
-            }
-
-            try_read();
-
-            read_promise = dfd.promise();
-            return read_promise;
-        }
-
-        var replace_channel = null;
-
-        function replace(new_content, expected_tag) {
-            var dfd = $.Deferred();
-
-            var file_content;
-            try {
-                if (new_content === null)
-                    file_content = null;
-                else
-                    file_content = stringify(new_content);
-            }
-            catch (e) {
-                dfd.reject(e);
-                return dfd.promise();
-            }
-
-            if (replace_channel)
-                replace_channel.close("abort");
-
-            var opts = $.extend({ }, base_channel_options, {
-                payload: "fsreplace1",
-                path: path,
-                tag: expected_tag
-            });
-            replace_channel = cockpit.channel(opts);
-
-            $(replace_channel).on("close", function (event, message) {
-                replace_channel = null;
-                if (message.problem) {
-                    dfd.reject(new BasicError(message.problem, message.message));
-                } else {
-                    fire_watch_callbacks(new_content, message.tag);
-                    dfd.resolve(message.tag);
-                }
-            });
-
-            /* TODO - don't flood the channel when file_content is
-             *        very large.
-             */
-            if (file_content !== null)
-                replace_channel.send(file_content);
-            replace_channel.control({ command: "done" });
-
-            return dfd.promise();
-        }
-
-        function modify(callback, initial_content, initial_tag) {
-            var dfd = $.Deferred();
-
-            function update(content, tag) {
-                var new_content = callback(content);
-                if (new_content === undefined)
-                    new_content = content;
-                replace(new_content, tag).
-                    done(function (new_tag) {
-                        dfd.resolve(new_content, new_tag);
-                    }).
-                    fail(function (error) {
-                        if (error.problem == "change-conflict")
-                            read_then_update();
-                        else
-                            dfd.reject(error);
-                    });
-            }
-
-            function read_then_update() {
-                read().
-                    done(update).
-                    fail (function (error) {
-                        dfd.reject(error);
-                    });
-            }
-
-            if (initial_content === undefined)
-                read_then_update();
-            else
-                update(initial_content, initial_tag);
-
-            return dfd.promise();
-        }
-
-        var watch_callbacks = $.Callbacks();
-        var n_watch_callbacks = 0;
-
-        var watch_channel = null;
-        var watch_tag;
-
-        function ensure_watch_channel() {
-            if (n_watch_callbacks > 0) {
-                if (watch_channel)
-                    return;
-
-                var opts = $.extend({ }, base_channel_options, {
-                    payload: "fswatch1",
-                    path: path
-                });
-                watch_channel = cockpit.channel(opts);
-                $(watch_channel).on("message", function (event, message_string) {
-                    var message;
-                    try      { message = JSON.parse(message_string); }
-                    catch(e) { message = null; }
-                    if (message && message.path == path && message.tag && message.tag != watch_tag)
-                        read();
-                });
-            } else {
-                if (watch_channel) {
-                    watch_channel.close();
-                    watch_channel = null;
-                }
-            }
-        }
-
-        function fire_watch_callbacks(/* content, tag, error */) {
-            watch_tag = arguments[1] || null;
-            watch_callbacks.fireWith(self, arguments);
-        }
-
-        function watch(callback) {
-            if (callback)
-                watch_callbacks.add(callback);
-            n_watch_callbacks += 1;
-            ensure_watch_channel();
-
-            watch_tag = null;
-            read();
-
-            return {
-                remove: function () {
-                    if (callback)
-                        watch_callbacks.remove(callback);
-                    n_watch_callbacks -= 1;
-                    ensure_watch_channel();
-                }
-            };
-        }
-
-        function close() {
-            if (read_channel)
-                read_channel.close("cancelled");
-            if (replace_channel)
-                replace_channel.close("cancelled");
-            if (watch_channel)
-                watch_channel.close("cancelled");
-        }
+        /* Promises are recursive like jQuery */
+        self.promise = self;
 
         return self;
-    };
-
-    /* ---------------------------------------------------------------------
-     * Localization
-     */
-
-    var po_data = { };
-    var po_plural;
-
-    cockpit.language = undefined;
-
-    cockpit.locale = function locale(po) {
-        var lang = cockpit.language || "en";
-        var header;
-
-        if (po) {
-            $.extend(po_data, po);
-            header = po[""];
-        } else {
-            po_data = { };
-        }
-
-        if (header) {
-            if (header["plural-forms"]) {
-                /*
-                 * This code has been cross checked when it was compiled by our
-                 * po2json tool. Therefore ignore warnings about eval being evil.
-                 */
-
-                /* jshint ignore:start */
-                po_plural = new Function("n", "var nplurals, plural; " +
-                                         header["plural-forms"] + "; return plural;");
-                /* jshint ignore:end */
-            }
-            if (header["language"])
-                lang = header["language"];
-        }
-
-        cockpit.language = lang;
-    };
-
-    cockpit.translate = function translate(sel) {
-        $("[translatable=\"yes\"]", sel).each(function(i, e) {
-            var $e = $(e);
-            var translated = cockpit.gettext(e.getAttribute("context"), $e.text());
-            $(e).removeAttr("translatable").text(translated);
-        });
-    };
-
-    cockpit.gettext = function gettext(context, string) {
-        /* Missing first parameter */
-        if (arguments.length == 1) {
-            string = context;
-            context = undefined;
-        }
-
-        var key = context ? context + '\u0004' + string : string;
-        if (po_data) {
-            var translated = po_data[key];
-            if (translated && translated[1])
-                return translated[1];
-        }
-        return string;
-    };
-
-    function imply( val ) {
-        return (val === true ? 1 : val ? val : 0);
     }
 
-    cockpit.ngettext = function ngettext(context, string1, stringN, num) {
-        /* Missing first parameter */
-        if (arguments.length == 3) {
-            num = stringN;
-            stringN = string1;
-            string1 = context;
-            context = undefined;
-        }
+    function process_queue(state) {
+        var fn, deferred, pending;
 
-        var key = context ? context + '\u0004' + string1 : string1;
-        if (po_data && po_plural) {
-            var translated = po_data[key];
-            if (translated) {
-                var i = imply(po_plural(num)) + 1;
-                if (translated[i])
-                    return translated[i];
+        pending = state.pending;
+        state.process_scheduled = false;
+        state.pending = undefined;
+        for (var i = 0, ii = pending.length; i < ii; ++i) {
+            state.pur = true;
+            deferred = pending[i][0];
+            fn = pending[i][state.status];
+            if (is_function(fn)) {
+                deferred.resolve(fn.apply(state.promise, state.values));
+            } else if (state.status === 1) {
+                deferred.resolve.apply(deferred.resolve, state.values);
+            } else {
+                deferred.reject.apply(deferred.reject, state.values);
             }
         }
-        if (num == 1)
-            return string1;
-        return stringN;
+    }
+
+    function schedule_process_queue(state) {
+        if (state.process_scheduled || !state.pending)
+            return;
+        state.process_scheduled = true;
+        window.setTimeout(function() {
+            process_queue(state);
+        }, 0);
+    }
+
+    function deferred_resolve(state, values) {
+        var then, done = false;
+        if (is_object(values[0]) || is_function(values[0]))
+            then = values[0] && values[0].then;
+        if (is_function(then)) {
+            state.status = -1;
+            then.call(values, function(/* ... */) {
+                if (done)
+                    return;
+                done = true;
+                deferred_resolve(state, arguments);
+            }, function(/* ... */) {
+                if (done)
+                    return;
+                done = true;
+                deferred_reject(state, arguments);
+            }, function(/* ... */) {
+                deferred_notify(state, arguments);
+            });
+        } else {
+            state.values = values;
+            state.status = 1;
+            schedule_process_queue(state);
+        }
+    }
+
+    function deferred_reject(state, values) {
+        state.values = values;
+        state.status = 2;
+        schedule_process_queue(state);
+    }
+
+    function deferred_notify(state, values) {
+        var callbacks = state.pending;
+        if ((state.status <= 0) && callbacks && callbacks.length) {
+            window.setTimeout(function() {
+                var callback, result;
+                for (var i = 0, ii = callbacks.length; i < ii; i++) {
+                    result = callbacks[i][0];
+                    callback = callbacks[i][3];
+                    if (is_function(callback))
+                        result.notify(callback.apply(state.promise, values));
+                    else
+                        result.notify.apply(result, values);
+                }
+            }, 0);
+        }
+    }
+
+    function Deferred() {
+        var self = this;
+        var state = { };
+        self.promise = state.promise = create_promise(state);
+
+        self.resolve = function resolve(/* ... */) {
+            if (arguments[0] === state.promise)
+                throw new Error("Expected promise to be resolved with other value than itself");
+            if (!state.status)
+                deferred_resolve(state, arguments);
+            return self;
+        };
+
+        self.reject = function reject(/* ... */) {
+            if (state.status)
+                return;
+            deferred_reject(state, arguments);
+            return self;
+        };
+
+        self.notify = function notify(/* ... */) {
+            deferred_notify(state, arguments);
+            return self;
+        };
+    }
+
+    function prep_promise(values, resolved) {
+        var result = cockpit.defer();
+        if (resolved)
+            result.resolve.apply(result, values);
+        else
+            result.reject.apply(result, values);
+        return result.promise;
+    }
+
+    function handle_callback(values, is_resolved, callback) {
+        var callback_output = null;
+        if (is_function(callback))
+            callback_output = callback();
+        if (callback_output && is_function (callback_output.then)) {
+            return callback_output.then(function() {
+                return prep_promise(values, is_resolved);
+            }, function() {
+                return prep_promise(arguments, false);
+            });
+        } else {
+            return prep_promise(values, is_resolved);
+        }
+    }
+
+    cockpit.when = function when(value, fulfilled, rejected, updated) {
+        var result = cockpit.defer();
+        result.resolve(value);
+        return result.promise.then(fulfilled, rejected, updated);
     };
 
-    cockpit.noop = function noop(arg0, arg1) {
-        return arguments[arguments.length - 1];
+    cockpit.all = function all(promises) {
+        var deferred = cockpit.defer();
+        var counter = 0;
+        var results = [];
+
+        if (arguments.length != 1 && !is_array (promises))
+            promises = Array.prototype.slice.call(arguments);
+
+        promises.forEach(function(promise, key) {
+            counter++;
+            cockpit.when(promise).then(function(value) {
+                results[key] = value;
+                if (!(--counter))
+                    deferred.resolve.apply(deferred, results);
+            }, function(/* ... */) {
+                deferred.reject.apply(deferred, arguments);
+            });
+        });
+
+        if (counter === 0)
+            deferred.resolve(results);
+        return deferred.promise;
     };
 
-    /* Only for _() calls here in the cockpit code */
-    var _ = cockpit.gettext;
+    cockpit.defer = function() {
+        return new Deferred();
+    };
 
     /* ---------------------------------------------------------------------
      * Utilities
@@ -2215,9 +1290,25 @@ function full_scope(cockpit, $, po) {
 
     var fmt_re = /\$\{([^}]+)\}|\$([a-zA-Z0-9_]+)/g;
     cockpit.format = function format(fmt, args) {
-        if (arguments.length != 2 || typeof args !== "object" || args === null)
+        if (arguments.length != 2 || !is_object(args) || args === null)
             args = Array.prototype.slice.call(arguments, 1);
         return fmt.replace(fmt_re, function(m, x, y) { return args[x || y] || ""; });
+    };
+
+    cockpit.format_number = function format_number(number) {
+        /* non-zero values should never appear zero */
+        if (number > 0 && number < 0.1)
+            number = 0.1;
+        else if (number < 0 && number > -0.1)
+            number = -0.1;
+
+        /* TODO: Make the decimal separator translatable */
+
+        /* only show as integer if we have a natural number */
+        if (number % 1 === 0)
+            return number.toString();
+        else
+            return number.toFixed(1);
     };
 
     function format_units(number, suffixes, factor, separate) {
@@ -2257,22 +1348,9 @@ function full_scope(cockpit, $, po) {
             }
         }
 
-        /* non-zero values should never appear zero */
-        if (number > 0 && number < 0.1)
-            number = 0.1;
-        else if (number < 0 && number > -0.1)
-            number = -0.1;
+        var string_representation = cockpit.format_number(number);
 
         var ret;
-
-        /* TODO: Make the decimal separator translatable */
-        var string_representation;
-
-        /* only show as integer if we have a natural number */
-        if (number % 1 === 0)
-            string_representation = number.toString();
-        else
-            string_representation = number.toFixed(1);
 
         if (suffix)
             ret = [string_representation, suffix];
@@ -2286,9 +1364,8 @@ function full_scope(cockpit, $, po) {
     }
 
     var byte_suffixes = {
-        1024: [ null, "KB", "MB", "GB", "TB", "PB", "EB", "ZB" ],
-        1000: [ null, "KB", "MB", "GB", "TB", "PB", "EB", "ZB" ]
-        /* 1024: [ null, "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB" ] */
+        1000: [ null, "KB", "MB", "GB", "TB", "PB", "EB", "ZB" ],
+        1024: [ null, "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB" ]
     };
 
     cockpit.format_bytes = function format_bytes(number, factor, separate) {
@@ -2297,8 +1374,33 @@ function full_scope(cockpit, $, po) {
         return format_units(number, byte_suffixes, factor, separate);
     };
 
+    cockpit.get_byte_units = function get_byte_units(guide_value, factor) {
+        if (factor === undefined || ! (factor in byte_suffixes))
+            factor = 1024;
+
+        function unit(index) {
+            return { name: byte_suffixes[factor][index],
+                     factor: Math.pow(factor, index)
+                   };
+        }
+
+        var units = [ unit(2), unit(3), unit(4) ];
+
+        // The default unit is the largest one that gives us at least
+        // two decimal digits in front of the comma.
+
+        for (var i = units.length-1; i >= 0; i--) {
+            if (i === 0 || (guide_value / units[i].factor) >= 10) {
+                units[i].selected = true;
+                break;
+            }
+        }
+
+        return units;
+    };
+
     var byte_sec_suffixes = {
-        1024: [ "B/s", "KB/s", "MB/s", "GB/s", "TB/s", "PB/s", "EB/s", "ZB/s" ]
+        1024: [ "B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s", "PiB/s", "EiB/s", "ZiB/s" ]
     };
 
     cockpit.format_bytes_per_sec = function format_bytes_per_sec(number, factor, separate) {
@@ -2315,335 +1417,6 @@ function full_scope(cockpit, $, po) {
         if (factor === undefined)
             factor = 1000;
         return format_units(number, bit_suffixes, factor, separate);
-    };
-
-    cockpit.message = function message(arg) {
-        if (arg.message)
-            return arg.message;
-
-        var problem = null;
-        if (arg.problem)
-            problem = arg.problem;
-        else
-            problem = arg + "";
-        if (problem == "terminated")
-            return _("Your session has been terminated.");
-        else if (problem == "no-session")
-            return _("Your session has expired. Please log in again.");
-        else if (problem == "access-denied")
-            return _("Not permitted to perform this action.");
-        else if (problem == "authentication-failed")
-            return _("Login failed");
-        else if (problem == "authentication-not-supported")
-            return _("The server refused to authenticate using any supported methods.");
-        else if (problem == "unknown-hostkey")
-            return _("Untrusted host");
-        else if (problem == "internal-error")
-            return _("Internal error");
-        else if (problem == "timeout")
-            return _("Connection has timed out.");
-        else if (problem == "no-cockpit")
-            return _("Cockpit is not installed on the system.");
-        else if (problem == "no-forwarding")
-            return _("Cannot forward login credentials");
-        else if (problem == "disconnected")
-            return _("Server has closed the connection.");
-        else if (problem == "not-supported")
-            return _("Cockpit is not compatible with the software on the system.");
-        else
-            return problem;
-    };
-
-    function HttpError(arg0, arg1, message) {
-        this.status = parseInt(arg0, 10);
-        this.reason = arg1;
-        this.message = message || arg1;
-        this.problem = null;
-
-        this.valueOf = function() {
-            return this.status;
-        };
-        this.toString = function() {
-            return this.status + " " + this.message;
-        };
-    }
-
-    function http_debug() {
-        if (window.debugging == "all" || window.debugging == "http")
-            console.debug.apply(console, arguments);
-    }
-
-    function find_header(headers, name) {
-        if (!headers)
-            return undefined;
-        name = name.toLowerCase();
-        for (var head in headers) {
-            if (head.toLowerCase() == name)
-                return headers[head];
-        }
-        return undefined;
-    }
-
-    function HttpClient(endpoint, options) {
-        var self = this;
-
-        options.payload = "http-stream1";
-
-        if (endpoint !== undefined) {
-            if (endpoint.indexOf && endpoint.indexOf("/") === 0) {
-                options.unix = endpoint;
-            } else {
-                var port = parseInt(endpoint, 10);
-                if (!isNaN(port))
-                    options.port = port;
-                else
-                    throw "The endpoint must be either a unix path or port number";
-            }
-        }
-
-        if (options.address) {
-            if (!options.capabilities)
-                options.capabilities = [];
-            options.capabilities.push("address");
-        }
-
-        self.request = function request(req) {
-            var dfd = new $.Deferred();
-
-            if (!req.path)
-                req.path = "/";
-            if (!req.method)
-                req.method = "GET";
-            if (req.params) {
-                if (req.path.indexOf("?") === -1)
-                    req.path += "?" + $.param(req.params);
-                else
-                    req.path += "&" + $.param(req.params);
-            }
-            delete req.params;
-
-            var input = req.body;
-            delete req.body;
-
-            var headers = req.headers;
-            delete req.headers;
-
-            $.extend(req, options);
-
-            /* Combine the headers */
-            if (options.headers && headers)
-                req.headers = $.extend({ }, options.headers, headers);
-            else if (options.headers)
-                req.headers = options.headers;
-            else
-                req.headers = headers;
-
-            http_debug("http request:", JSON.stringify(req));
-
-            /* We need a channel for the request */
-            var channel = cockpit.channel(req);
-
-            if (input !== undefined) {
-                if (input !== "") {
-                    http_debug("http input:", input);
-                    channel.send(input);
-                }
-                http_debug("http done");
-                channel.control({ command: "done" });
-            }
-
-            /* Callbacks that want to stream or get headers */
-            var streamer = null;
-            var responsers = null;
-
-            var count = 0;
-            var resp = null;
-
-            var buffer = channel.buffer(function(data) {
-                count += 1;
-
-                if (count === 1) {
-                    if (channel.binary)
-                        data = cockpit.utf8_decoder().decode(data);
-                    resp = JSON.parse(data);
-
-                    /* Anyone looking for response details? */
-                    if (responsers) {
-                        resp.headers = resp.headers || { };
-                        responsers.fire(resp.status, resp.headers);
-                    }
-                    return true;
-                }
-
-                /* Fire any streamers */
-                if (resp.status >= 200 && resp.status <= 299 && streamer)
-                    return streamer(data);
-
-                return 0;
-            });
-
-            $(channel).on("close", function(event, options) {
-                if (options.problem) {
-                    http_debug("http problem: ", options.problem);
-                    dfd.reject(new BasicError(options.problem));
-
-                } else {
-                    var body = buffer.squash();
-
-                    /* An error, fail here */
-                    if (resp && (resp.status < 200 || resp.status > 299)) {
-                        var message;
-                        var type = find_header(resp.headers, "Content-Type");
-                        if (type && !channel.binary) {
-                            if (type.indexOf("text/plain") === 0)
-                                message = body;
-                        }
-                        http_debug("http status: ", resp.status);
-                        dfd.reject(new HttpError(resp.status, resp.reason, message), body);
-
-                    } else {
-                        http_debug("http done");
-                        dfd.resolve(body);
-                    }
-                }
-
-                $(channel).off();
-            });
-
-            var jpromise = dfd.promise;
-            dfd.promise = function mypromise() {
-                var ret = $.extend(jpromise.apply(this, arguments), {
-                    stream: function(callback) {
-                        streamer = callback;
-                        return this;
-                    },
-                    response: function(callback) {
-                        if (responsers === null)
-                            responsers = $.Callbacks("" /* no flags */);
-                        responsers.add(callback);
-                        return this;
-                    },
-                    input: function(message, stream) {
-                        if (message !== null && message !== undefined) {
-                            http_debug("http input:", message);
-                            channel.send(message);
-                        }
-                        if (!stream) {
-                            http_debug("http done");
-                            channel.control({ command: "done" });
-                        }
-                        return this;
-                    },
-                    close: function(problem) {
-                        http_debug("http closing:", problem);
-                        channel.close(problem);
-                        $(channel).off("message");
-                        return this;
-                    },
-                    promise: this.promise
-                });
-                return ret;
-            };
-
-            return dfd.promise();
-        };
-
-        self.get = function get(path, params, headers) {
-            return self.request({
-                "method": "GET",
-                "params": params,
-                "path": path,
-                "body": "",
-                "headers": headers
-            });
-        };
-
-        self.post = function post(path, body, headers) {
-            headers = headers || { };
-
-            if ($.isPlainObject(body) || $.isArray(body)) {
-                body = JSON.stringify(body);
-                if (find_header(headers, "Content-Type") === undefined)
-                    headers["Content-Type"] = "application/json";
-            } else if (body === undefined || body === null) {
-                body = "";
-            } else if (typeof body !== "string") {
-                body = String(body);
-            }
-
-            return self.request({
-                "method": "POST",
-                "path": path,
-                "body": body,
-                "headers": headers
-            });
-        };
-    }
-
-    /* public */
-    cockpit.http = function(endpoint, options) {
-        if ($.isPlainObject(endpoint) && options === undefined) {
-            options = endpoint;
-            endpoint = undefined;
-        }
-        return new HttpClient(endpoint, options || { });
-    };
-
-    /* ---------------------------------------------------------------------
-     * Permission
-     */
-
-    var authority = null;
-
-    function Permission(options) {
-        var self = this;
-        self.allowed = null;
-
-        var user = cockpit.user;
-        var group = null;
-
-        if (options)
-            group = options.group;
-
-        function decide() {
-            if (user.id === 0)
-                return true;
-
-            if (group && user.groups) {
-                var allowed = false;
-                $.each(user.groups, function(i, name) {
-                    if (name == group) {
-                        allowed = true;
-                        return false;
-                    }
-                });
-                return allowed;
-            }
-
-            if (user.id === undefined)
-                return null;
-
-            return false;
-        }
-
-        function user_changed() {
-            var allowed = decide();
-            if (self.allowed !== allowed) {
-                self.allowed = allowed;
-                $(self).triggerHandler("changed");
-            }
-        }
-
-        $(user).on("changed", user_changed);
-        user_changed();
-
-        self.close = function close() {
-            $(user).off("changed", user_changed);
-        };
-    }
-
-    cockpit.permission = function permission(arg) {
-        return new Permission(arg);
     };
 
     /* ---------------------------------------------------------------------
@@ -2798,204 +1571,9 @@ function full_scope(cockpit, $, po) {
     /* ---------------------------------------------------------------------
      * Metrics
      *
+     * Implements the cockpit.series and cockpit.grid. Part of the metrics
+     * implementations that do not require jquery.
      */
-
-    function timestamp(when, interval) {
-        if (typeof when == "number")
-            return when * interval;
-        else if (typeof when == "string")
-            when = new Date(when);
-        if (when instanceof Date)
-            return when.getTime();
-        else
-            throw "invalid date or offset";
-    }
-
-    function MetricsChannel(interval, options_list, cache) {
-        var self = this;
-
-        if (options_list.length === undefined)
-            options_list = [ options_list ];
-
-        var channels = [ ];
-        var following = false;
-
-        self.series = cockpit.series(interval, cache, fetch_for_series);
-
-        function fetch_for_series(beg, end, for_walking) {
-            if (!for_walking)
-                self.fetch(beg, end);
-            else
-                self.follow();
-        }
-
-        function transfer(options_list, callback, is_archive) {
-            if (options_list.length === 0)
-                return;
-
-            if (!is_archive) {
-                if (following)
-                    return;
-                following = true;
-            }
-
-            var options = $.extend({
-                payload: "metrics1",
-                interval: interval,
-                source: "internal"
-            }, options_list[0]);
-
-            delete options.archive_source;
-
-            var channel = cockpit.channel(options);
-            channels.push(channel);
-
-            var meta = null;
-            var last = null;
-            var beg;
-
-            $(channel)
-                .on("close", function(ev, close_options) {
-                    if (!is_archive)
-                        following = false;
-
-                    if (options_list.length > 1 &&
-                        (close_options.problem == "not-supported" || close_options.problem == "not-found")) {
-                        transfer(options_list.slice(1), callback);
-                    } else if (close_options.problem) {
-                        if (close_options.problem != "terminated" &&
-                            close_options.problem != "disconnected" &&
-                            close_options.problem != "authentication-failed" &&
-                            (close_options.problem != "not-found" || !is_archive) &&
-                            (close_options.problem != "not-supported" || !is_archive)) {
-                            console.warn("metrics channel failed: " + close_options.problem);
-                        }
-                    } else if (is_archive) {
-                        if (!self.archives) {
-                            self.archives = true;
-                            $(self).triggerHandler('changed');
-                        }
-                    }
-                })
-                .on("message", function(ev, payload) {
-                    var message = JSON.parse(payload);
-
-                    var data, data_len, last_len, dataj, dataj_len, lastj, lastj_len;
-                    var i, j, k;
-                    var timestamp;
-
-                    /* A meta message? */
-                    var message_len = message.length;
-                    if (message_len === undefined) {
-                        meta = message;
-                        timestamp = 0;
-                        if (meta.now && meta.timestamp)
-                            timestamp = meta.timestamp + ($.now() - meta.now);
-                        beg = Math.floor(timestamp / interval);
-                        callback(beg, meta, null, options_list[0]);
-
-                    /* A data message */
-                    } else if (meta) {
-
-                        /* Data decompression */
-                        for (i = 0; i < message_len; i++) {
-                            data = message[i];
-                            if (last) {
-                                data_len = data.length;
-                                last_len = last.length;
-                                for (j = 0; j < last_len; j++) {
-                                    dataj = data[j];
-                                    if (dataj === null || dataj === undefined) {
-                                        data[j] = last[j];
-                                    } else {
-                                        dataj_len = dataj.length;
-                                        if (dataj_len !== undefined) {
-                                            lastj = last[j];
-                                            lastj_len = last[j].length;
-                                            for (k = 0; k < dataj_len; k++) {
-                                                if (dataj[k] === null)
-                                                    dataj[k] = lastj[k];
-                                            }
-                                            for (; k < lastj_len; k++)
-                                                dataj[k] = lastj[k];
-                                        }
-                                    }
-                                }
-                            }
-                            last = data;
-                        }
-
-                        /* Return the data */
-                        callback(beg, meta, message, options_list[0]);
-
-                        /* Bump timestamp for the next message */
-                        beg += message_len;
-                        meta.timestamp += (interval * message_len);
-                    }
-                });
-        }
-
-        function drain(beg, meta, message, options) {
-            var mapping, map, name;
-
-            /* Generate a mapping object if necessary */
-            mapping = meta.mapping;
-            if (!mapping) {
-                mapping = { };
-                meta.metrics.forEach(function(metric, i) {
-                    map = { "": i };
-                    if (options.metrics_path_names)
-                        name = options.metrics_path_names[i];
-                    else
-                        name = metric.name;
-                    mapping[name] = map;
-                    if (metric.instances) {
-                        metric.instances.forEach(function(instance, i) {
-                            if (instance === "")
-                                instance = "/";
-                            map[instance] = { "": i };
-                        });
-                    }
-                });
-                meta.mapping = mapping;
-            }
-
-            if (message)
-                self.series.input(beg, message, mapping);
-        }
-
-        self.fetch = function fetch(beg, end) {
-            var timestamp = beg * interval - $.now();
-            var limit = end - beg;
-
-            var archive_options_list = [ ];
-            for (var i = 0; i < options_list.length; i++) {
-                if (options_list[i].archive_source) {
-                    archive_options_list.push($.extend({}, options_list[i],
-                                                       { "source": options_list[i].archive_source,
-                                                         timestamp: timestamp,
-                                                         limit: limit
-                                                       }));
-                }
-            }
-
-            transfer(archive_options_list, drain, true);
-        };
-
-        self.follow = function follow() {
-            transfer(options_list, drain);
-        };
-
-        self.close = function close(options) {
-            var i, len = channels.length;
-            for (i = 0; i < len; i++)
-                channels[i].close(options);
-        };
-    }
-
-    cockpit.metrics = function metrics(interval, options) {
-        return new MetricsChannel(interval, options);
-    };
 
     function SeriesSink(interval, identifier, fetch_callback) {
         var self = this;
@@ -3290,6 +1868,9 @@ function full_scope(cockpit, $, po) {
     function SeriesGrid(interval, beg, end) {
         var self = this;
 
+        /* We can trigger events */
+        event_mixin(self, { });
+
         var rows = [];
 
         self.interval = interval;
@@ -3328,7 +1909,7 @@ function full_scope(cockpit, $, po) {
                 callback.call(self, row, x, n);
             }
 
-            $(self).triggerHandler("notify", [ x, n ]);
+            self.dispatchEvent("notify", x, n);
         };
 
         self.add = function add(/* sink, path */) {
@@ -3338,7 +1919,7 @@ function full_scope(cockpit, $, po) {
             var registered, sink, path, links, cb;
 
             /* Called as add(sink, path) */
-            if (typeof (arguments[0]) === "object") {
+            if (is_object(arguments[0])) {
                 sink = arguments[0];
                 sink = sink["series"] || sink;
 
@@ -3355,7 +1936,7 @@ function full_scope(cockpit, $, po) {
                 links.push([path, row]);
 
             /* Called as add(callback) */
-            } else if (typeof (arguments[0]) === "function") {
+            } else if (is_function(arguments[0])) {
                 cb = [ arguments[0], row ];
                 if (arguments[1] === true)
                     callbacks.unshift(cb);
@@ -3412,11 +1993,6 @@ function full_scope(cockpit, $, po) {
             self.notify(0, self.end - self.beg);
         };
 
-        /* Also works for negative zero */
-        function is_negative(n) {
-            return ((n = +n) || 1 / n) < 0;
-        }
-
         function move_internal(beg, end, for_walking) {
             if (end === undefined)
                 end = beg + (self.end - self.beg);
@@ -3445,14 +2021,23 @@ function full_scope(cockpit, $, po) {
 
         self.move = function move(beg, end) {
             stop_walking();
+            /* Some code paths use now twice.
+             * They should use the same value.
+             */
+            var now = null;
 
             /* Treat negative numbers relative to now */
-            if (beg === undefined)
+            if (beg === undefined) {
                 beg = 0;
-            else if (is_negative(beg))
-                beg = Math.floor($.now() / self.interval) + beg;
-            if (end !== undefined && is_negative(end))
-                end = Math.floor($.now() / self.interval) + end;
+            } else if (is_negative(beg)) {
+                now = Date.now();
+                beg = Math.floor(now / self.interval) + beg;
+            }
+            if (end !== undefined && is_negative(end)) {
+                if (now === null)
+                    now = Date.now();
+                end = Math.floor(now / self.interval) + end;
+            }
 
             move_internal(beg, end, false);
         };
@@ -3473,13 +2058,16 @@ function full_scope(cockpit, $, po) {
              *    overflow when using delays larger than 2147483647,
              *    resulting in the timeout being executed immediately.
              */
+
+            var start = Date.now();
             if (self.interval > 2000000000)
                 return;
 
             stop_walking();
-            offset = $.now() - self.beg * self.interval;
+            offset = start - self.beg * self.interval;
             walking = window.setInterval(function() {
-                move_internal(Math.floor(($.now() - offset) / self.interval), undefined, true);
+                var now = Date.now();
+                move_internal(Math.floor((now - offset) / self.interval), undefined, true);
             }, self.interval);
         };
 
@@ -3496,6 +2084,1869 @@ function full_scope(cockpit, $, po) {
         return new SeriesGrid(interval, beg, end);
     };
 
+    /* --------------------------------------------------------------------
+     * Basic utilities.
+     */
+
+    function BasicError(problem, message) {
+        this.problem = problem;
+        this.message = message || cockpit.message(problem);
+        this.toString = function() {
+            return this.message;
+        };
+    }
+
+    cockpit.logout = function logout(reload) {
+        window.sessionStorage.clear();
+        if (reload !== false)
+            reload_after_disconnect = true;
+        ensure_transport(function(transport) {
+            transport.send_control({ "command": "logout", "disconnect": true });
+        });
+        window.sessionStorage.setItem("logout-intent", "explicit");
+    };
+
+    /* Not public API ... yet? */
+    cockpit.drop_privileges = function drop_privileges() {
+        ensure_transport(function(transport) {
+            transport.send_control({ "command": "logout", "disconnect": false });
+        });
+    };
+
+    /* ---------------------------------------------------------------------
+     * User and system information
+     */
+
+    cockpit.info = { };
+    event_mixin(cockpit.info, { });
+
+    init_callback = function(options) {
+        if (options.system)
+            extend(cockpit.info, options.system);
+        if (options.system)
+            cockpit.info.dispatchEvent("changed");
+    };
+
+    function User() {
+        var self = this;
+        event_mixin(self, { });
+
+        self["user"] = null;
+        self["name"] = null;
+
+        var dbus = cockpit.dbus(null, { "bus": "internal" });
+        dbus.call("/user", "org.freedesktop.DBus.Properties",
+                  "GetAll", [ "cockpit.User" ],
+                  { "type": "s" })
+            .done(function(reply) {
+                var user = reply[0];
+                self["user"] = user.Name.v;
+                self["name"] = user.Full.v;
+                self["id"] = user.Id.v;
+                self["groups"] = user.Groups.v;
+                self["home"] = user.Home.v;
+                self["shell"] = user.Shell.v;
+            })
+            .fail(function(ex) {
+                console.warn("couldn't load user info: " + ex.message);
+            })
+            .always(function() {
+                dbus.close();
+                self.dispatchEvent("changed");
+            });
+    }
+
+    var the_user = null;
+    Object.defineProperty(cockpit, "user", {
+        enumerable: true,
+        get: function user_get() {
+            if (!the_user)
+                the_user = new User();
+            return the_user;
+        }
+    });
+
+    /* ------------------------------------------------------------------------
+     * Override for broken browser behavior
+     */
+
+    document.addEventListener("click", function(ev) {
+        if (in_array(ev.target.classList, 'disabled'))
+          ev.stopPropagation();
+    }, true);
+
+    /* ------------------------------------------------------------------------
+     * Cockpit location
+     */
+
+    /* HACK: Mozilla will unescape 'window.location.hash' before returning
+     * it, which is broken.
+     *
+     * https://bugzilla.mozilla.org/show_bug.cgi?id=135309
+     */
+
+    var last_loc = null;
+
+    function get_window_location_hash() {
+        return (window.location.href.split('#')[1] || '');
+    }
+
+    function Location() {
+        var self = this;
+
+        var href = get_window_location_hash();
+        var options = { };
+        var path = decode(href, options);
+
+        function decode_path(input) {
+            var parts = input.split('/').map(decodeURIComponent);
+            var result;
+            if (input && input[0] !== "/") {
+                result = [].concat(path);
+                result.pop();
+                result = result.concat(parts);
+            } else {
+                result = parts;
+            }
+            return resolve_path_dots(result);
+        }
+
+        function encode(path, options) {
+            if (typeof path == "string")
+                path = decode_path(path, self.path);
+            var href = "/" + path.map(encodeURIComponent).join("/");
+
+            /* Undo unnecessary encoding of these */
+            href = href.replace("%40", "@");
+
+            var i, opt, value, query = [];
+            function push_option(v) {
+                query.push(encodeURIComponent(opt) + "=" + encodeURIComponent(v));
+            }
+
+            if (options) {
+                for (opt in options) {
+                    value = options[opt];
+                    if (!is_array(value))
+                        value = [ value ];
+                    value.forEach(push_option);
+                }
+                if (query.length > 0)
+                    href += "?" + query.join("&");
+            }
+            return href;
+        }
+
+        function decode(href, options) {
+            if (href[0] == '#')
+                href = href.substr(1);
+
+            var pos = href.indexOf('?');
+            var first = href;
+            if (pos === -1)
+                first = href;
+            else
+                first = href.substr(0, pos);
+            var path = decode_path(first);
+            if (pos !== -1 && options) {
+                href.substring(pos + 1).split("&").forEach(function(opt) {
+                    var last, parts = opt.split('=');
+                    var name = decodeURIComponent(parts[0]);
+                    var value = decodeURIComponent(parts[1]);
+                    if (options.hasOwnProperty(name)) {
+                        last = options[name];
+                        if (!is_array(value))
+                            last = options[name] = [ last ];
+                        last.push(value);
+                    } else {
+                        options[name] = value;
+                    }
+                });
+            }
+
+            return path;
+        }
+
+        function href_for_go_or_replace(/* ... */) {
+            var href;
+            if (arguments.length == 1 && arguments[0] instanceof Location) {
+                href = String(arguments[0]);
+            } else if (typeof arguments[0] == "string") {
+                var options = arguments[1] || { };
+                href = encode(decode(arguments[0], options), options);
+            } else {
+                href = encode.apply(self, arguments);
+            }
+            return href;
+        }
+
+        function replace(/* ... */) {
+            if (self !== last_loc)
+                return;
+            var href = href_for_go_or_replace.apply(self, arguments);
+            window.location.replace(window.location.pathname + '#' + href);
+        }
+
+        function go(/* ... */) {
+            if (self !== last_loc)
+                return;
+            var href = href_for_go_or_replace.apply(self, arguments);
+            window.location.hash = '#' + href;
+        }
+
+        Object.defineProperties(self, {
+            path: {
+                enumerable: true,
+                writable: false,
+                value: path
+            },
+            options: {
+                enumerable: true,
+                writable: false,
+                value: options
+            },
+            href: {
+                enumerable: true,
+                value: href
+            },
+            go: { value: go },
+            replace: { value: replace },
+            encode: { value: encode },
+            decode: { value: decode },
+            toString: { value: function() { return href; } }
+        });
+    }
+
+    Object.defineProperty(cockpit, "location", {
+        enumerable: true,
+        get: function() {
+            if (!last_loc || last_loc.href !== get_window_location_hash())
+                last_loc = new Location();
+            return last_loc;
+        },
+        set: function(v) {
+            cockpit.location.go(v);
+        }
+    });
+
+    window.addEventListener("hashchange", function() {
+        last_loc = null;
+        cockpit.dispatchEvent("locationchanged");
+    });
+
+    /* ------------------------------------------------------------------------
+     * Cockpit jump
+     */
+
+    cockpit.jump = function jump(path, host) {
+        if (is_array(path))
+            path = "/" + path.map(encodeURIComponent).join("/").replace("%40", "@");
+        else
+            path = "" + path;
+        var options = { command: "jump", location: path, host: host };
+        cockpit.transport.inject("\n" + JSON.stringify(options));
+    };
+
+    /* ---------------------------------------------------------------------
+     * Spawning
+     *
+     * Public: https://files.cockpit-project.org/guide/api-cockpit.html
+     */
+
+    function ProcessError(options, name) {
+        this.problem = options.problem || null;
+        this.exit_status = options["exit-status"];
+        if (this.exit_status === undefined)
+            this.exit_status = null;
+        this.exit_signal = options["exit-signal"];
+        if (this.exit_signal === undefined)
+            this.exit_signal = null;
+        this.message = options.message;
+
+        if (this.message === undefined) {
+            if (this.problem)
+                this.message = cockpit.message(options.problem);
+            else if (this.exit_signal !== null)
+                this.message = cockpit.format(_("$0 killed with signal $1"), name, this.exit_signal);
+            else if (this.exit_status !== undefined)
+                this.message = cockpit.format(_("$0 exited with code $1"), name, this.exit_status);
+            else
+                this.message = cockpit.format(_("$0 failed"), name);
+        } else {
+            this.message = this.message.trim();
+        }
+
+        this.toString = function() {
+            return this.message;
+        };
+    }
+
+    function spawn_debug() {
+        if (window.debugging == "all" || window.debugging == "spawn")
+            console.debug.apply(console, arguments);
+    }
+
+    /* public */
+    cockpit.spawn = function(command, options) {
+        var dfd = cockpit.defer();
+
+        var args = { "payload": "stream", "spawn": [] };
+        if (command instanceof Array) {
+            for (var i = 0; i < command.length; i++)
+                args["spawn"].push(String(command[i]));
+        } else {
+            args["spawn"].push(String(command));
+        }
+        if (options !== undefined)
+            extend(args, options);
+
+        var name = args["spawn"][0] || "process";
+        var channel = cockpit.channel(args);
+
+        /* Callback that wants a stream response, see below */
+        var buffer = channel.buffer(null);
+
+        channel.addEventListener("close", function(event, options) {
+            var data = buffer.squash();
+            spawn_debug("process closed:", JSON.stringify(options));
+            if (data)
+                spawn_debug("process output:", data);
+            if (options.message !== undefined)
+                spawn_debug("process error:", options.message);
+
+            if (options.problem)
+                dfd.reject(new ProcessError(options, name));
+            else if (options["exit-status"] || options["exit-signal"])
+                dfd.reject(new ProcessError(options, name), data);
+            else if (options.message !== undefined)
+                dfd.resolve(data, options.message);
+            else
+                dfd.resolve(data);
+        });
+
+        var ret = dfd.promise;
+        ret.stream = function(callback) {
+            buffer.callback = callback;
+            return this;
+        };
+
+        ret.input = function(message, stream) {
+            if (message !== null && message !== undefined) {
+                spawn_debug("process input:", message);
+                channel.send(message);
+            }
+            if (!stream)
+                channel.control({ command: "done" });
+            return this;
+        };
+
+        ret.close = function(problem) {
+            spawn_debug("process closing:", problem);
+            if (channel.valid)
+                channel.close(problem);
+            return this;
+        };
+
+        return ret;
+    };
+
+    /* public */
+    cockpit.script = function(script, args, options) {
+        if (!options && is_plain_object(args)) {
+            options = args;
+            args = [];
+        }
+        var command = [ "/bin/sh", "-c", script, "--" ];
+        command.push.apply(command, args);
+        return cockpit.spawn(command, options);
+    };
+
+    function dbus_debug() {
+        if (window.debugging == "all" || window.debugging == "dbus")
+            console.debug.apply(console, arguments);
+    }
+
+    function DBusError(arg) {
+        if (typeof(arg) == "string") {
+            this.problem = arg;
+            this.name = null;
+            this.message = cockpit.message(arg);
+        } else {
+            this.problem = null;
+            this.name = arg[0];
+            this.message = arg[1][0] || arg[0];
+        }
+        this.toString = function() {
+            return this.message;
+        };
+    }
+
+    function DBusCache() {
+        var self = this;
+
+        var callbacks = [ ];
+        self.data = { };
+        self.meta = { };
+
+        self.connect = function connect(path, iface, callback, first) {
+            var cb = [path, iface, callback];
+            if (first)
+                callbacks.unshift(cb);
+            else
+                callbacks.push(cb);
+            return {
+                remove: function remove() {
+                    var i, length = callbacks.length;
+                    for (i = 0; i < length; i++) {
+                        var cb = callbacks[i];
+                        if (cb[0] === path && cb[1] === iface && cb[2] === callback) {
+                            delete cb[i];
+                            break;
+                        }
+                    }
+                }
+            };
+        };
+
+        function emit(path, iface, props) {
+            var copy = callbacks.slice();
+            var i, length = copy.length;
+            for (i = 0; i < length; i++) {
+                var cb = copy[i];
+                if ((!cb[0] || cb[0] === path) &&
+                    (!cb[1] || cb[1] === iface)) {
+                    cb[2](props, path);
+                }
+            }
+        }
+
+        self.update = function update(path, iface, props) {
+            if (!self.data[path])
+                self.data[path] = { };
+            if (!self.data[path][iface])
+                self.data[path][iface] = props;
+            else
+                props = extend(self.data[path][iface], props);
+            emit(path, iface, props);
+        };
+
+        self.remove = function remove(path, iface) {
+            if (self.data[path]) {
+                delete self.data[path][iface];
+                emit(path, iface, null);
+            }
+        };
+
+        self.lookup = function lookup(path, iface) {
+            if (self.data[path])
+                return self.data[path][iface];
+            return undefined;
+        };
+
+        self.each = function each(iface, callback) {
+            var path, ifa;
+            for (path in self.data) {
+                for (iface in self.data[path]) {
+                    if (ifa == iface)
+                        callback(self.data[path][iface], path);
+                }
+            }
+        };
+
+        self.close = function close() {
+            self.data = { };
+            var copy = callbacks;
+            callbacks = [ ];
+            var i, length = copy.length;
+            for (i = 0; i < length; i++)
+                copy[i].callback();
+        };
+    }
+
+    function DBusProxy(client, cache, iface, path, options) {
+        var self = this;
+        event_mixin(self, { });
+
+        var valid = false;
+        var defined = false;
+        var waits = cockpit.defer();
+
+        /* No enumeration on these properties */
+        Object.defineProperties(self, {
+            "client": { value: client, enumerable: false, writable: false },
+            "path": { value: path, enumerable: false, writable: false },
+            "iface": { value: iface, enumerable: false, writable: false },
+            "valid": { get: function() { return valid; }, enumerable: false },
+            "wait": { enumerable: false, writable: false,
+                value: function(func) {
+                    if (func)
+                        waits.promise.always(func);
+                    return waits.promise;
+                }
+            },
+            "call": { value: function(name, args) { return client.call(path, iface, name, args); },
+                      enumerable: false, writable: false },
+            "data": { value: { }, enumerable: false }
+        });
+
+        if (typeof window.$ === "function") {
+            Object.defineProperty(self, window.$.expando, {
+                value: { }, writable: true, enumerable: false
+            });
+        }
+
+        if (!options)
+            options = { };
+
+        function define() {
+            if (!cache.meta[iface])
+                return;
+
+            var meta = cache.meta[iface];
+            defined = true;
+
+            Object.keys(meta.methods || { }).forEach(function(name) {
+                if (name[0].toLowerCase() == name[0])
+                    return; /* Only map upper case */
+
+                /* Again, make sure these don't show up in enumerations */
+                Object.defineProperty(self, name, {
+                    enumerable: false,
+                    value: function() {
+                        var dfd = cockpit.defer();
+                        client.call(path, iface, name, Array.prototype.slice.call(arguments)).
+                            done(function(reply) { dfd.resolve.apply(dfd, reply); }).
+                            fail(function(ex) { dfd.reject(ex); });
+                        return dfd.promise;
+                    }
+                });
+            });
+
+            Object.keys(meta.properties || { }).forEach(function(name) {
+                if (name[0].toLowerCase() == name[0])
+                    return; /* Only map upper case */
+
+                var config = {
+                    enumerable: true,
+                    get: function() { return self.data[name]; },
+                    set: function(v) { throw name + "is not writable"; }
+                };
+
+                var prop = meta.properties[name];
+                if (prop.flags && prop.flags.indexOf('w') !== -1) {
+                    config.set = function(v) {
+                        client.call(path, "org.freedesktop.DBus.Properties", "Set",
+                                [ iface, name, cockpit.variant(prop.type, v) ]).
+                            fail(function(ex) {
+                                console.log("Couldn't set " + iface + " " + name +
+                                            " at " + path + ": " + ex);
+                            });
+                    };
+                }
+
+                /* Again, make sure these don't show up in enumerations */
+                Object.defineProperty(self, name, config);
+            });
+        }
+
+        function update(props) {
+            if (props) {
+                extend(self.data, props);
+                if (!defined)
+                    define();
+                valid = true;
+            } else {
+                valid = false;
+            }
+            self.dispatchEvent("changed", props);
+        }
+
+        cache.connect(path, iface, update, true);
+        update(cache.lookup(path, iface));
+
+        function signal(path, iface, name, args) {
+            self.dispatchEvent("signal", name, args);
+            if (name[0].toLowerCase() != name[0]) {
+                args = args.slice();
+                args.unshift(name);
+                self.dispatchEvent.apply(self, args);
+            }
+        }
+
+        client.subscribe({ "path": path, "interface": iface }, signal, options.subscribe !== false);
+
+        function waited() {
+            if (valid)
+                waits.resolve();
+            else
+                waits.reject();
+        }
+
+        /* If watching then do a proper watch, otherwise object is done */
+        if (options.watch !== false)
+            client.watch({ "path": path, "interface": iface }).always(waited);
+        else
+            waited();
+    }
+
+    function DBusProxies(client, cache, iface, path_namespace, options) {
+        var self = this;
+        event_mixin(self, { });
+
+        var waits;
+
+        Object.defineProperties(self, {
+            "client": { value: client, enumerable: false, writable: false },
+            "iface": { value: iface, enumerable: false, writable: false },
+            "path_namespace": { value: path_namespace, enumerable: false, writable: false },
+            "wait": { enumerable: false, writable: false,
+                value: function(func) {
+                    if (func)
+                        waits.always(func);
+                    return waits;
+                }
+            }
+        });
+
+        if (typeof window.$ === "function") {
+            Object.defineProperty(self, window.$.expando, {
+                value: { }, writable: true, enumerable: false
+            });
+        }
+
+        /* Subscribe to signals once for all proxies */
+        var match = { "interface": iface, "path_namespace": path_namespace };
+
+        /* Callbacks added by proxies */
+        client.subscribe(match);
+
+        /* Watch for property changes */
+        if (options.watch !== false) {
+            waits = client.watch(match);
+        } else {
+            waits = cockpit.defer().resolve().promise;
+        }
+
+        /* Already added watch/subscribe, tell proxies not to */
+        options = extend({ watch: false, subscribe: false }, options);
+
+        function update(props, path) {
+            var proxy = self[path];
+            if (!path) {
+                return;
+            } else if (!props && proxy) {
+                delete self[path];
+                self.dispatchEvent("removed", proxy);
+            } else if (props) {
+                if (!proxy) {
+                    proxy = self[path] = client.proxy(iface, path, options);
+                    self.dispatchEvent("added", proxy);
+                }
+                self.dispatchEvent("changed", proxy);
+            }
+        }
+
+        cache.connect(null, iface, update, false);
+        cache.each(iface, update);
+    }
+
+    function DBusClient(name, options) {
+        var self = this;
+        event_mixin(self, { });
+
+        var args = { };
+        var track = false;
+        var owner = null;
+
+        if (options) {
+            if (options.track)
+                track = true;
+
+            delete options['track'];
+            extend(args, options);
+        }
+        args.payload = "dbus-json3";
+        args.name = name;
+        self.options = options;
+
+        dbus_debug("dbus open: ", args);
+
+        var channel = cockpit.channel(args);
+        var subscribers = { };
+        var calls = { };
+        var cache;
+
+        /* The problem we closed with */
+        var closed;
+
+        self.constructors = { "*": DBusProxy };
+
+        function ensure_cache() {
+            if (!cache)
+                cache = new DBusCache();
+        }
+
+        function matches(signal, match) {
+            if (match.path && signal[0] !== match.path)
+                return false;
+            if (match.path_namespace && signal[0].indexOf(match.path_namespace) !== 0)
+                return false;
+            if (match["interface"] && signal[1] !== match["interface"])
+                return false;
+            if (match.member && signal[2] !== match.member)
+                return false;
+            if (match.arg0 && signal[3] !== match.arg0)
+                return false;
+            return true;
+        }
+
+        function on_message(event, payload) {
+            dbus_debug("dbus:", payload);
+            var msg;
+            try {
+                msg = JSON.parse(payload);
+            } catch(ex) {
+                console.warn("received invalid dbus json message:", ex);
+            }
+            if (msg === undefined) {
+                channel.close({"problem": "protocol-error"});
+                return;
+            }
+            var dfd, options, id, subscription;
+            if (msg.id !== undefined)
+                dfd = calls[msg.id];
+            if (msg.reply) {
+                if (dfd) {
+                    options = { };
+                    if (msg.type)
+                        options.type = msg.type;
+                    if (msg.flags)
+                        options.flags = msg.flags;
+                    dfd.resolve(msg.reply[0] || [], options);
+                    delete calls[msg.id];
+                }
+            } else if (msg.error) {
+                if (dfd) {
+                    dfd.reject(new DBusError(msg.error));
+                    delete calls[msg.id];
+                }
+            } else if (msg.signal) {
+                for (id in subscribers) {
+                    subscription = subscribers[id];
+                    if (subscription.callback) {
+                        if (matches(msg.signal, subscription.match))
+                            subscription.callback.apply(self, msg.signal);
+                    }
+                }
+            } else if (msg.notify) {
+                notify(msg.notify);
+            } else if (msg.meta) {
+                ensure_cache();
+                extend(cache.meta, msg.meta);
+            } else if (msg.owner !== undefined) {
+                self.dispatchEvent("owner", msg.owner);
+
+                // We won't get this signal with the same
+                // owner twice so if we've seen an owner
+                // before that means it has changed.
+                if (track && owner)
+                    self.close();
+
+                owner = msg.owner;
+            } else {
+                dbus_debug("received unexpected dbus json message:", payload);
+            }
+        }
+
+        function notify(data) {
+            ensure_cache();
+            var path, iface, props;
+            for (path in data) {
+                for (iface in data[path]) {
+                    props = data[path][iface];
+                    if (!props)
+                        cache.remove(path, iface);
+                    else
+                        cache.update(path, iface, props);
+                }
+            }
+            self.dispatchEvent("notify", data);
+        }
+
+        this.notify = notify;
+
+        function close_perform(options) {
+            closed = options.problem || "disconnected";
+            var id, outstanding = calls;
+            calls = { };
+            for (id in outstanding) {
+                outstanding[id].reject(new DBusError(closed));
+            }
+            self.dispatchEvent("close", options);
+        }
+
+        this.close = function close(options) {
+            if (typeof options == "string")
+                options = { "problem": options };
+            if (!options)
+                options = { };
+            if (channel)
+                channel.close(options);
+            else
+                close_perform(options);
+        };
+
+        function on_close(event, options) {
+            dbus_debug("dbus close:", options);
+            channel.removeEventListener("message", on_message);
+            channel.removeEventListener("close", on_close);
+            channel = null;
+            close_perform(options);
+        }
+
+        channel.addEventListener("message", on_message);
+        channel.addEventListener("close", on_close);
+
+        var last_cookie = 1;
+
+        this.call = function call(path, iface, method, args, options) {
+            var dfd = cockpit.defer();
+            var id = String(last_cookie);
+            last_cookie++;
+            var method_call = {
+                "call": [ path, iface, method, args || [] ],
+                "id": id
+            };
+            if (options) {
+                if (options.type)
+                    method_call.type = options.type;
+                if (options.flags !== undefined)
+                    method_call.flags = options.flags;
+            }
+
+            var msg = JSON.stringify(method_call);
+            dbus_debug("dbus:", msg);
+
+            if (channel) {
+                channel.send(msg);
+                calls[id] = dfd;
+            } else {
+                dfd.reject(new DBusError(closed));
+            }
+
+            return dfd.promise;
+        };
+
+        this.subscribe = function subscribe(match, callback, rule) {
+            var subscription = {
+                match: match || { },
+                callback: callback
+            };
+
+            if (rule !== false && channel && channel.valid) {
+                var msg = JSON.stringify({ "add-match": subscription.match });
+                dbus_debug("dbus:", msg);
+                channel.send(msg);
+            }
+
+            var id;
+            if (callback) {
+                id = String(last_cookie);
+                last_cookie++;
+                subscribers[id] = subscription;
+            }
+
+            return {
+                remove: function() {
+                    var prev;
+                    if (id) {
+                        prev = subscribers[id];
+                        if (prev)
+                            delete subscribers[id];
+                    }
+                    if (rule !== false && channel && channel.valid && prev) {
+                        var msg = JSON.stringify({ "remove-match": prev.match });
+                        dbus_debug("dbus:", msg);
+                        channel.send(msg);
+                    }
+                }
+            };
+        };
+
+        self.watch = function watch(path) {
+            var match;
+            if (is_plain_object(path))
+                match = path;
+            else
+                match = { path: String(path) };
+
+            var id = String(last_cookie);
+            last_cookie++;
+            var dfd = cockpit.defer();
+            calls[id] = dfd;
+
+            var msg = JSON.stringify({ "watch": match, "id": id });
+            if (channel && channel.valid) {
+                dbus_debug("dbus:", msg);
+                channel.send(msg);
+            } else {
+                dfd.reject(new DBusError(closed));
+            }
+
+            var ret = dfd.promise;
+            ret.remove = function remove() {
+                delete calls[id];
+                if (channel && channel.valid) {
+                    msg = JSON.stringify({ "unwatch": match });
+                    dbus_debug("dbus:", msg);
+                    channel.send(msg);
+                }
+            };
+            return ret;
+        };
+
+        self.proxy = function proxy(iface, path, options) {
+            if (!iface)
+                iface = name;
+            iface = String(iface);
+            if (!path)
+                path = "/" + iface.replace(/\./g, "/");
+            var Constructor = self.constructors[iface];
+            if (!Constructor)
+                Constructor = self.constructors["*"];
+            if (!options)
+                options = { };
+            ensure_cache();
+            return new Constructor(self, cache, iface, String(path), options);
+        };
+
+        self.proxies = function proxies(iface, path_namespace, options) {
+            if (!iface)
+                iface = name;
+            if (!path_namespace)
+                path_namespace = "/";
+            if (!options)
+                options = { };
+            ensure_cache();
+            return new DBusProxies(self, cache, String(iface), String(path_namespace), options);
+        };
+
+    }
+
+    /* public */
+    cockpit.dbus = function dbus(name, options) {
+        return new DBusClient(name, options);
+    };
+
+    cockpit.variant = function variant(type, value) {
+        return { 'v': value, 't': type };
+    };
+
+    cockpit.byte_array = function byte_array(string) {
+        return window.btoa(string);
+    };
+
+    /* File access
+     */
+
+    cockpit.file = function file(path, options) {
+        options = options || { };
+        var binary = options.binary;
+
+        var self = {
+            path: path,
+            read: read,
+            replace: replace,
+            modify: modify,
+
+            watch: watch,
+
+            close: close
+        };
+
+        var base_channel_options = extend({ }, options);
+        delete base_channel_options.syntax;
+
+        function parse(str) {
+            if (options.syntax && options.syntax.parse)
+                return options.syntax.parse(str);
+            else
+                return str;
+        }
+
+        function stringify(obj) {
+            if (options.syntax && options.syntax.stringify)
+                return options.syntax.stringify(obj);
+            else
+                return obj;
+        }
+
+        var read_promise = null;
+        var read_channel;
+
+        function read() {
+            if (read_promise)
+                return read_promise;
+
+            var dfd = cockpit.defer();
+            var opts = extend({ }, base_channel_options, {
+                payload: "fsread1",
+                path: path
+            });
+
+            function try_read() {
+                read_channel = cockpit.channel(opts);
+                var content_parts = [ ];
+                read_channel.addEventListener("message", function (event, message) {
+                    content_parts.push(message);
+                });
+                read_channel.addEventListener("close", function (event, message) {
+                    read_channel = null;
+
+                    if (message.problem == "change-conflict") {
+                        try_read();
+                        return;
+                    }
+
+                    read_promise = null;
+
+                    if (message.problem) {
+                        var error = new BasicError(message.problem, message.message);
+                        fire_watch_callbacks(null, null, error);
+                        dfd.reject(error);
+                        return;
+                    }
+
+                    var content;
+                    if (message.tag == "-")
+                        content = null;
+                    else {
+                        try {
+                            content = parse(join_data(content_parts, binary));
+                        } catch (e) {
+                            fire_watch_callbacks(null, null, e);
+                            dfd.reject(e);
+                            return;
+                        }
+                    }
+
+                    fire_watch_callbacks(content, message.tag);
+                    dfd.resolve(content, message.tag);
+                });
+            }
+
+            try_read();
+
+            read_promise = dfd.promise;
+            return read_promise;
+        }
+
+        var replace_channel = null;
+
+        function replace(new_content, expected_tag) {
+            var dfd = cockpit.defer();
+
+            var file_content;
+            try {
+                if (new_content === null)
+                    file_content = null;
+                else
+                    file_content = stringify(new_content);
+            }
+            catch (e) {
+                dfd.reject(e);
+                return dfd.promise;
+            }
+
+            if (replace_channel)
+                replace_channel.close("abort");
+
+            var opts = extend({ }, base_channel_options, {
+                payload: "fsreplace1",
+                path: path,
+                tag: expected_tag
+            });
+            replace_channel = cockpit.channel(opts);
+
+            replace_channel.addEventListener("close", function (event, message) {
+                replace_channel = null;
+                if (message.problem) {
+                    dfd.reject(new BasicError(message.problem, message.message));
+                } else {
+                    fire_watch_callbacks(new_content, message.tag);
+                    dfd.resolve(message.tag);
+                }
+            });
+
+            var len = 0, binary = false;
+            if (file_content) {
+                if (file_content.byteLength) {
+                    len = file_content.byteLength;
+                    binary = true;
+                } else if (file_content.length) {
+                    len = file_content.length;
+                }
+            }
+
+            var i, n, batch = 16 * 1024;
+            for (i = 0; i < len; i += batch) {
+                n = Math.min(len - i, batch);
+                if (binary)
+                    replace_channel.send(new window.Uint8Array(file_content.buffer, i, n));
+                else
+                    replace_channel.send(file_content.substr(i, n));
+            }
+
+            replace_channel.control({ command: "done" });
+            return dfd.promise;
+        }
+
+        function modify(callback, initial_content, initial_tag) {
+            var dfd = cockpit.defer();
+
+            function update(content, tag) {
+                var new_content = callback(content);
+                if (new_content === undefined)
+                    new_content = content;
+                replace(new_content, tag).
+                    done(function (new_tag) {
+                        dfd.resolve(new_content, new_tag);
+                    }).
+                    fail(function (error) {
+                        if (error.problem == "change-conflict")
+                            read_then_update();
+                        else
+                            dfd.reject(error);
+                    });
+            }
+
+            function read_then_update() {
+                read().
+                    done(update).
+                    fail (function (error) {
+                        dfd.reject(error);
+                    });
+            }
+
+            if (initial_content === undefined)
+                read_then_update();
+            else
+                update(initial_content, initial_tag);
+
+            return dfd.promise;
+        }
+
+        var watch_callbacks = [];
+        var n_watch_callbacks = 0;
+
+        var watch_channel = null;
+        var watch_tag;
+
+        function ensure_watch_channel() {
+            if (n_watch_callbacks > 0) {
+                if (watch_channel)
+                    return;
+
+                var opts = extend({ }, base_channel_options, {
+                    payload: "fswatch1",
+                    path: path
+                });
+                watch_channel = cockpit.channel(opts);
+                watch_channel.addEventListener("message", function (event, message_string) {
+                    var message;
+                    try      { message = JSON.parse(message_string); }
+                    catch(e) { message = null; }
+                    if (message && message.path == path && message.tag && message.tag != watch_tag)
+                        read();
+                });
+            } else {
+                if (watch_channel) {
+                    watch_channel.close();
+                    watch_channel = null;
+                }
+            }
+        }
+
+        function fire_watch_callbacks(/* content, tag, error */) {
+            watch_tag = arguments[1] || null;
+            invoke_functions(watch_callbacks, self, arguments);
+        }
+
+        function watch(callback) {
+            if (callback)
+                watch_callbacks.push(callback);
+            n_watch_callbacks += 1;
+            ensure_watch_channel();
+
+            watch_tag = null;
+            read();
+
+            return {
+                remove: function () {
+                    var index;
+                    if (callback) {
+                        index = watch_callbacks.indexOf(callback);
+                        if (index > -1)
+                            watch_callbacks[index] = null;
+                    }
+                    n_watch_callbacks -= 1;
+                    ensure_watch_channel();
+                }
+            };
+        }
+
+        function close() {
+            if (read_channel)
+                read_channel.close("cancelled");
+            if (replace_channel)
+                replace_channel.close("cancelled");
+            if (watch_channel)
+                watch_channel.close("cancelled");
+        }
+
+        return self;
+    };
+
+    /* ---------------------------------------------------------------------
+     * Localization
+     */
+
+    var po_data = { };
+    var po_plural;
+
+    cockpit.language = undefined;
+
+    cockpit.locale = function locale(po) {
+        var lang = cockpit.language || "en";
+        var header;
+
+        if (po) {
+            extend(po_data, po);
+            header = po[""];
+        } else {
+            po_data = { };
+        }
+
+        if (header) {
+            if (header["plural-forms"])
+                po_plural = header["plural-forms"];
+            if (header["language"])
+                lang = header["language"];
+        }
+
+        cockpit.language = lang;
+    };
+
+    cockpit.translate = function translate(el) {
+        var list = (el || document).querySelectorAll("[translatable=\"yes\"]");
+        var e, translated, i, len;
+        if (list) {
+            for (i = 0, len = list.length; i < len; i++) {
+                e = list[i];
+                translated = cockpit.gettext(e.getAttribute("context"), e.textContent);
+                e.removeAttribute("translatable");
+                e.textContent = translated;
+            }
+        }
+    };
+
+    cockpit.gettext = function gettext(context, string) {
+        /* Missing first parameter */
+        if (arguments.length == 1) {
+            string = context;
+            context = undefined;
+        }
+
+        var key = context ? context + '\u0004' + string : string;
+        if (po_data) {
+            var translated = po_data[key];
+            if (translated && translated[1])
+                return translated[1];
+        }
+        return string;
+    };
+
+    function imply( val ) {
+        return (val === true ? 1 : val ? val : 0);
+    }
+
+    cockpit.ngettext = function ngettext(context, string1, stringN, num) {
+        /* Missing first parameter */
+        if (arguments.length == 3) {
+            num = stringN;
+            stringN = string1;
+            string1 = context;
+            context = undefined;
+        }
+
+        var key = context ? context + '\u0004' + string1 : string1;
+        if (po_data && po_plural) {
+            var translated = po_data[key];
+            if (translated) {
+                var i = imply(po_plural(num)) + 1;
+                if (translated[i])
+                    return translated[i];
+            }
+        }
+        if (num == 1)
+            return string1;
+        return stringN;
+    };
+
+    cockpit.noop = function noop(arg0, arg1) {
+        return arguments[arguments.length - 1];
+    };
+
+    /* Only for _() calls here in the cockpit code */
+    var _ = cockpit.gettext;
+
+    cockpit.message = function message(arg) {
+        if (arg.message)
+            return arg.message;
+
+        var problem = null;
+        if (arg.problem)
+            problem = arg.problem;
+        else
+            problem = arg + "";
+        if (problem == "terminated")
+            return _("Your session has been terminated.");
+        else if (problem == "no-session")
+            return _("Your session has expired. Please log in again.");
+        else if (problem == "access-denied")
+            return _("Not permitted to perform this action.");
+        else if (problem == "authentication-failed")
+            return _("Login failed");
+        else if (problem == "authentication-not-supported")
+            return _("The server refused to authenticate using any supported methods.");
+        else if (problem == "unknown-hostkey")
+            return _("Untrusted host");
+        else if (problem == "invalid-hostkey")
+            return _("Host key is incorrect");
+        else if (problem == "internal-error")
+            return _("Internal error");
+        else if (problem == "timeout")
+            return _("Connection has timed out.");
+        else if (problem == "no-cockpit")
+            return _("Cockpit is not installed on the system.");
+        else if (problem == "no-forwarding")
+            return _("Cannot forward login credentials");
+        else if (problem == "disconnected")
+            return _("Server has closed the connection.");
+        else if (problem == "not-supported")
+            return _("Cockpit is not compatible with the software on the system.");
+        else if (problem == "no-host")
+            return _("Cockpit could not contact the given host.");
+        else
+            return problem;
+    };
+
+    function HttpError(arg0, arg1, message) {
+        this.status = parseInt(arg0, 10);
+        this.reason = arg1;
+        this.message = message || arg1;
+        this.problem = null;
+
+        this.valueOf = function() {
+            return this.status;
+        };
+        this.toString = function() {
+            return this.status + " " + this.message;
+        };
+    }
+
+    function http_debug() {
+        if (window.debugging == "all" || window.debugging == "http")
+            console.debug.apply(console, arguments);
+    }
+
+    function find_header(headers, name) {
+        if (!headers)
+            return undefined;
+        name = name.toLowerCase();
+        for (var head in headers) {
+            if (head.toLowerCase() == name)
+                return headers[head];
+        }
+        return undefined;
+    }
+
+    function HttpClient(endpoint, options) {
+        var self = this;
+
+        self.options = options;
+        options.payload = "http-stream1";
+
+        if (endpoint !== undefined) {
+            if (endpoint.indexOf && endpoint.indexOf("/") === 0) {
+                options.unix = endpoint;
+            } else {
+                var port = parseInt(endpoint, 10);
+                if (!isNaN(port))
+                    options.port = port;
+                else
+                    throw "The endpoint must be either a unix path or port number";
+            }
+        }
+
+        if (options.address) {
+            if (!options.capabilities)
+                options.capabilities = [];
+            options.capabilities.push("address");
+        }
+
+        function param(obj) {
+            return Object.keys(obj).map(function(k) {
+                return encodeURIComponent(k) + '=' + encodeURIComponent(obj[k]);
+            }).join('&').split('%20').join('+'); /* split/join because phantomjs */
+        }
+
+        self.request = function request(req) {
+            var dfd = cockpit.defer();
+
+            if (!req.path)
+                req.path = "/";
+            if (!req.method)
+                req.method = "GET";
+            if (req.params) {
+                if (req.path.indexOf("?") === -1)
+                    req.path += "?" + param(req.params);
+                else
+                    req.path += "&" + param(req.params);
+            }
+            delete req.params;
+
+            var input = req.body;
+            delete req.body;
+
+            var headers = req.headers;
+            delete req.headers;
+
+            extend(req, options);
+
+            /* Combine the headers */
+            if (options.headers && headers)
+                req.headers = extend({ }, options.headers, headers);
+            else if (options.headers)
+                req.headers = options.headers;
+            else
+                req.headers = headers;
+
+            http_debug("http request:", JSON.stringify(req));
+
+            /* We need a channel for the request */
+            var channel = cockpit.channel(req);
+
+            if (input !== undefined) {
+                if (input !== "") {
+                    http_debug("http input:", input);
+                    channel.send(input);
+                }
+                http_debug("http done");
+                channel.control({ command: "done" });
+            }
+
+            /* Callbacks that want to stream or get headers */
+            var streamer = null;
+            var responsers = null;
+
+            var count = 0;
+            var resp = null;
+
+            var buffer = channel.buffer(function(data) {
+                count += 1;
+
+                if (count === 1) {
+                    if (channel.binary)
+                        data = cockpit.utf8_decoder().decode(data);
+                    resp = JSON.parse(data);
+
+                    /* Anyone looking for response details? */
+                    if (responsers) {
+                        resp.headers = resp.headers || { };
+                        invoke_functions(responsers, self, [resp.status, resp.headers]);
+                    }
+                    return true;
+                }
+
+                /* Fire any streamers */
+                if (resp.status >= 200 && resp.status <= 299 && streamer)
+                    return streamer(data);
+
+                return 0;
+            });
+
+            function on_close(event, options) {
+                if (options.problem) {
+                    http_debug("http problem: ", options.problem);
+                    dfd.reject(new BasicError(options.problem));
+
+                } else {
+                    var body = buffer.squash();
+
+                    /* An error, fail here */
+                    if (resp && (resp.status < 200 || resp.status > 299)) {
+                        var message;
+                        var type = find_header(resp.headers, "Content-Type");
+                        if (type && !channel.binary) {
+                            if (type.indexOf("text/plain") === 0)
+                                message = body;
+                        }
+                        http_debug("http status: ", resp.status);
+                        dfd.reject(new HttpError(resp.status, resp.reason, message), body);
+
+                    } else {
+                        http_debug("http done");
+                        dfd.resolve(body);
+                    }
+                }
+
+                channel.removeEventListener("close", on_close);
+            }
+
+            channel.addEventListener("close", on_close);
+
+            var ret = dfd.promise;
+            ret.stream = function(callback) {
+                streamer = callback;
+                return ret;
+            };
+            ret.response = function(callback) {
+                if (responsers === null)
+                    responsers = [];
+                responsers.push(callback);
+                return ret;
+            };
+            ret.input = function(message, stream) {
+                if (message !== null && message !== undefined) {
+                    http_debug("http input:", message);
+                    channel.send(message);
+                }
+                if (!stream) {
+                    http_debug("http done");
+                    channel.control({ command: "done" });
+                }
+                return ret;
+            };
+            ret.close = function(problem) {
+                http_debug("http closing:", problem);
+                channel.close(problem);
+                return ret;
+            };
+            return ret;
+        };
+
+        self.get = function get(path, params, headers) {
+            return self.request({
+                "method": "GET",
+                "params": params,
+                "path": path,
+                "body": "",
+                "headers": headers
+            });
+        };
+
+        self.post = function post(path, body, headers) {
+            headers = headers || { };
+
+            if (is_plain_object(body) || is_array(body)) {
+                body = JSON.stringify(body);
+                if (find_header(headers, "Content-Type") === undefined)
+                    headers["Content-Type"] = "application/json";
+            } else if (body === undefined || body === null) {
+                body = "";
+            } else if (typeof body !== "string") {
+                body = String(body);
+            }
+
+            return self.request({
+                "method": "POST",
+                "path": path,
+                "body": body,
+                "headers": headers
+            });
+        };
+    }
+
+    /* public */
+    cockpit.http = function(endpoint, options) {
+        if (is_plain_object(endpoint) && options === undefined) {
+            options = endpoint;
+            endpoint = undefined;
+        }
+        return new HttpClient(endpoint, options || { });
+    };
+
+    /* ---------------------------------------------------------------------
+     * Permission
+     */
+
+    var authority = null;
+
+    function Permission(options) {
+        var self = this;
+        event_mixin(self, { });
+
+        self.allowed = null;
+
+        var user = cockpit.user;
+        var group = null;
+        var admin = false;
+
+        if (options)
+            group = options.group;
+
+        if (options && options.admin)
+            admin = true;
+
+        function decide() {
+            if (user.id === 0)
+                return true;
+
+            if (user.groups) {
+                var allowed = false;
+                user.groups.forEach(function(name) {
+                    if (name == group) {
+                        allowed = true;
+                        return false;
+                    }
+                    if (admin && (name == "wheel" || name == "sudo")) {
+                        allowed = true;
+                        return false;
+                    }
+                });
+                return allowed;
+            }
+
+            if (user.id === undefined)
+                return null;
+
+            return false;
+        }
+
+        function user_changed() {
+            var allowed = decide();
+            if (self.allowed !== allowed) {
+                self.allowed = allowed;
+                self.dispatchEvent("changed");
+            }
+        }
+
+        user.addEventListener("changed", user_changed);
+        user_changed();
+
+        self.close = function close() {
+            user.removeEventListener("changed", user_changed);
+        };
+    }
+
+    cockpit.permission = function permission(arg) {
+        return new Permission(arg);
+    };
+
+    /* ---------------------------------------------------------------------
+     * Metrics
+     *
+     */
+
+    function timestamp(when, interval) {
+        if (typeof when == "number")
+            return when * interval;
+        else if (typeof when == "string")
+            when = new Date(when);
+        if (when instanceof Date)
+            return when.getTime();
+        else
+            throw "invalid date or offset";
+    }
+
+    function MetricsChannel(interval, options_list, cache) {
+        var self = this;
+        event_mixin(self, { });
+
+        if (options_list.length === undefined)
+            options_list = [ options_list ];
+
+        var channels = [ ];
+        var following = false;
+
+        self.series = cockpit.series(interval, cache, fetch_for_series);
+
+        function fetch_for_series(beg, end, for_walking) {
+            if (!for_walking)
+                self.fetch(beg, end);
+            else
+                self.follow();
+        }
+
+        function transfer(options_list, callback, is_archive) {
+            if (options_list.length === 0)
+                return;
+
+            if (!is_archive) {
+                if (following)
+                    return;
+                following = true;
+            }
+
+            var options = extend({
+                payload: "metrics1",
+                interval: interval,
+                source: "internal"
+            }, options_list[0]);
+
+            delete options.archive_source;
+
+            var channel = cockpit.channel(options);
+            channels.push(channel);
+
+            var meta = null;
+            var last = null;
+            var beg;
+
+            channel.addEventListener("close", function(ev, close_options) {
+                if (!is_archive)
+                    following = false;
+
+                if (options_list.length > 1 &&
+                    (close_options.problem == "not-supported" || close_options.problem == "not-found")) {
+                    transfer(options_list.slice(1), callback);
+                } else if (close_options.problem) {
+                    if (close_options.problem != "terminated" &&
+                        close_options.problem != "disconnected" &&
+                        close_options.problem != "authentication-failed" &&
+                        (close_options.problem != "not-found" || !is_archive) &&
+                        (close_options.problem != "not-supported" || !is_archive)) {
+                        console.warn("metrics channel failed: " + close_options.problem);
+                    }
+                } else if (is_archive) {
+                    if (!self.archives) {
+                        self.archives = true;
+                        self.dispatchEvent('changed');
+                    }
+                }
+            });
+
+            channel.addEventListener("message", function(ev, payload) {
+                var message = JSON.parse(payload);
+
+                var data, data_len, last_len, dataj, dataj_len, lastj, lastj_len;
+                var i, j, k;
+                var timestamp;
+
+                /* A meta message? */
+                var message_len = message.length;
+                if (message_len === undefined) {
+                    meta = message;
+                    timestamp = 0;
+                    if (meta.now && meta.timestamp)
+                        timestamp = meta.timestamp + (Date.now() - meta.now);
+                    beg = Math.floor(timestamp / interval);
+                    callback(beg, meta, null, options_list[0]);
+
+                /* A data message */
+                } else if (meta) {
+
+                    /* Data decompression */
+                    for (i = 0; i < message_len; i++) {
+                        data = message[i];
+                        if (last) {
+                            data_len = data.length;
+                            last_len = last.length;
+                            for (j = 0; j < last_len; j++) {
+                                dataj = data[j];
+                                if (dataj === null || dataj === undefined) {
+                                    data[j] = last[j];
+                                } else {
+                                    dataj_len = dataj.length;
+                                    if (dataj_len !== undefined) {
+                                        lastj = last[j];
+                                        lastj_len = last[j].length;
+                                        for (k = 0; k < dataj_len; k++) {
+                                            if (dataj[k] === null)
+                                                dataj[k] = lastj[k];
+                                        }
+                                        for (; k < lastj_len; k++)
+                                            dataj[k] = lastj[k];
+                                    }
+                                }
+                            }
+                        }
+                        last = data;
+                    }
+
+                    /* Return the data */
+                    callback(beg, meta, message, options_list[0]);
+
+                    /* Bump timestamp for the next message */
+                    beg += message_len;
+                    meta.timestamp += (interval * message_len);
+                }
+            });
+        }
+
+        function drain(beg, meta, message, options) {
+            var mapping, map, name;
+
+            /* Generate a mapping object if necessary */
+            mapping = meta.mapping;
+            if (!mapping) {
+                mapping = { };
+                meta.metrics.forEach(function(metric, i) {
+                    map = { "": i };
+                    if (options.metrics_path_names)
+                        name = options.metrics_path_names[i];
+                    else
+                        name = metric.name;
+                    mapping[name] = map;
+                    if (metric.instances) {
+                        metric.instances.forEach(function(instance, i) {
+                            if (instance === "")
+                                instance = "/";
+                            map[instance] = { "": i };
+                        });
+                    }
+                });
+                meta.mapping = mapping;
+            }
+
+            if (message)
+                self.series.input(beg, message, mapping);
+        }
+
+        self.fetch = function fetch(beg, end) {
+            var timestamp = beg * interval - Date.now();
+            var limit = end - beg;
+
+            var archive_options_list = [ ];
+            for (var i = 0; i < options_list.length; i++) {
+                if (options_list[i].archive_source) {
+                    archive_options_list.push(extend({}, options_list[i],
+                                                       { "source": options_list[i].archive_source,
+                                                         timestamp: timestamp,
+                                                         limit: limit
+                                                       }));
+                }
+            }
+
+            transfer(archive_options_list, drain, true);
+        };
+
+        self.follow = function follow() {
+            transfer(options_list, drain);
+        };
+
+        self.close = function close(options) {
+            var i, len = channels.length;
+            for (i = 0; i < len; i++)
+                channels[i].close(options);
+        };
+    }
+
+    cockpit.metrics = function metrics(interval, options) {
+        return new MetricsChannel(interval, options);
+    };
+
     /* ---------------------------------------------------------------------
      * Ooops handling.
      *
@@ -3506,7 +3957,7 @@ function full_scope(cockpit, $, po) {
 
     cockpit.oops = function oops() {
         if (window.parent !== window && window.name.indexOf("cockpit1:") === 0)
-            window.parent.postMessage("\n{ \"command\": \"oops\" }", origin);
+            window.parent.postMessage("\n{ \"command\": \"oops\" }", transport_origin);
     };
 
     var old_onerror;
@@ -3521,25 +3972,20 @@ function full_scope(cockpit, $, po) {
         };
     }
 
-} /* full_scope */
+} /* scope end */
 
 /*
  * Register this script as a module and/or with globals
  */
 
 var cockpit = { };
+event_mixin(cockpit, { });
+
 var basics = false;
-var extra = false;
-function factory(jquery) {
+function factory() {
     if (!basics) {
         basic_scope(cockpit);
         basics = true;
-    }
-    if (!extra) {
-        if (jquery) {
-            full_scope(cockpit, jquery);
-            extra = true;
-        }
     }
     return cockpit;
 }
@@ -3557,15 +4003,15 @@ if (pos !== -1)
 /* cockpit.js is being loaded as a <script>  and no other loader around? */
 if (pos !== -1) {
     self_module_id = last.substring(pos + 1, last.indexOf(".", pos + 1));
-    window.cockpit = factory(window.jQuery);
+    window.cockpit = factory();
 }
 
 /* Cockpit loaded via AMD loader */
-if (typeof define === 'function' && define.amd) {
+if (is_function(window.define) && window.define.amd) {
     if (self_module_id)
-        define(self_module_id, ['jquery'], window.cockpit);
+        define(self_module_id, [], window.cockpit);
     else
-        define(['jquery'], factory);
+        define([], factory);
 }
 
 })();

@@ -373,6 +373,7 @@ test_read_error (void)
   g_assert (out >= 0);
 
   cockpit_expect_warning ("*Bad file descriptor");
+  cockpit_expect_message ("*Bad file descriptor");
 
   /* Using wrong end of the pipe */
   io = mock_io_stream_for_fds (fds[1], out);
@@ -397,6 +398,8 @@ test_read_error (void)
   close (fds[0]);
 
   g_object_unref (echo_stream);
+
+  cockpit_assert_expected ();
 }
 
 static void
@@ -412,6 +415,7 @@ test_write_error (void)
     g_assert_not_reached ();
 
   cockpit_expect_warning ("*Bad file descriptor");
+  cockpit_expect_message ("*Bad file descriptor");
 
   io = mock_io_stream_for_fds (fds[0], fds[1]);
 
@@ -438,6 +442,8 @@ test_write_error (void)
   g_assert_cmpstr (echo_stream->problem, ==, "internal-error");
 
   g_object_unref (echo_stream);
+
+  cockpit_assert_expected ();
 }
 
 static void
@@ -547,6 +553,7 @@ typedef struct {
   GSocket *conn_sock;
   GSource *conn_source;
   GSocketAddress *address;
+  gboolean skip_ipv6_loopback;
   guint16 port;
 } TestConnect;
 
@@ -618,6 +625,15 @@ setup_connect (TestConnect *tc,
 
   g_socket_bind (tc->listen_sock, address, TRUE, &error);
   g_object_unref (address);
+
+  if (error != NULL && family == G_SOCKET_FAMILY_IPV6)
+    {
+      /* Some test runners don't have IPv6 loopback, strangely enough */
+      g_clear_error (&error);
+      tc->skip_ipv6_loopback = TRUE;
+      return;
+    }
+
   g_assert_no_error (error);
 
   tc->address = g_socket_get_local_address (tc->listen_sock, &error);
@@ -637,7 +653,8 @@ static void
 teardown_connect (TestConnect *tc,
                   gconstpointer data)
 {
-  g_object_unref (tc->address);
+  if (tc->address)
+    g_object_unref (tc->address);
   if (tc->conn_source)
     {
       g_source_destroy (tc->conn_source);
@@ -656,11 +673,12 @@ static void
 test_connect_and_read (TestConnect *tc,
                        gconstpointer user_data)
 {
+  CockpitConnectable connectable = { .address = G_SOCKET_CONNECTABLE (tc->address) };
   CockpitStream *stream;
   GError *error = NULL;
   GByteArray *buffer;
 
-  stream = cockpit_stream_connect ("connect-and-read", G_SOCKET_CONNECTABLE (tc->address), NULL);
+  stream = cockpit_stream_connect ("connect-and-read", &connectable);
   g_assert (stream != NULL);
 
   while (tc->conn_sock == NULL)
@@ -681,17 +699,41 @@ test_connect_and_read (TestConnect *tc,
 }
 
 static void
+test_connect_early_close (TestConnect *tc,
+                          gconstpointer user_data)
+{
+  CockpitConnectable connectable = { .address = G_SOCKET_CONNECTABLE (tc->address) };
+  CockpitStream *stream;
+
+  stream = cockpit_stream_connect ("connect-early-close", &connectable);
+  g_assert (stream != NULL);
+
+  cockpit_stream_close (stream, NULL);
+  g_object_unref (stream);
+
+  while (tc->conn_sock == NULL)
+    g_main_context_iteration (NULL, TRUE);
+}
+
+static void
 test_connect_loopback (TestConnect *tc,
                        gconstpointer user_data)
 {
-  GSocketConnectable *connectable;
+  CockpitConnectable connectable = { 0 };
   CockpitStream *stream;
   GError *error = NULL;
   GByteArray *buffer;
 
-  connectable = cockpit_loopback_new (tc->port);
-  stream = cockpit_stream_connect ("loopback", connectable, NULL);
-  g_object_unref (connectable);
+
+  if (tc->skip_ipv6_loopback)
+    {
+      cockpit_test_skip ("no loopback for ipv6 found");
+      return;
+    }
+
+  connectable.address = cockpit_loopback_new (tc->port);
+  stream = cockpit_stream_connect ("loopback", &connectable);
+  g_object_unref (connectable.address);
   g_assert (stream != NULL);
 
   while (tc->conn_sock == NULL)
@@ -715,13 +757,14 @@ static void
 test_connect_and_write (TestConnect *tc,
                         gconstpointer user_data)
 {
+  CockpitConnectable connectable = { .address = G_SOCKET_CONNECTABLE (tc->address) };
   gchar buffer[8];
   CockpitStream *stream;
   GError *error = NULL;
   GBytes *sent;
   gssize ret;
 
-  stream = cockpit_stream_connect ("connect-and-write", G_SOCKET_CONNECTABLE (tc->address), NULL);
+  stream = cockpit_stream_connect ("connect-and-write", &connectable);
   g_assert (stream != NULL);
 
   /* Sending on the stream before actually connected */
@@ -757,6 +800,7 @@ test_connect_and_write (TestConnect *tc,
 static void
 test_fail_not_found (void)
 {
+  CockpitConnectable connectable = { 0 };
   CockpitStream *stream;
   GSocketAddress *address;
   gchar *problem = NULL;
@@ -764,8 +808,9 @@ test_fail_not_found (void)
   cockpit_expect_message ("*No such file or directory");
 
   address = g_unix_socket_address_new ("/non-existent");
-  stream = cockpit_stream_connect ("bad", G_SOCKET_CONNECTABLE (address), NULL);
-  g_object_unref (address);
+  connectable.address = G_SOCKET_CONNECTABLE (address);
+  stream = cockpit_stream_connect ("bad", &connectable);
+  g_object_unref (connectable.address);
 
   /* Should not have closed at this point */
   g_assert (stream != NULL);
@@ -785,6 +830,7 @@ test_fail_not_found (void)
 static void
 test_fail_access_denied (void)
 {
+  CockpitConnectable connectable = { 0 };
   CockpitStream *stream;
   GSocketAddress *address;
   gchar *unix_path;
@@ -807,7 +853,8 @@ test_fail_access_denied (void)
   cockpit_expect_message ("*Permission denied");
 
   address = g_unix_socket_address_new (unix_path);
-  stream = cockpit_stream_connect ("bad", G_SOCKET_CONNECTABLE (address), NULL);
+  connectable.address = G_SOCKET_CONNECTABLE (address);
+  stream = cockpit_stream_connect ("bad", &connectable);
   g_object_unref (address);
 
   /* Should not have closed at this point */
@@ -890,6 +937,8 @@ main (int argc,
 
   g_test_add ("/stream/connect/and-read", TestConnect, NULL,
               setup_connect, test_connect_and_read, teardown_connect);
+  g_test_add ("/stream/connect/early-close", TestConnect, NULL,
+              setup_connect, test_connect_early_close, teardown_connect);
   g_test_add ("/stream/connect/and-write", TestConnect, NULL,
               setup_connect, test_connect_and_write, teardown_connect);
   g_test_add ("/stream/connect/loopback-ipv4", TestConnect, GINT_TO_POINTER (G_SOCKET_FAMILY_IPV4),

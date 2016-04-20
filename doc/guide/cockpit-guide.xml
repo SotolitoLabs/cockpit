@@ -10,7 +10,7 @@
     <title>Cockpit Guide</title>
     <releaseinfo>Documentation for Cockpit &version; --
     latest version available at:
-      <ulink url="http://files.cockpit-project.org/guide/latest">http://files.cockpit-project.org/guide/latest/</ulink></releaseinfo>
+      <ulink url="http://cockpit-project.org/guide/latest">http://cockpit-project.org/guide/latest/</ulink></releaseinfo>
   </bookinfo>
 
   <part id="guide">
@@ -24,6 +24,7 @@
 
     <xi:include href="https.xml"/>
     <xi:include href="listen.xml"/>
+    <xi:include href="startup.xml"/>
     <xi:include href="authentication.xml"/>
     <xi:include href="sso.xml"/>
     <xi:include href="privileges.xml"/>
@@ -43,6 +44,9 @@
     <xi:include href="feature-subscription.xml"/>
     <xi:include href="feature-kubernetes.xml"/>
     <xi:include href="feature-machines.xml"/>
+    <xi:include href="feature-tuned.xml"/>
+    <xi:include href="feature-sosreport.xml"/>
+    <xi:include href="feature-ostree.xml"/>
   </part>
 
   <part id="development">

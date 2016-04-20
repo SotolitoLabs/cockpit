@@ -363,15 +363,18 @@ send_to_portal (CockpitPortal *self,
       return TRUE;
 
     case PORTAL_OPEN:
-      cockpit_transport_send (self->other, channel, payload);
+      if (self->transport)
+        cockpit_transport_send (self->other, channel, payload);
       return TRUE;
 
     case PORTAL_FAILED:
-      if (channel && !(flags & COCKPIT_PORTAL_FALLBACK) &&
-          g_hash_table_contains (self->channels, channel))
+      if ((flags & COCKPIT_PORTAL_FALLBACK) == 0)
         {
-          g_hash_table_remove (self->channels, channel);
-          send_close_channel (self, channel, self->problem);
+          if (channel && g_hash_table_contains (self->channels, channel))
+            {
+              g_hash_table_remove (self->channels, channel);
+              send_close_channel (self, channel, self->problem);
+            }
           return TRUE;
         }
       return FALSE;
@@ -556,27 +559,12 @@ on_transport_recv (CockpitTransport *transport,
 }
 
 static void
-disconnect_transport (CockpitPortal *self)
-{
-  if (self->transport)
-    {
-      g_signal_handler_disconnect (self->transport, self->transport_recv_sig);
-      g_signal_handler_disconnect (self->transport, self->transport_control_sig);
-      g_signal_handler_disconnect (self->transport, self->transport_closed_sig);
-      g_object_unref (self->transport);
-      self->transport = NULL;
-    }
-
-  transition_none (self);
-}
-
-static void
 on_transport_closed (CockpitTransport *transport,
                      const gchar *problem,
                      gpointer user_data)
 {
   CockpitPortal *self = user_data;
-  disconnect_transport (self);
+  transition_none (self);
 }
 
 static void
@@ -648,13 +636,30 @@ cockpit_portal_set_property (GObject *object,
 }
 
 static void
-cockpit_portal_finalize (GObject *object)
+cockpit_portal_dispose (GObject *object)
 {
   CockpitPortal *self = COCKPIT_PORTAL (object);
 
   transition_none (self);
-  disconnect_transport (self);
 
+  if (self->transport)
+    {
+      g_signal_handler_disconnect (self->transport, self->transport_recv_sig);
+      g_signal_handler_disconnect (self->transport, self->transport_control_sig);
+      g_signal_handler_disconnect (self->transport, self->transport_closed_sig);
+      g_object_unref (self->transport);
+      self->transport = NULL;
+    }
+
+  G_OBJECT_CLASS (cockpit_portal_parent_class)->dispose (object);
+}
+
+static void
+cockpit_portal_finalize (GObject *object)
+{
+  CockpitPortal *self = COCKPIT_PORTAL (object);
+
+  g_assert (self->transport == NULL);
   g_assert (self->channels == NULL);
   g_assert (self->interned == NULL);
   g_assert (self->queue == NULL);
@@ -674,6 +679,7 @@ cockpit_portal_class_init (CockpitPortalClass *klass)
   gobject_class->constructed = cockpit_portal_constructed;
   gobject_class->get_property = cockpit_portal_get_property;
   gobject_class->set_property = cockpit_portal_set_property;
+  gobject_class->dispose = cockpit_portal_dispose;
   gobject_class->finalize = cockpit_portal_finalize;
 
   g_object_class_install_property (gobject_class, PROP_TRANSPORT,
@@ -777,6 +783,7 @@ cockpit_portal_new_superuser (CockpitTransport *transport)
     PATH_PKEXEC,
     "--disable-internal-agent",
     "cockpit-bridge",
+    "--privileged",
     NULL
   };
 
@@ -784,6 +791,7 @@ cockpit_portal_new_superuser (CockpitTransport *transport)
     PATH_SUDO,
     "-n", /* non-interactive */
     "cockpit-bridge",
+    "--privileged",
     NULL
   };
 

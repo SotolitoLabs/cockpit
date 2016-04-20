@@ -21,6 +21,7 @@
 
 #include "cockpitwebserver.h"
 
+#include "cockpithash.h"
 #include "cockpitmemory.h"
 #include "cockpitwebresponse.h"
 
@@ -53,6 +54,7 @@ struct _CockpitWebServer {
   GString *ssl_exception_prefix;
   gint request_timeout;
   gint request_max;
+  gboolean redirect_tls;
 
   GSocketService *socket_service;
   GMainContext *main_context;
@@ -66,8 +68,7 @@ struct _CockpitWebServerClass {
                                 const gchar *path,
                                 GIOStream *io_stream,
                                 GHashTable *headers,
-                                GByteArray *input,
-                                guint in_length);
+                                GByteArray *input);
 
   gboolean (* handle_resource) (CockpitWebServer *server,
                                 const gchar *path,
@@ -82,7 +83,8 @@ enum
   PROP_CERTIFICATE,
   PROP_DOCUMENT_ROOTS,
   PROP_SSL_EXCEPTION_PREFIX,
-  PROP_SOCKET_ACTIVATED
+  PROP_SOCKET_ACTIVATED,
+  PROP_REDIRECT_TLS
 };
 
 static gint sig_handle_stream = 0;
@@ -108,6 +110,7 @@ cockpit_web_server_init (CockpitWebServer *server)
                                             cockpit_request_free, NULL);
   server->main_context = g_main_context_ref_thread_default ();
   server->ssl_exception_prefix = g_string_new ("");
+  server->redirect_tls = TRUE;
 }
 
 static void
@@ -175,6 +178,10 @@ cockpit_web_server_get_property (GObject *object,
 
     case PROP_SOCKET_ACTIVATED:
       g_value_set_boolean (value, server->socket_activated);
+      break;
+
+    case PROP_REDIRECT_TLS:
+      g_value_set_boolean (value, server->redirect_tls);
       break;
 
     default:
@@ -253,6 +260,10 @@ cockpit_web_server_set_property (GObject *object,
       g_string_assign (server->ssl_exception_prefix, g_value_get_string (value));
       break;
 
+    case PROP_REDIRECT_TLS:
+      server->redirect_tls = g_value_get_boolean (value);
+      break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -300,8 +311,7 @@ cockpit_web_server_default_handle_stream (CockpitWebServer *self,
                                           const gchar *path,
                                           GIOStream *io_stream,
                                           GHashTable *headers,
-                                          GByteArray *input,
-                                          guint in_length)
+                                          GByteArray *input)
 {
   CockpitWebResponse *response;
   gboolean claimed = FALSE;
@@ -371,7 +381,7 @@ cockpit_web_server_default_handle_resource (CockpitWebServer *self,
                                             CockpitWebResponse *response)
 {
   if (self->document_roots)
-    cockpit_web_response_file (response, path, FALSE, (const gchar **)self->document_roots);
+    cockpit_web_response_file (response, path, (const gchar **)self->document_roots);
   else
     cockpit_web_response_error (response, 404, NULL, NULL);
   return TRUE;
@@ -427,6 +437,10 @@ cockpit_web_server_class_init (CockpitWebServerClass *klass)
                                    g_param_spec_boolean ("socket-activated", NULL, NULL, FALSE,
                                                         G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class, PROP_REDIRECT_TLS,
+                                   g_param_spec_boolean ("redirect-tls", NULL, NULL, TRUE,
+                                                         G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+
   sig_handle_stream = g_signal_new ("handle-stream",
                                     G_OBJECT_CLASS_TYPE (klass),
                                     G_SIGNAL_RUN_LAST,
@@ -435,12 +449,11 @@ cockpit_web_server_class_init (CockpitWebServerClass *klass)
                                     NULL, /* accu_data */
                                     g_cclosure_marshal_generic,
                                     G_TYPE_BOOLEAN,
-                                    5,
+                                    4,
                                     G_TYPE_STRING,
                                     G_TYPE_IO_STREAM,
                                     G_TYPE_HASH_TABLE,
-                                    G_TYPE_BYTE_ARRAY,
-                                    G_TYPE_UINT);
+                                    G_TYPE_BYTE_ARRAY);
 
   sig_handle_resource = g_signal_new ("handle-resource",
                                       G_OBJECT_CLASS_TYPE (klass),
@@ -498,10 +511,27 @@ cockpit_web_server_get_port (CockpitWebServer *self)
   return self->port;
 }
 
+void
+cockpit_web_server_set_redirect_tls (CockpitWebServer *self,
+                                     gboolean          redirect_tls)
+{
+  g_return_if_fail (COCKPIT_IS_WEB_SERVER (self));
+
+  self->redirect_tls = redirect_tls;
+}
+
+gboolean
+cockpit_web_server_get_redirect_tls (CockpitWebServer *self)
+{
+  g_return_val_if_fail (COCKPIT_IS_WEB_SERVER (self), FALSE);
+
+  return self->redirect_tls;
+}
+
 GHashTable *
 cockpit_web_server_new_table (void)
 {
-  return web_socket_util_new_headers ();
+  return g_hash_table_new_full (cockpit_str_case_hash, cockpit_str_case_equal, g_free, g_free);
 }
 
 gchar *
@@ -825,8 +855,7 @@ path_has_prefix (const gchar *path,
 static void
 process_request (CockpitRequest *request,
                  const gchar *path,
-                 GHashTable *headers,
-                 guint length)
+                 GHashTable *headers)
 {
   gboolean claimed = FALSE;
 
@@ -853,7 +882,6 @@ process_request (CockpitRequest *request,
                  request->io,
                  headers,
                  request->buffer,
-                 length,
                  &claimed);
 
   if (!claimed)
@@ -954,7 +982,7 @@ parse_and_process_request (CockpitRequest *request)
     }
 
   g_byte_array_remove_range (request->buffer, 0, off1 + off2);
-  process_request (request, path, headers, length);
+  process_request (request, path, headers);
 
 out:
   if (headers)
@@ -1125,14 +1153,17 @@ on_socket_input (GSocket *socket,
   if (first_byte != 22 && first_byte != 0x80)
     {
       is_tls = FALSE;
-      redirect_tls = TRUE;
-      addr = g_socket_connection_get_local_address (G_SOCKET_CONNECTION (request->io), NULL);
-      if (G_IS_INET_SOCKET_ADDRESS (addr))
+      redirect_tls = request->web_server->redirect_tls;
+      if (redirect_tls)
         {
-          inet = g_inet_socket_address_get_address (G_INET_SOCKET_ADDRESS (addr));
-          redirect_tls = !g_inet_address_get_is_loopback (inet);
+          addr = g_socket_connection_get_local_address (G_SOCKET_CONNECTION (request->io), NULL);
+          if (G_IS_INET_SOCKET_ADDRESS (addr))
+            {
+              inet = g_inet_socket_address_get_address (G_INET_SOCKET_ADDRESS (addr));
+              redirect_tls = !g_inet_address_get_is_loopback (inet);
+            }
+          g_clear_object (&addr);
         }
-      g_clear_object (&addr);
     }
 
   if (is_tls)

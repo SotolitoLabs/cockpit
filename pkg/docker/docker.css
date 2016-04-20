@@ -84,7 +84,7 @@
 #containers .cell-buttons button,
 #containers .table > tbody > tr > .cell-buttons button {
     position: absolute;
-    right: 30px;
+    right: 36px;
     width: 28px;
     height: 28px;
 }
@@ -135,14 +135,17 @@
 }
 
 #containers #containers-containers .table,
-#containers #containers-images .table {
+#containers #containers-images .table,
+#image-details-containers .table {
     table-layout: fixed;
 }
 
 #containers #containers-containers .table th,
 #containers #containers-containers .table td,
 #containers #containers-images .table th,
-#containers #containers-images .table td {
+#containers #containers-images .table td,
+#image-details #image-details-containers .table th,
+#image-details #image-details-containers .table td {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -162,10 +165,6 @@
 
 #containers_run_image_dialog td {
     vertical-align: top;
-}
-
-.containers-run-inline {
-    margin-left: 8px;
 }
 
 .containers-run-inline form .pficon-close,
@@ -211,12 +210,32 @@
 }
 
 @media (min-width: 768px) {
-  #select-linked-containers .form-group {
-      width: 40%;
-  }
-  #select-linked-containers input {
-      max-width: 73%;
-  }
+    #select-linked-containers .form-group {
+        width: 40%;
+    }
+    #select-linked-containers input {
+        max-width: 73%;
+    }
+}
+
+#restart-policy-select {
+    max-width: 150px;
+}
+
+#restart-policy-select > button > span.pull-left {
+    overflow: hidden;
+    width: 100%;
+    text-align: left;
+}
+
+#restart-policy-retries-container {
+    display: inline;
+    margin-left: 4px;
+}
+
+#restart-policy-retries {
+    max-width: 50px;
+    display: inline;
 }
 
 /* Hack to remove size column */
@@ -225,8 +244,29 @@
 }
 
 /* workaround: make text red for select if contained in has-error, not in patternfly */
-.has-error > .bootstrap-select > button > span {
+.has-error > .dropdown > button > span {
     color: #A94442;
+}
+
+#containers-cpu-graph,
+#containers-mem-graph {
+    height: 120px;
+}
+
+/* Display properly when there are several tags */
+#image-details .panel-heading {
+    min-height: 44px;
+    height: auto;
+}
+
+#image-details .panel-heading .pull-right,
+#container-details .panel-heading .pull-right {
+    height: 25px;
+}
+
+.resource-value {
+    min-width: 8em;
+    text-align: right;
 }
 
 /*

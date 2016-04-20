@@ -22,8 +22,9 @@ define([
     "base1/cockpit",
     "base1/mustache",
     "docker/docker",
+    "docker/bar",
     "shell/controls",
-], function($, cockpit, Mustache, docker, controls) {
+], function($, cockpit, Mustache, docker, bar) {
     var _ = cockpit.gettext;
     var C_ = cockpit.gettext;
 
@@ -71,6 +72,24 @@ define([
             return cockpit.format(_("Up since $StartedAt"), state);
         else
             return cockpit.format(_("Exited $ExitCode"), state);
+    };
+
+    util.render_container_restart_policy = function render_restart_policy(policy) {
+        switch (policy.Name) {
+            case "no":
+                return _("No");
+            case "on-failure":
+                var text = cockpit.ngettext("On failure, retry $0 time", "On failure, retry $0 times", policy.MaximumRetryCount);
+                return cockpit.format(text, policy.MaximumRetryCount);
+            case "always":
+                return _("Always");
+            case "unless-stopped":
+                return _("Unless Stopped");
+            default: /* Keeping this here just in case. http://stackoverflow.com/a/4878800 */
+                return policy.Name.replace('-', ' ').replace(/\w\S*/g, function(txt) {
+                    return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
+                });
+        }
     };
 
     util.multi_line = function multi_line(strings) {
@@ -152,7 +171,12 @@ define([
 
     util.render_container = function render_container(client, $panel,
                                                       prefix, id, container, danger_mode) {
-        var tr = $("#" + prefix + id);
+
+        // Docker ID can contain funny characters such as ":" so
+        // we take care not to embed them into jQuery query
+        // strings or HTML.
+
+        var tr = $(document.getElementById(prefix + id));
 
         if (!container) {
             tr.remove();
@@ -215,12 +239,12 @@ define([
                         });
                     return false;
                 });
-            tr = $('<tr id="' + prefix + id + '">').append(
+            tr = $('<tr>', { 'id': prefix + id }).append(
                 $('<td class="container-col-name">'),
                 $('<td class="container-col-image">'),
                 $('<td class="container-col-command">'),
                 $('<td class="container-col-cpu">'),
-                $('<td class="container-col-memory-graph">').append(controls.BarRow("containers-containers")),
+                $('<td class="container-col-memory-graph">').append(bar.create("containers-containers")),
                 $('<td class="container-col-memory-text">'),
                 $('<td class="container-col-danger cell-buttons">').append(btn_delete, img_waiting),
                 $('<td class="container-col-actions cell-buttons">').append(btn_play, btn_stop, img_waiting.clone()));
@@ -267,6 +291,8 @@ define([
 
         if (added)
             util.insert_table_sorted($panel.find('table'), tr);
+
+        bar.update();
     };
 
     /* Memory limit slider/checkbox interaction happens here */
@@ -301,6 +327,7 @@ define([
                 $(slider).attr("disabled", !this.checked);
                 $(desc).toggleClass("disabled", !this.checked);
                 $(desc).text(update_limit());
+                $(slider).trigger("change");
             })[0];
 
         Object.defineProperty(this, "value", {

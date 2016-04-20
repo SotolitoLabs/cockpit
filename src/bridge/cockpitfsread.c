@@ -69,7 +69,7 @@ on_idle_send_block (gpointer data)
   if (payload == NULL)
     {
       self->idler = 0;
-      cockpit_channel_done (channel);
+      cockpit_channel_control (channel, "done", NULL);
 
       problem = NULL;
       if (self->fd >= 0 && self->start_tag)
@@ -221,7 +221,6 @@ cockpit_fsread_prepare (CockpitChannel *channel)
         {
           options = cockpit_channel_close_options (channel);
           json_object_set_string_member (options, "tag", "-");
-          cockpit_channel_ready (channel);
           cockpit_channel_close (channel, NULL);
           problem = NULL;
         }

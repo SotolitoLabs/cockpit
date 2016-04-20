@@ -8,6 +8,10 @@ libcockpit_ws_a_SOURCES = \
 	src/ws/cockpitws.h				\
 	src/ws/cockpithandlers.h	src/ws/cockpithandlers.c	\
 	src/ws/cockpitauth.h		src/ws/cockpitauth.c		\
+	src/ws/cockpitchannelresponse.h \
+	src/ws/cockpitchannelresponse.c \
+	src/ws/cockpitchannelsocket.h \
+	src/ws/cockpitchannelsocket.c \
 	src/ws/cockpitcreds.h src/ws/cockpitcreds.c \
 	src/ws/cockpitwebservice.h \
 	src/ws/cockpitwebservice.c \
@@ -54,6 +58,7 @@ EXTRA_DIST += \
 	src/ws/mock-kdc.conf.in \
 	src/ws/mock-static \
 	src/ws/mock-config.conf \
+	src/ws/mock-auth-command \
 	$(NULL)
 
 # ----------------------------------------------------------------------------------------------------
@@ -84,10 +89,9 @@ cockpit.service : src/ws/cockpit.service.in Makefile.am
 	$(AM_V_GEN) $(SED_SUBST) $< > $@
 nodist_systemdunit_DATA += cockpit.service
 
-cockpit-testing.service : src/ws/cockpit-testing.service.in Makefile
+mock-auth-command: src/ws/mock-auth-command
 	$(AM_V_GEN) $(SED_SUBST) $< > $@
-noinst_DATA += cockpit-testing.service
-testassets_systemdunit_data += cockpit-testing.service
+	chmod +x $@
 
 firewalldir = $(prefix)/lib/firewalld/services
 firewall_DATA = src/ws/cockpit.xml
@@ -95,20 +99,17 @@ firewall_DATA = src/ws/cockpit.xml
 # If running cockpit-ws as a non-standard user, we also set up
 # cockpit-session to be setuid root, but only runnable by cockpit-session
 install-exec-hook::
-	-chown root:$(COCKPIT_GROUP) $(DESTDIR)$(libexecdir)/cockpit-session
-	-test "$(COCKPIT_USER)" != "root" && chmod 4750 $(DESTDIR)$(libexecdir)/cockpit-session
+	chown -f root:$(COCKPIT_GROUP) $(DESTDIR)$(libexecdir)/cockpit-session || true
+	test "$(COCKPIT_USER)" != "root" && chmod -f 4750 $(DESTDIR)$(libexecdir)/cockpit-session || true
 
 EXTRA_DIST += \
 	src/ws/cockpit.service.in \
-	src/ws/cockpit-testing.service.in \
-	src/ws/test-server.service.in \
 	$(firewall_DATA) \
 	$(NULL)
 
 CLEANFILES += \
-	cockpit-testing.service \
-	test-server.service \
 	cockpit.service \
+	mock-auth-command \
 	$(NULL)
 
 @INTLTOOL_XML_RULE@
@@ -140,8 +141,6 @@ EXTRA_DIST += \
 noinst_PROGRAMS += test-server
 check_PROGRAMS += test-server
 
-testassets_programs += test-server
-
 test_server_SOURCES = src/ws/test-server.c $(mock_dbus_sources)
 nodist_test_server_SOURCES = $(test_built_sources)
 test_server_CFLAGS = 					\
@@ -157,21 +156,13 @@ test_server_LDADD = 					\
 	-lpam 						\
 	$(NULL)
 
-testassets_systemdunit_data += \
-	$(srcdir)/src/ws/cockpit-testing.socket \
-	$(srcdir)/src/ws/test-server.socket
-
-test-server.service : src/ws/test-server.service.in Makefile
-	$(AM_V_GEN) sed -e "s|\@libexecdir\@|$(libexecdir)|;s|\@datadir\@|$(datadir)|" $< > $@
-noinst_DATA += test-server.service
-testassets_systemdunit_data += test-server.service
-
 WS_CHECKS = \
 	test-creds \
 	test-auth \
 	test-sshtransport \
 	test-sshagent \
 	test-webservice \
+	test-channelresponse \
 	test-handlers \
 	test-kerberos \
 	$(NULL)
@@ -185,6 +176,17 @@ test_auth_SOURCES = \
 	$(NULL)
 
 test_auth_LDADD = \
+	libcockpit-ws.a \
+	$(cockpit_ws_LDADD) \
+	$(NULL)
+
+test_channelresponse_CFLAGS = $(cockpit_ws_CFLAGS)
+test_channelresponse_SOURCES = src/ws/test-channelresponse.c \
+	src/ws/mock-auth.c src/ws/mock-auth.h \
+	src/common/mock-io-stream.c src/common/mock-io-stream.h \
+	$(NULL)
+test_channelresponse_LDADD = \
+	libwebsocket.a \
 	libcockpit-ws.a \
 	$(cockpit_ws_LDADD) \
 	$(NULL)
@@ -273,13 +275,15 @@ noinst_PROGRAMS += \
 	$(NULL)
 
 noinst_SCRIPTS += \
-	src/ws/mock-pid-cat
+	src/ws/mock-pid-cat \
+	mock-auth-command \
+	$(NULL)
 
 TESTS += $(WS_CHECKS)
 
 install-exec-hook::
 	mkdir -p $(DESTDIR)$(sysconfdir)/cockpit/ws-certs.d
-	-chmod 755 $(DESTDIR)$(sysconfdir)/cockpit/ws-certs.d $(DESTDIR)$(sysconfdir)/cockpit/ws-certs.d
+	chmod 755 $(DESTDIR)$(sysconfdir)/cockpit/ws-certs.d $(DESTDIR)$(sysconfdir)/cockpit/ws-certs.d
 
 update-known-hosts:
 	cat $(srcdir)/src/ws/mock_*.pub | \

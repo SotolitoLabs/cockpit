@@ -24,7 +24,10 @@
 #include "cockpitchannel.h"
 
 #include "common/cockpitenums.h"
+#include "common/cockpithex.h"
 #include "common/cockpitjson.h"
+#include "common/cockpitsystem.h"
+#include "common/cockpitwebinject.h"
 #include "common/cockpitwebresponse.h"
 #include "common/cockpitwebserver.h"
 
@@ -49,6 +52,10 @@ struct _CockpitPackage {
   gchar *directory;
   JsonObject *manifest;
   GHashTable *paths;
+  gchar *content_security_policy;
+  gchar *content_security_marker;
+  GBytes *content_security_key;
+  guint content_security_nonce;
 };
 
 /*
@@ -74,6 +81,10 @@ cockpit_package_free (gpointer data)
   g_debug ("%s: freeing package", package->name);
   g_free (package->name);
   g_free (package->directory);
+  g_free (package->content_security_policy);
+  g_free (package->content_security_marker);
+  if (package->content_security_key)
+    g_bytes_unref (package->content_security_key);
   if (package->paths)
     g_hash_table_unref (package->paths);
   if (package->manifest)
@@ -268,48 +279,74 @@ out:
 }
 
 static JsonObject *
-read_package_manifest (const gchar *directory,
-                       const gchar *package)
+read_json_file (const gchar *directory,
+                const gchar *name,
+                GError **error)
 {
-  JsonObject *manifest = NULL;
-  GError *error = NULL;
+  JsonObject *object;
   GMappedFile *mapped;
   gchar *filename;
   GBytes *bytes;
 
-  filename = g_build_filename (directory, "manifest.json", NULL);
-  mapped = g_mapped_file_new (filename, FALSE, &error);
+  filename = g_build_filename (directory, name, NULL);
+  mapped = g_mapped_file_new (filename, FALSE, error);
+  g_free (filename);
+
   if (!mapped)
     {
+      return NULL;
+    }
+
+  bytes = g_mapped_file_get_bytes (mapped);
+  object = cockpit_json_parse_bytes (bytes, error);
+  g_mapped_file_unref (mapped);
+  g_bytes_unref (bytes);
+
+  return object;
+}
+
+static JsonObject *
+read_package_manifest (const gchar *directory,
+                       const gchar *package)
+{
+  JsonObject *manifest = NULL;
+  JsonObject *override = NULL;
+  GError *error = NULL;
+
+
+  manifest = read_json_file (directory, "manifest.json", &error);
+  if (!manifest)
+    {
       if (g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NOENT))
-        g_debug ("no manifest found: %s", filename);
-      else if (!g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NOTDIR))
-        g_message ("%s: %s", package, error->message);
+        g_debug ("%s: no manifest found", package);
+      else
+        g_message ("%s: couldn't read manifest.json: %s", package, error->message);
       g_clear_error (&error);
+    }
+  else if (!validate_package (package))
+    {
+      g_warning ("%s: package has invalid name", package);
+      json_object_unref (manifest);
+      return NULL;
     }
   else
     {
-     if (!validate_package (package))
-       {
-         g_warning ("package has invalid name: %s", package);
-       }
-     else
-       {
-         bytes = g_mapped_file_get_bytes (mapped);
-         manifest = cockpit_json_parse_bytes (bytes, &error);
-         g_bytes_unref (bytes);
-
-         if (!manifest)
-           {
-             g_message ("%s: invalid manifest: %s", package, error->message);
-             g_clear_error (&error);
-           }
-       }
-
-      g_mapped_file_unref (mapped);
+      override = read_json_file (directory, "override.json", &error);
+      if (error)
+        {
+          if (g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NOENT))
+            g_debug ("%s: no override found", package);
+          else
+            g_message ("%s: couldn't read override.json: %s", package, error->message);
+          g_clear_error (&error);
+        }
+      if (override)
+        {
+          cockpit_json_patch (manifest, override);
+          json_object_unref (override);
+        }
     }
 
-  g_free (filename);
   return manifest;
 }
 
@@ -333,6 +370,184 @@ read_package_name (JsonObject *manifest,
   return value;
 }
 
+static gboolean
+strv_have_prefix (gchar **strv,
+                  const gchar *prefix)
+{
+  gint i;
+
+  for (i = 0; strv && strv[i] != NULL; i++)
+    {
+      if (g_str_has_prefix (strv[i], prefix))
+        return TRUE;
+    }
+  return FALSE;
+}
+
+static gchar *
+find_nonce_marker (const gchar *name,
+                   const gchar *input)
+{
+  gchar *beg;
+  gchar *end;
+
+  /* Find beginning of nonce string */
+  beg = strstr (input, "'nonce-");
+  if (beg == NULL)
+    return NULL;
+  beg += 7;
+
+  /* Find the end of nonce string */
+  end = strchr (beg, '\'');
+  if (end == NULL || beg == end)
+    {
+      g_warning ("%s: invalid \"content-security-policy\" nonce field in manifest", name);
+      return NULL;
+    }
+
+  return g_strndup (beg, end - beg);
+}
+
+static gboolean
+setup_content_security_policy (CockpitPackage *package,
+                               const gchar *input)
+{
+  const gchar *default_src = "default-src 'self'";
+  const gchar *connect_src = "connect-src 'self' ws: wss:";
+  gchar *marker = NULL;
+  gchar **parts = NULL;
+  GString *result;
+  gchar *found;
+  gint i;
+
+  result = g_string_sized_new (128);
+
+  /*
+   * Note that browsers need to be explicitly told they can connect
+   * to a WebSocket. This is non-obvious, but it stems from the fact
+   * that some browsers treat 'https' and 'wss' as different protocols.
+   *
+   * Since each component could establish a WebSocket connection back to
+   * cockpit-ws, we need to insert that into the policy.
+   */
+
+  if (input)
+    parts = g_strsplit (input, ";", -1);
+
+  if (!strv_have_prefix (parts, "default-src "))
+    g_string_append_printf (result, "%s; ", default_src);
+  if (!strv_have_prefix (parts, "connect-src "))
+    g_string_append_printf (result, "%s; ", connect_src);
+
+  for (i = 0; parts && parts[i] != NULL; i++)
+    {
+      g_strstrip (parts[i]);
+      g_string_append_printf (result, "%s; ", parts[i]);
+
+      found = find_nonce_marker (package->name, parts[i]);
+      if (found)
+        {
+          if (marker)
+            {
+              if (!g_str_equal (found, marker))
+                {
+                  g_warning ("%s: invalid \"content-security-policy\" has varying nonce", package->name);
+                  g_strfreev (parts);
+                  return FALSE;
+                }
+
+              g_free (found);
+            }
+          else
+            {
+              marker = found;
+            }
+        }
+
+    }
+
+  g_strfreev (parts);
+
+  package->content_security_key = cockpit_system_random_nonce (64);
+  if (!package->content_security_key)
+    {
+      g_warning ("%s: couldn't generate nonce for \"content-security-policy\"", package->name);
+      return FALSE;
+    }
+
+  /* Remove trailing semicolon */
+  g_string_set_size (result, result->len - 2);
+  package->content_security_policy = g_string_free (result, FALSE);
+  package->content_security_nonce = 1;
+  package->content_security_marker = marker;
+  return TRUE;
+}
+
+static gchar *
+finish_content_security_policy (CockpitPackage *package,
+                                GBytes **nonce)
+{
+  GString *result;
+  gchar *nonce_str;
+  gsize nonce_len;
+  gchar *found;
+  const gchar *where;
+  gsize at;
+  const guchar *key;
+  gsize len;
+
+  result = g_string_new (package->content_security_policy);
+  if (package->content_security_marker)
+    {
+      package->content_security_nonce++;
+      key = g_bytes_get_data (package->content_security_key, &len);
+      nonce_str = g_compute_hmac_for_data (G_CHECKSUM_SHA1, key, len,
+                                           (gpointer)(&package->content_security_nonce),
+                                           sizeof (package->content_security_nonce));
+
+      nonce_len = strlen (nonce_str);
+
+      at = 0;
+      for (;;)
+        {
+          where = result->str + at;
+          found = strstr (where, package->content_security_marker);
+          if (!found)
+            break;
+          at += (found - where) + strlen (package->content_security_marker);
+          g_string_insert (result, at, nonce_str);
+          at += strlen (nonce_str);
+        }
+
+      *nonce = g_bytes_new_take (nonce_str, nonce_len);
+    }
+
+  return g_string_free (result, FALSE);
+}
+
+static gboolean
+setup_package_manifest (CockpitPackage *package,
+                        JsonObject *manifest)
+{
+  const gchar *field = "content-security-policy";
+  const gchar *policy = NULL;
+
+  if (!cockpit_json_get_string (manifest, field, NULL, &policy) ||
+      (policy && !cockpit_web_response_is_header_value (policy)))
+    {
+      g_warning ("%s: invalid %s: %s", package->name, field, policy);
+      return FALSE;
+    }
+
+  if (!setup_content_security_policy (package, policy))
+    return FALSE;
+
+  json_object_remove_member (manifest, field);
+
+  package->manifest = json_object_ref (manifest);
+  return TRUE;
+}
+
 static CockpitPackage *
 maybe_add_package (GHashTable *listing,
                    const gchar *parent,
@@ -345,18 +560,24 @@ maybe_add_package (GHashTable *listing,
   JsonObject *manifest = NULL;
   GHashTable *paths = NULL;
 
+  path = g_build_filename (parent, name, NULL);
+
+  manifest = read_package_manifest (path, name);
+  if (!manifest)
+    goto out;
+
+  /* Manifest could specify a different name */
+  name = read_package_name (manifest, name);
+  if (!name)
+    goto out;
+
+  /* In case the package is already present */
   package = g_hash_table_lookup (listing, name);
   if (package)
     {
       package = NULL;
       goto out;
     }
-
-  path = g_build_filename (parent, name, NULL);
-
-  manifest = read_package_manifest (path, name);
-  if (!manifest)
-    goto out;
 
   if (system)
     paths = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
@@ -367,28 +588,27 @@ maybe_add_package (GHashTable *listing,
         goto out;
     }
 
-  /* Manifest could specify a different name */
-  name = read_package_name (manifest, name);
-  if (!name)
-    goto out;
-
   package = cockpit_package_new (name);
-
   package->directory = path;
-  package->manifest = manifest;
+  path = NULL;
+
   if (paths)
     package->paths = g_hash_table_ref (paths);
+
+  if (!setup_package_manifest (package, manifest))
+    {
+      cockpit_package_free (package);
+      package = NULL;
+      goto out;
+    }
 
   g_hash_table_replace (listing, package->name, package);
   g_debug ("%s: added package at %s", package->name, package->directory);
 
 out:
-  if (!package)
-    {
-      g_free (path);
-      if (manifest)
-        json_object_unref (manifest);
-    }
+  g_free (path);
+  if (manifest)
+    json_object_unref (manifest);
   if (paths)
     g_hash_table_unref (paths);
 
@@ -537,18 +757,6 @@ handle_package_checksum (CockpitWebServer *server,
   return TRUE;
 }
 
-static void
-add_cache_header (GHashTable *headers,
-                  CockpitPackages *packages,
-                  GHashTable *out_headers)
-{
-  const gchar *pragma;
-
-  pragma = g_hash_table_lookup (headers, "Pragma");
-  if (packages->checksum && (!pragma || !strstr (pragma, "no-cache")))
-    g_hash_table_insert (out_headers, g_strdup ("Cache-Control"), g_strdup ("max-age=31556926, public"));
-}
-
 static gboolean
 handle_package_manifests_js (CockpitWebServer *server,
                              const gchar *path,
@@ -566,7 +774,9 @@ handle_package_manifests_js (CockpitWebServer *server,
   suffix = g_bytes_new_static (");", 2);
 
   out_headers = cockpit_web_server_new_table ();
-  add_cache_header (headers, packages, out_headers);
+
+  if (!packages->checksum)
+    cockpit_web_response_set_cache_type (response, COCKPIT_WEB_RESPONSE_NO_CACHE);
 
   cockpit_web_response_content (response, out_headers, prefix, content, suffix, NULL);
 
@@ -588,9 +798,11 @@ handle_package_manifests_json (CockpitWebServer *server,
   GBytes *content;
 
   out_headers = cockpit_web_server_new_table ();
-  add_cache_header (headers, packages, out_headers);
 
   content = cockpit_json_write_bytes (packages->json);
+
+  if (!packages->checksum)
+    cockpit_web_response_set_cache_type (response, COCKPIT_WEB_RESPONSE_NO_CACHE);
 
   cockpit_web_response_content (response, out_headers, content, NULL);
 
@@ -608,13 +820,17 @@ handle_packages (CockpitWebServer *server,
                  CockpitPackages *packages)
 {
   CockpitPackage *package;
+  CockpitWebFilter *inject;
   gchar *filename = NULL;
   GError *error = NULL;
   gchar *name;
   const gchar *path;
   GHashTable *out_headers = NULL;
+  const gchar *type;
   GBytes *bytes = NULL;
   gchar *chosen = NULL;
+  GBytes *nonce = NULL;
+  gchar *policy = NULL;
 
   name = cockpit_web_response_pop_path (response);
   path = cockpit_web_response_get_path (response);
@@ -633,8 +849,6 @@ handle_packages (CockpitWebServer *server,
       cockpit_web_response_error (response, 404, NULL, NULL);
       goto out;
     }
-
-  add_cache_header (headers, packages, out_headers);
 
   bytes = cockpit_web_response_negotiation (filename, package->paths, &chosen, &error);
   if (error)
@@ -661,6 +875,36 @@ handle_packages (CockpitWebServer *server,
   if (g_str_has_suffix (chosen, ".gz"))
     g_hash_table_insert (out_headers, g_strdup ("Content-Encoding"), g_strdup ("gzip"));
 
+  type = cockpit_web_response_content_type (path);
+  if (type)
+    {
+      g_hash_table_insert (out_headers, g_strdup ("Content-Type"), g_strdup (type));
+      if (g_str_has_prefix (type, "text/html"))
+        {
+          if (package->content_security_policy)
+            {
+              policy = finish_content_security_policy (package, &nonce);
+              if (!policy)
+                {
+                  cockpit_web_response_error (response, 500, NULL, NULL);
+                  goto out;
+                }
+
+              g_hash_table_insert (out_headers, g_strdup ("Content-Security-Policy"), policy);
+              if (nonce)
+                {
+                  inject = cockpit_web_inject_new (package->content_security_marker, nonce, G_MAXUINT);
+                  cockpit_web_response_add_filter (response, inject);
+                  g_object_unref (inject);
+                  g_bytes_unref (nonce);
+                }
+            }
+        }
+    }
+
+  if (!packages->checksum)
+    cockpit_web_response_set_cache_type (response, COCKPIT_WEB_RESPONSE_NO_CACHE);
+
   cockpit_web_response_headers_full (response, 200, "OK", -1, out_headers);
 
   cockpit_web_response_queue (response, bytes);
@@ -675,7 +919,6 @@ out:
   g_free (chosen);
   g_clear_error (&error);
   g_free (filename);
-
   return TRUE;
 }
 

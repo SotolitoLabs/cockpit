@@ -17,14 +17,13 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
+require([
     "jquery",
     "base1/cockpit",
     "base1/mustache",
     "shell/controls",
     "shell/shell",
     "system/server",
-    "shell/cockpit-util",
     "shell/plot",
     "base1/patterns",
 ], function($, cockpit, Mustache, controls, shell, server) {
@@ -49,6 +48,51 @@ function show_unexpected_error(error) {
     $("#error-popup-message").text(error.message || error || "???");
     $('.modal[role="dialog"]').modal('hide');
     $('#error-popup').modal('show');
+}
+
+function select_btn(func, spec) {
+    var choice = spec[0].choice;
+
+    function option_mapper(opt) {
+        return $('<li>', { value: opt.choice }).append($("<a>").text(opt.title));
+    }
+
+    var toggle = $('<button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown">').append(
+        $('<span class="pull-left"></span>'),
+        $('<div class="caret"></div>')
+    );
+
+    var btn = $('<div class="btn-group bootstrap-select dropdown form-control">').append(
+        toggle,
+        $('<ul class="dropdown-menu">').append(spec.map(option_mapper))
+    );
+
+    btn.on('click', 'li', function() {
+        choice = $(this).attr('value');
+        select(choice);
+        func(choice);
+    });
+
+    function select(a) {
+        $("button span", btn).text($("li[value='" + a + "']", btn).text());
+        choice = a;
+    }
+
+    function selected() {
+        return choice;
+    }
+
+    select(choice);
+    $.data(btn[0], 'cockpit-select-btn-funcs', { select: select, selected: selected });
+    return btn;
+}
+
+function select_btn_select(btn, choice) {
+    $.data(btn[0], 'cockpit-select-btn-funcs').select(choice);
+}
+
+function select_btn_selected(btn) {
+    return $.data(btn[0], 'cockpit-select-btn-funcs').selected();
 }
 
 /* NetworkManagerModel
@@ -760,7 +804,7 @@ function NetworkManagerModel() {
             return;
 
         push_refresh();
-        cockpit.spawn(["udevadm", "info", obj.Udi]).
+        cockpit.spawn(["udevadm", "info", obj.Udi], { err: 'message' }).
             done(function(res) {
                 var props = { };
                 function snarf_prop(line, env, prop) {
@@ -776,7 +820,11 @@ function NetworkManagerModel() {
                 set_object_properties(obj, props);
             }).
             fail(function(ex) {
-                console.warn(ex);
+                /* udevadm info exits with 4 when device doesn't exist */
+                if (ex.exit_status !== 4) {
+                    console.warn(ex.message);
+                    console.warn(ex);
+                }
             }).
             always(pop_refresh);
     }
@@ -1232,16 +1280,20 @@ function render_active_connection(dev, with_link, hide_link_local) {
     return $('<span>').text(parts.join(", "));
 }
 
-function network_plot_setup_hook(plot) {
-    var axes = plot.getAxes();
-    if (axes.yaxis.datamax < 100000)
-        axes.yaxis.options.max = 100000;
-    else
-        axes.yaxis.options.max = null;
-    axes.yaxis.options.min = 0;
+function make_network_plot_setup_hook(unit) {
+    return function (plot) {
+        var axes = plot.getAxes();
+        if (axes.yaxis.datamax < 100000)
+            axes.yaxis.options.max = 100000;
+        else
+            axes.yaxis.options.max = null;
+        axes.yaxis.options.min = 0;
+
+        $(unit).text(shell.bits_per_sec_tick_unit(axes.yaxis));
+    };
 }
 
-var permission = cockpit.permission({ group: "wheel" });
+var permission = cockpit.permission({ admin: true });
 $(permission).on("changed", update_network_privileged);
 
 function update_network_privileged() {
@@ -1279,11 +1331,11 @@ function ensure_usage_monitor() {
                                                 metrics_path_names: [ "rx", "tx" ]
                                               },
                                               { source: "internal",
-                                                metrics: [ { name: "network.all.rx",
+                                                metrics: [ { name: "network.interface.rx",
                                                              units: "bytes",
                                                              derive: "rate"
                                                            },
-                                                           { name: "network.all.tx",
+                                                           { name: "network.interface.tx",
                                                              units: "bytes",
                                                              derive: "rate"
                                                            },
@@ -1320,39 +1372,28 @@ PageNetworking.prototype = {
         $("#networking-add-bridge").click($.proxy(this, "add_bridge"));
         $("#networking-add-vlan").click($.proxy(this, "add_vlan"));
 
-        var blues = [ "#006bb4",
-                      "#008ff0",
-                      "#2daaff",
-                      "#69c2ff",
-                      "#a5daff",
-                      "#e1f3ff",
-                      "#00243c",
-                      "#004778"
-                    ];
-
         function highlight_netdev_row(event, id) {
             $('#networking-interfaces tr').removeClass('highlight');
             if (id) {
-                $('#networking-interfaces tr[data-interface="' + shell.esc(id) + '"]').addClass('highlight');
+                $('#networking-interfaces tr[data-interface="' + encodeURIComponent(id) + '"]').addClass('highlight');
             }
         }
 
         var rx_plot_data = {
             direct: "network.interface.in.bytes",
-            internal: "network.all.rx",
+            internal: "network.interface.rx",
             units: "bytes",
-            derive: "rate"
+            derive: "rate",
+            threshold: 200
         };
 
         var rx_plot_options = shell.plot_simple_template();
-        $.extend(rx_plot_options.yaxis, { tickFormatter: shell.format_bytes_per_sec_tick,
-                                          labelWidth: 60
+        $.extend(rx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(rx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
-        rx_plot_options.colors = blues;
-        rx_plot_options.setup_hook = network_plot_setup_hook;
+        rx_plot_options.setup_hook = make_network_plot_setup_hook("#networking-rx-unit");
         this.rx_plot = shell.plot($("#networking-rx-graph"), 300);
         this.rx_plot.set_options(rx_plot_options);
         this.rx_series = this.rx_plot.add_metrics_stacked_instances_series(rx_plot_data, { });
@@ -1361,20 +1402,19 @@ PageNetworking.prototype = {
 
         var tx_plot_data = {
             direct: "network.interface.out.bytes",
-            internal: "network.all.tx",
+            internal: "network.interface.tx",
             units: "bytes",
-            derive: "rate"
+            derive: "rate",
+            threshold: 200
         };
 
         var tx_plot_options = shell.plot_simple_template();
-        $.extend(tx_plot_options.yaxis, { tickFormatter: shell.format_bytes_per_sec_tick,
-                                          labelWidth: 60
+        $.extend(tx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(tx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
-        tx_plot_options.colors = blues;
-        tx_plot_options.setup_hook = network_plot_setup_hook;
+        tx_plot_options.setup_hook = make_network_plot_setup_hook("#networking-tx-unit");
         this.tx_plot = shell.plot($("#networking-tx-graph"), 300);
         this.tx_plot.set_options(tx_plot_options);
         this.tx_series = this.tx_plot.add_metrics_stacked_instances_series(tx_plot_data, { });
@@ -1395,17 +1435,23 @@ PageNetworking.prototype = {
         });
 
         function handle_usage_samples() {
+            // console.log(JSON.stringify(usage_samples));
             for (var iface in usage_samples) {
                 var samples = usage_samples[iface];
                 var rx = samples[0][0];
                 var tx = samples[1][0];
-                var row = $('#networking-interfaces tr[data-sample-id="' + shell.esc(iface) + '"]');
+                var row = $('#networking-interfaces tr[data-sample-id="' + encodeURIComponent(iface) + '"]');
                 if (rx !== undefined && tx !== undefined && row.length > 0) {
                     row.find('td:nth-child(3)').text(cockpit.format_bits_per_sec(tx * 8));
                     row.find('td:nth-child(4)').text(cockpit.format_bits_per_sec(rx * 8));
                 }
             }
         }
+
+        $(window).on('resize', function () {
+            self.rx_plot.resize();
+            self.tx_plot.resize();
+        });
     },
 
     enter: function () {
@@ -1443,7 +1489,7 @@ PageNetworking.prototype = {
             function has_master(iface) {
                 var connections =
                     (iface.Device ? iface.Device.AvailableConnections : iface.Connections);
-                return connections.some(function (c) { return c.Masters.length > 0; });
+                return connections.some(function (c) { return c.Masters && c.Masters.length > 0; });
             }
 
             // Skip slaves
@@ -1464,8 +1510,8 @@ PageNetworking.prototype = {
             self.tx_series.add_instance(iface.Name);
             add_usage_monitor(iface.Name);
 
-            tbody.append($('<tr>', { "data-interface": iface.Name,
-                                     "data-sample-id": is_active? iface.Name : null
+            tbody.append($('<tr>', { "data-interface": encodeURIComponent(iface.Name),
+                                     "data-sample-id": is_active? encodeURIComponent(iface.Name) : null
                                    }).
                          append($('<td>').text(iface.Name),
                                 $('<td>').html(render_active_connection(dev, false, true)),
@@ -1650,39 +1696,27 @@ PageNetworkInterface.prototype = {
                     self.disconnect();
             });
 
-        var blues = [ "#006bb4",
-                      "#008ff0",
-                      "#2daaff",
-                      "#69c2ff",
-                      "#a5daff",
-                      "#e1f3ff",
-                      "#00243c",
-                      "#004778"
-                    ];
-
         function highlight_netdev_row(event, id) {
             $('#network-interface-slaves tr').removeClass('highlight');
             if (id) {
-                $('#network-interface-slaves tr[data-interface="' + shell.esc(id) + '"]').addClass('highlight');
+                $('#network-interface-slaves tr[data-interface="' + encodeURIComponent(id) + '"]').addClass('highlight');
             }
         }
 
         var rx_plot_data = {
             direct: "network.interface.in.bytes",
-            internal: "network.all.rx",
+            internal: "network.interface.rx",
             units: "bytes",
             derive: "rate"
         };
 
         var rx_plot_options = shell.plot_simple_template();
-        $.extend(rx_plot_options.yaxis, { tickFormatter: shell.format_bytes_per_sec_tick,
-                                          labelWidth: 60
+        $.extend(rx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(rx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
-        rx_plot_options.colors = blues;
-        rx_plot_options.setup_hook = network_plot_setup_hook;
+        rx_plot_options.setup_hook = make_network_plot_setup_hook("#network-interface-rx-unit");
         this.rx_plot = shell.plot($("#network-interface-rx-graph"), 300);
         this.rx_plot.set_options(rx_plot_options);
         this.rx_series = this.rx_plot.add_metrics_stacked_instances_series(rx_plot_data, { });
@@ -1691,20 +1725,18 @@ PageNetworkInterface.prototype = {
 
         var tx_plot_data = {
             direct: "network.interface.out.bytes",
-            internal: "network.all.tx",
+            internal: "network.interface.tx",
             units: "bytes",
             derive: "rate"
         };
 
         var tx_plot_options = shell.plot_simple_template();
-        $.extend(tx_plot_options.yaxis, { tickFormatter: shell.format_bytes_per_sec_tick,
-                                          labelWidth: 60
+        $.extend(tx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(tx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
-        tx_plot_options.colors = blues;
-        tx_plot_options.setup_hook = network_plot_setup_hook;
+        tx_plot_options.setup_hook = make_network_plot_setup_hook("#network-interface-tx-unit");
         this.tx_plot = shell.plot($("#network-interface-tx-graph"), 300);
         this.tx_plot.set_options(tx_plot_options);
         this.tx_series = this.tx_plot.add_metrics_stacked_instances_series(tx_plot_data, { });
@@ -1729,7 +1761,7 @@ PageNetworkInterface.prototype = {
                 var samples = usage_samples[iface];
                 var rx = samples[0][0];
                 var tx = samples[1][0];
-                var row = $('#network-interface-slaves tr[data-sample-id="' + shell.esc(iface) + '"]');
+                var row = $('#network-interface-slaves tr[data-sample-id="' + encodeURIComponent(iface) + '"]');
                 if (row.length > 0) {
                     row.find('td:nth-child(2)').text(cockpit.format_bits_per_sec(tx * 8));
                     row.find('td:nth-child(3)').text(cockpit.format_bits_per_sec(rx * 8));
@@ -1737,6 +1769,10 @@ PageNetworkInterface.prototype = {
             }
         }
 
+        $(window).on('resize', function () {
+            self.rx_plot.resize();
+            self.tx_plot.resize();
+        });
     },
 
     enter: function (dev_name) {
@@ -1770,14 +1806,14 @@ PageNetworkInterface.prototype = {
         var self = this;
 
         function delete_connection_and_slaves(con) {
-            return $.when(con.delete_(),
-                          $.when.apply($, con.Slaves.map(function (s) {
-                              return free_slave_connection(s);
-                          })));
+            return cockpit.all(con.delete_(),
+                               cockpit.all(con.Slaves.map(function (s) {
+                                    return free_slave_connection(s);
+                               })));
         }
 
         function delete_connections(cons) {
-            return $.when.apply($, cons.map(delete_connection_and_slaves));
+            return cockpit.all(cons.map(delete_connection_and_slaves));
         }
 
         function delete_iface_connections(iface) {
@@ -2009,7 +2045,7 @@ PageNetworkInterface.prototype = {
                         text(title).
                         css('vertical-align', rows.length > 1 ? "top" : "center"),
                     $('<td>').append(rows),
-                    $('<td style="text-align:right;vertical-align:top">').append(
+                    $('<td class="networking-configure">').append(
                         $('<button class="btn btn-default network-privileged">').
                             text(_("Configure")).
                             click(function () {
@@ -2123,9 +2159,9 @@ PageNetworkInterface.prototype = {
             return [ render_master(),
                      $('<tr>').append(
                          $('<td>').text(_("General")),
-                         $('<td>').append(
-                             $('<label style="font-weight:inherit">').append(
-                                 $('<input type="checkbox" style="margin-left:0px">').
+                         $('<td class="networking-controls">').append(
+                             $('<label>').append(
+                                 $('<input type="checkbox">').
                                      prop('checked', settings.connection.autoconnect).
                                      change(function () {
                                          settings.connection.autoconnect = $(this).prop('checked');
@@ -2230,16 +2266,15 @@ PageNetworkInterface.prototype = {
                     slave_ifaces[iface.Name] = true;
 
                     rows[iface.Name] =
-                        $('<tr>', { "data-interface": iface.Name,
-                                    "data-sample-id": is_active? iface.Name : null
+                        $('<tr>', { "data-interface": encodeURIComponent(iface.Name),
+                                    "data-sample-id": is_active? encodeURIComponent(iface.Name) : null
                                   }).
                             append($('<td>').text(iface.Name),
                                    (is_active?
                                     [ $('<td>').text(""), $('<td>').text("") ] :
                                     $('<td colspan="2">').text(device_state_text(dev))),
-                                   $('<td style="text-align:right">').append(
+                                   $('<td class="networking-row-configure">').append(
                                        switchbox(is_active, function(val) {
-    console.log("is_active", val);
                                            if (val) {
                                                slave_con.activate(iface.Device).
                                                    fail(show_unexpected_error);
@@ -2272,8 +2307,7 @@ PageNetworkInterface.prototype = {
                                     'data-toggle': 'dropdown'
                                   }).
                         text("+"),
-                    $('<ul>', { 'class': 'dropdown-menu',
-                                'style': 'right:0px;left:auto;min-width:0;text-align:left',
+                    $('<ul>', { 'class': 'dropdown-menu add-button',
                                 'role': 'menu'
                               }).
                         append(
@@ -2310,7 +2344,12 @@ function PageNetworkInterface(model) {
 }
 
 function switchbox(val, callback) {
-    return $('<div class="btn-onoff">').onoff();
+    var onoff = $('<div class="btn-onoff">').onoff();
+    onoff.onoff("value", val);
+    onoff.on("change", function () {
+        callback(onoff.onoff("value"));
+    });
+    return onoff;
 }
 
 PageNetworkIpSettings.prototype = {
@@ -2349,20 +2388,20 @@ PageNetworkIpSettings.prototype = {
         var auto_routes_btn, routes_table;
 
         function choicebox(p, choices) {
-            var btn = shell.select_btn(
+            var btn = select_btn(
                 function (choice) {
                     params[p] = choice;
                     self.update();
                 },
                 choices);
-            shell.select_btn_select(btn, params[p]);
+            select_btn_select(btn, params[p]);
             return btn;
         }
 
         function inverted_switchbox(title, p) {
             var onoff;
             var btn = $('<span>').append(
-                $('<span style="margin-right:10px">').text(title),
+                $('<span class="inverted-switchbox">').text(title),
                 onoff = switchbox(!params[p], function(val) {
                     params[p] = !val;
                     self.update();
@@ -2413,10 +2452,10 @@ PageNetworkIpSettings.prototype = {
             var panel =
                 $('<div class="network-ip-settings-row">').append(
                     $('<div>').append(
-                        $('<span style="font-weight:bold">').text(title),
-                        $('<div style="float:right">').append(
+                        $('<strong>').text(title),
+                        $('<div class="pull-right">').append(
                             header_buttons,
-                            add_btn = $('<button class="btn btn-default" style="width:2em">').
+                            add_btn = $('<button class="btn btn-default">').
                                 text("+").
                                 css("margin-left", "10px").
                                 click(add()))),
@@ -2432,11 +2471,14 @@ PageNetworkIpSettings.prototype = {
                                                 set(i,j, $(event.target).val());
                                             }));
                                 }),
-                                $('<td style="text-align:right; padding-right: 0;">').append(
-                                    $('<button class="btn btn-default" style="width:2em">').
+                                $('<td>').append(
+                                    $('<button class="btn btn-default">').
                                         text(_("-")).
                                         click(remove(i)))));
                         })));
+
+            // For testing
+            panel.attr("data-field", p);
 
             panel.enable_add = function enable_add(val) {
                 add_btn.prop('disabled', !val);
@@ -2597,7 +2639,7 @@ function slave_interface_choices(model, master) {
 }
 
 function render_slave_interface_choices(model, master) {
-    return $('<ul class="list-group available-interfaces-group">').append(
+    return $('<ul class="list-group available-interfaces-group dialog-list">').append(
         slave_interface_choices(model, master).map(function (iface) {
             return $('<li class="list-group-item">').append(
                 $('<div class="checkbox">').
@@ -2618,7 +2660,7 @@ function slave_chooser_btn(change, slave_choices) {
         if ($(elt).prop('checked'))
             choices.push({ title: name, choice: name });
     });
-    return shell.select_btn(change, choices);
+    return select_btn(change, choices);
 }
 
 function free_slave_connection(con) {
@@ -2703,7 +2745,7 @@ function apply_master_slave(choices, model, master_connection, master_settings, 
             return set_slave(model, master_connection, master_settings, slave_type,
                              $(elt).attr("data-iface"), $(elt).prop('checked'));
         });
-        return $.when.apply($, deferreds.get());
+        return cockpit.all(deferreds.get());
     }
 
     function update_master() {
@@ -2765,22 +2807,22 @@ PageNetworkBondSettings.prototype = {
             var btn = slave_chooser_btn(change_mode, slaves_element);
             primary_btn.replaceWith(btn);
             primary_btn = btn;
-            shell.select_btn_select(primary_btn, options.primary);
+            select_btn_select(primary_btn, options.primary);
             change_mode();
         }
 
         function change_mode() {
-            options.mode = shell.select_btn_selected(mode_btn);
+            options.mode = select_btn_selected(mode_btn);
 
             primary_btn.parents("tr").toggle(options.mode == "active-backup");
             if (options.mode == "active-backup")
-                options.primary = shell.select_btn_selected(primary_btn);
+                options.primary = select_btn_selected(primary_btn);
             else
                 delete options.primary;
         }
 
         function change_monitoring() {
-            var use_mii = shell.select_btn_selected(monitoring_btn) == "mii";
+            var use_mii = select_btn_selected(monitoring_btn) == "mii";
 
             targets_input.parents("tr").toggle(!use_mii);
             updelay_input.parents("tr").toggle(use_mii);
@@ -2818,11 +2860,11 @@ PageNetworkBondSettings.prototype = {
                       append(slaves_element = render_slave_interface_choices(model, master).
                              change(change_slaves));
         body.find('#network-bond-settings-mode-select').
-                      append(mode_btn = shell.select_btn(change_mode, bond_mode_choices));
+                      append(mode_btn = select_btn(change_mode, bond_mode_choices));
         body.find('#network-bond-settings-primary-select').
                       append(primary_btn = slave_chooser_btn(change_mode, slaves_element));
         body.find('#network-bond-settings-link-monitoring-select').
-                      append(monitoring_btn = shell.select_btn(change_monitoring, bond_monitoring_choices));
+                      append(monitoring_btn = select_btn(change_monitoring, bond_monitoring_choices));
 
         interval_input = body.find('#network-bond-settings-monitoring-interval-input');
         interval_input.change(change_monitoring);
@@ -2833,8 +2875,8 @@ PageNetworkBondSettings.prototype = {
         downdelay_input = body.find('#network-bond-settings-link-down-delay-input');
         downdelay_input.change(change_monitoring);
 
-        shell.select_btn_select(mode_btn, options.mode);
-        shell.select_btn_select(monitoring_btn, (options.miimon !== 0)? "mii" : "arp");
+        select_btn_select(mode_btn, options.mode);
+        select_btn_select(monitoring_btn, (options.miimon !== 0)? "mii" : "arp");
         change_slaves();
         change_mode();
         change_monitoring();
@@ -3115,7 +3157,7 @@ PageNetworkVlanSettings.prototype = {
 
         function change() {
             // XXX - parse errors
-            options.parent = shell.select_btn_selected(parent_btn);
+            options.parent = select_btn_selected(parent_btn);
             $("#network-vlan-settings-apply").toggleClass("disabled", !options.parent);
 
             options.id = parseInt(id_input.val(), 10);
@@ -3144,7 +3186,7 @@ PageNetworkVlanSettings.prototype = {
                        vlan_id: options.id || "1",
                        interface_name: options.interface_name
                    }));
-        parent_btn = shell.select_btn(change, parent_choices);
+        parent_btn = select_btn(change, parent_choices);
         body.find('#network-vlan-settings-parent-select').html(parent_btn);
         id_input = body.find('#network-vlan-settings-vlan-id-input').
                        change(change).
@@ -3153,7 +3195,7 @@ PageNetworkVlanSettings.prototype = {
                        change(change_name).
                        on('input', change_name);
 
-        shell.select_btn_select(parent_btn, (options.parent ||
+        select_btn_select(parent_btn, (options.parent ||
                                                (parent_choices[0] ?
                                                 parent_choices[0].choice :
                                                 "")));
@@ -3276,6 +3318,6 @@ function init() {
     navigate();
 }
 
-return init;
+$(init);
 
 });

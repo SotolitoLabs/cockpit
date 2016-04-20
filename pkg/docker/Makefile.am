@@ -14,6 +14,7 @@ docker_DATA = \
 dockerdebugdir = $(debugdir)$(dockerdir)
 dockerdebug_DATA = \
 	pkg/docker/bundle.js \
+	pkg/docker/bar.js \
 	pkg/docker/client.js \
 	pkg/docker/details.js \
 	pkg/docker/docker.css \
@@ -29,6 +30,7 @@ dockerdebug_DATA = \
 	$(NULL)
 
 docker_BUNDLE = \
+	pkg/docker/bar.min.js \
 	pkg/docker/client.min.js \
 	pkg/docker/details.min.js \
 	pkg/docker/docker.min.js \
@@ -51,6 +53,9 @@ TESTS += $(docker_TESTS)
 
 CLEANFILES += \
 	pkg/docker/bundle.min.js \
+	pkg/docker/console.min.html \
+	pkg/docker/docker.min.css \
+	pkg/docker/index.min.html \
 	$(docker_BUNDLE) \
 	$(nodist_docker_DATA) \
 	$(NULL)
@@ -60,8 +65,5 @@ EXTRA_DIST += \
 	pkg/docker/console.min.html \
 	pkg/docker/docker.min.css \
 	pkg/docker/index.min.html \
-	$(docker_DATA) \
-	$(dockerdebug_DATA) \
-	$(docker_TESTS) \
 	$(docker_BUNDLE) \
 	$(NULL)

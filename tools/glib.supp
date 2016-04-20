@@ -1,3 +1,14 @@
+# This GLib suppressions file is known to be used at least by:
+#
+#  - rpm-software-management/libhif
+#
+# This file should be treated as canonical.
+{
+   gobject_init_1
+   Memcheck:Leak
+   ...
+   fun:gobject_init
+}
 {
    g_type_register_static_1
    Memcheck:Leak
@@ -490,4 +501,21 @@
    fun:g_strdup
    ...
    fun:g_tls_client_connection_new
+}
+{
+   g_unix_signal_add_full
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:g_malloc
+   ...
+   fun:g_thread_new
+   ...
+   fun:g_unix_signal_add_full
+}
+{
+   glib_worker_1
+   Memcheck:Leak
+   ...
+   fun:glib_worker_main
 }

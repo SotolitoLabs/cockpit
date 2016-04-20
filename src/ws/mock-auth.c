@@ -76,7 +76,8 @@ mock_auth_login_async (CockpitAuth *auth,
   g_object_set_data_full (G_OBJECT (result), "remote", g_strdup (remote_peer), g_free);
   g_object_set_data_full (G_OBJECT (result), "application", cockpit_auth_parse_application (path), g_free);
 
-  userpass = cockpit_auth_parse_authorization (headers, &type);
+  type = cockpit_auth_parse_authorization_type (headers);
+  userpass = cockpit_auth_parse_authorization (headers, TRUE);
   if (userpass && g_str_equal (type, "basic"))
     {
       split = g_strsplit (g_bytes_get_data (userpass, NULL), ":", 2);
@@ -111,6 +112,7 @@ mock_auth_login_finish (CockpitAuth *auth,
   GSimpleAsyncResult *result = G_SIMPLE_ASYNC_RESULT (async);
   CockpitCreds *creds;
   CockpitPipe *pipe;
+  gchar *nonce;
 
   const gchar *argv[] = {
     cockpit_ws_bridge_program ? cockpit_ws_bridge_program : BUILDDIR "/cockpit-bridge",
@@ -120,11 +122,16 @@ mock_auth_login_finish (CockpitAuth *auth,
   if (g_simple_async_result_propagate_error (result, error))
       return NULL;
 
+  nonce = cockpit_auth_nonce (auth);
+
   creds = cockpit_creds_new (self->expect_user,
                              g_object_get_data (G_OBJECT (result), "application"),
                              COCKPIT_CRED_PASSWORD, self->expect_password,
                              COCKPIT_CRED_RHOST, g_object_get_data (G_OBJECT (result), "remote"),
+                             COCKPIT_CRED_CSRF_TOKEN, nonce,
                              NULL);
+
+  g_free (nonce);
 
   if (transport)
     {

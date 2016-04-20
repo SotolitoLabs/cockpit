@@ -31,6 +31,7 @@
 #include "cockpitnetworksamples.h"
 #include "cockpitmountsamples.h"
 #include "cockpitcgroupsamples.h"
+#include "cockpitdisksamples.h"
 
 #include "common/cockpitjson.h"
 
@@ -51,7 +52,8 @@ typedef enum {
   BLOCK_SAMPLER = 1 << 2,
   NETWORK_SAMPLER = 1 << 3,
   MOUNT_SAMPLER = 1 << 4,
-  CGROUP_SAMPLER = 1 << 5
+  CGROUP_SAMPLER = 1 << 5,
+  DISK_SAMPLER = 1 << 6
 } SamplerSet;
 
 typedef struct {
@@ -76,8 +78,13 @@ static MetricDescription metric_descriptions[] = {
   { "block.device.read",    "bytes", "counter", TRUE, BLOCK_SAMPLER },
   { "block.device.written", "bytes", "counter", TRUE, BLOCK_SAMPLER },
 
-  { "network.all.rx", "bytes", "counter", FALSE, NETWORK_SAMPLER },
-  { "network.all.tx", "bytes", "counter", FALSE, NETWORK_SAMPLER },
+  { "disk.all.read",    "bytes", "counter", FALSE, DISK_SAMPLER },
+  { "disk.all.written", "bytes", "counter", FALSE, DISK_SAMPLER },
+
+  { "network.all.rx",       "bytes", "counter", FALSE, NETWORK_SAMPLER },
+  { "network.all.tx",       "bytes", "counter", FALSE, NETWORK_SAMPLER },
+  { "network.interface.rx", "bytes", "counter", TRUE,  NETWORK_SAMPLER },
+  { "network.interface.tx", "bytes", "counter", TRUE,  NETWORK_SAMPLER },
 
   { "mount.total", "bytes", "instant", TRUE, MOUNT_SAMPLER },
   { "mount.used",  "bytes", "instant", TRUE, MOUNT_SAMPLER },
@@ -313,6 +320,8 @@ cockpit_internal_metrics_tick (CockpitMetrics *metrics,
     cockpit_mount_samples (COCKPIT_SAMPLES (self));
   if (self->samplers & CGROUP_SAMPLER)
     cockpit_cgroup_samples (COCKPIT_SAMPLES (self));
+  if (self->samplers & DISK_SAMPLER)
+    cockpit_disk_samples (COCKPIT_SAMPLES (self));
 
   /* Check for disappeared instances
    */
@@ -373,50 +382,48 @@ convert_metric_description (CockpitInternalMetrics *self,
       if (!cockpit_json_get_string (json_node_get_object (node), "name", NULL, &name)
           || name == NULL)
         {
-          g_warning ("%s: invalid \"metrics\" option was specified (no name for metric %d)",
-                     self->name, index);
+          g_warning ("invalid \"metrics\" option was specified (no name for metric %d)", index);
           return FALSE;
         }
 
       if (!cockpit_json_get_string (json_node_get_object (node), "units", NULL, &units))
         {
-          g_warning ("%s: invalid units for metric %s (not a string)",
-                     self->name, name);
+          g_warning ("invalid units for metric %s (not a string)", name);
           return FALSE;
         }
 
       if (!cockpit_json_get_string (json_node_get_object (node), "derive", NULL, &info->derive))
         {
-          g_warning ("%s: invalid derivation mode for metric %s (not a string)",
-                     self->name, name);
+          g_warning ("invalid derivation mode for metric %s (not a string)", name);
           return FALSE;
         }
     }
   else
     {
-      g_warning ("%s: invalid \"metrics\" option was specified (not an object for metric %d)",
-                 self->name, index);
+      g_warning ("invalid \"metrics\" option was specified (not an object for metric %d)", index);
       return FALSE;
     }
 
   MetricDescription *desc = find_metric_description (name);
   if (desc == NULL)
     {
-      g_warning ("%s: unknown internal metric %s", self->name, name);
-      return FALSE;
+      g_message ("unknown internal metric %s", name);
     }
-
-  if (units && g_strcmp0 (desc->units, units) != 0)
+  else
     {
-      g_warning ("%s: %s has units %s, not %s", self->name, name, desc->units, units);
-      return FALSE;
+      if (units && g_strcmp0 (desc->units, units) != 0)
+        {
+          g_warning ("%s has units %s, not %s", name, desc->units, units);
+          return FALSE;
+        }
+
+      if (desc->instanced)
+        info->instances = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+
+      info->desc = desc;
+      self->samplers |= desc->sampler;
     }
 
-  if (desc->instanced)
-    info->instances = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-
-  info->desc = desc;
-  self->samplers |= desc->sampler;
   return TRUE;
 }
 
@@ -436,14 +443,14 @@ cockpit_internal_metrics_prepare (CockpitChannel *channel)
   /* "instances" option */
   if (!cockpit_json_get_strv (options, "instances", NULL, (gchar ***)&self->instances))
     {
-      g_warning ("%s: invalid \"instances\" option (not an array of strings)", self->name);
+      g_warning ("invalid \"instances\" option (not an array of strings)");
       goto out;
     }
 
   /* "omit-instances" option */
   if (!cockpit_json_get_strv (options, "omit-instances", NULL, (gchar ***)&self->omit_instances))
     {
-      g_warning ("%s: invalid \"omit-instances\" option (not an array of strings)", self->name);
+      g_warning ("invalid \"omit-instances\" option (not an array of strings)");
       goto out;
     }
 
@@ -451,7 +458,7 @@ cockpit_internal_metrics_prepare (CockpitChannel *channel)
   self->n_metrics = 0;
   if (!cockpit_json_get_array (options, "metrics", NULL, &metrics))
     {
-      g_warning ("%s: invalid \"metrics\" option was specified (not an array)", self->name);
+      g_warning ("invalid \"metrics\" option was specified (not an array)");
       goto out;
     }
   if (metrics)
@@ -463,17 +470,22 @@ cockpit_internal_metrics_prepare (CockpitChannel *channel)
       MetricInfo *info = &self->metrics[i];
       if (!convert_metric_description (self, json_array_get_element (metrics, i), info, i))
         goto out;
+      if (!info->desc)
+        {
+          problem = "not-supported";
+          goto out;
+        }
     }
 
   /* "interval" option */
   if (!cockpit_json_get_int (options, "interval", 1000, &self->interval))
     {
-      g_warning ("%s: invalid \"interval\" option", self->name);
+      g_warning ("invalid \"interval\" option");
       goto out;
     }
   else if (self->interval <= 0 || self->interval > G_MAXINT)
     {
-      g_warning ("%s: invalid \"interval\" value: %" G_GINT64_FORMAT, self->name, self->interval);
+      g_warning ("invalid \"interval\" value: %" G_GINT64_FORMAT, self->interval);
       goto out;
     }
 

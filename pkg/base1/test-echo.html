@@ -36,15 +36,21 @@
 <script type="text/javascript">
 
 asyncTest("basic", function() {
-    expect(3);
+    expect(4);
 
     var channel = cockpit.channel({ "payload": "echo" });
+    var pass = 0;
 
     $(channel).on("control", function(ev, options) {
-        equal(options.command, "done", "got done");
-        channel.close();
-        $(channel).off();
-        start();
+        if (pass == 0) {
+            equal(options.command, "ready", "got ready");
+            pass += 1;
+        } else {
+            equal(options.command, "done", "got done");
+            channel.close();
+            $(channel).off();
+            start();
+        }
     });
 
     $(channel).on("message", function(ev, payload) {
@@ -137,29 +143,6 @@ asyncTest("binary", function() {
 
     strictEqual(channel.binary, true, "binary set");
     channel.send(buffer);
-});
-
-asyncTest("sideband", function() {
-    expect(2);
-
-    var params = {
-        "payload": "echo",
-        "protocol": "booyah"
-    };
-
-    var ws = new WebSocket(cockpit.transport.uri() + "?" + JSON.stringify(params), "booyah");
-    ws.onopen = function() {
-        if (ws.protocol !== undefined)
-            equal(ws.protocol, "booyah", "got right protocol");
-        else
-            ok(true, "skipping protocol check");
-        ws.send("the payload");
-    };
-    ws.onmessage = function(event) {
-        strictEqual(event.data, "the payload", "got the right payload");
-        ws.close();
-        start();
-    };
 });
 
 QUnit.start();

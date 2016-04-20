@@ -82,6 +82,7 @@ The following fields are defined:
  * "channel-seed": A seed to be used when generating new channel ids.
  * "host": The host being communicated with.
  * "problem": A problem occurred during init.
+ * "csrf-token": The web service will send a csrf-token for external channels.
 
 If a problem occurs that requires shutdown of a transport, then the "problem"
 field can be set to indicate why the shutdown will be shortly occurring.
@@ -126,6 +127,14 @@ An example of an open:
 
 This message is sent to the cockpit-bridge.
 
+The open fields are also used with external channels. External channels are
+channels that have their payload sent via a separate HTTP request or another
+WebSocket. In this case the "channel" field must not be present, and an
+"external" field may be present with the following arguments:
+
+ * "content-disposition": a Content-Disposition header for GET responses
+ * "content-type": a Content-Type header for GET responses
+ * "protocols": an array of possible protocols for a WebSocket
 
 Command: close
 --------------
@@ -153,8 +162,44 @@ channel is considered closed.
 
 See below for a list of problem codes.
 
+When a channel closing is the result of a ssh transport closing cockpit-ws
+reports on the authentication methods used while attempting to authenticate
+by adding a "auth-method-results" object to the close object. This is mainly
+useful to provide helpful error messages and suggestions to users.
+
+The "auth-method-results" object contains a key for each method that cockpit-ws
+is able to atempt authentication with as well as the result of the atempt.
+For example:
+
+    {
+        "password": "denied"
+    }
+
+This possible "result" values are:
+
+ * "no-server-support": The target server does not support this method.
+ * "not-provided": cockpit-ws doesn't have a credential to try so this method was skipped.
+ * "succeeded": Authentication with this method was successful.
+ * "denied": Authentication with this method was denied.
+ * "partial": The server wants more authentication.
+ * "error": Unexpected error occured when using this method.
+ * "not-tried": This methods was not tried, usually due to an earlier method succeeding.
+
 Other fields may be present in a close message.
 
+Command: ready
+--------------
+
+The "ready" command indicates that the channel implementation (usually
+the bridge) is in a ready and settled state. It is not normally necessary to
+listen to this control message, since it is possible to start sending payload
+over a channel immediately after the open message has been sent.
+
+The following fields are defined:
+
+ * "channel": The id of the channel
+
+Other fields may be present in a ready message.
 
 Command: done
 -------------
@@ -283,8 +328,8 @@ Payload: dbus-json3
 -------------------
 
 DBus messages are encoded in JSON payloads by cockpit-web, and decoded in
-cockpit-bridge. The 'dbus-json1' is deprecated. The 'dbus-json2' protocol
-is no longer supported.
+cockpit-bridge. The 'dbus-json1' and 'dbus-json2' protocols are no
+longer supported.
 
 Additional "open" command options are needed to open a channel of this
 type:
@@ -558,6 +603,16 @@ the following fields:
 Any data to be sent should be sent via the channel, and then the channel
 should be closed without a problem.
 
+Payload: websocket-stream1
+--------------------------
+
+This channel payload implements a WebSocket client. The data in the
+channel is the message frames.
+
+Most of same options for http-stream2 apply here.
+
+The response headers are send back in a "response" control message.
+
 Payload: stream
 ---------------
 
@@ -652,8 +707,8 @@ The channel will send a number of JSON messages that list the current
 content of the directory.  These messages have a "event" field with
 value "present", a "path" field that holds the (relative) name of
 the file and a type field. Type will be one of: file, directory, link,
-special or unknown. After all files have been listed a message with an
-"event" field of "present-done" is sent.
+special or unknown. After all files have been listed the "ready"
+control message will be sent.
 
 Other messages on the stream signal changes to the directory, in the
 same format as used by the "fswatch1" payload type.

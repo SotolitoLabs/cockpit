@@ -1,0 +1,131 @@
+@import "variables.less";
+
+/* Depends on number of items in the sidebar */
+@sidebar-height-lg: 250px;
+
+@import "sidebar.less";
+@import "filter.less";
+@import "dropdown.less";
+@import "dashboard.less";
+
+@import "images.less";
+@import "layers.less";
+@import "projects.less";
+
+#content {
+    margin-right: 0px;
+    min-height: 100%;
+}
+
+.listing-body dl {
+    margin-bottom: 13px;
+}
+
+/* Registry dashboard */
+
+.card-pf-utilization .card-pf-title {
+    line-height: 1.1;
+}
+
+.dashboard-storage {
+    img {
+        display: block;
+        margin: 20px auto 0px auto;
+    }
+}
+
+.dashboard-images {
+    .card-pf-body {
+        min-height: 220px;
+        padding-bottom: 0px;
+
+        div {
+            padding: 7px 10px 10px 10px;
+            cursor: pointer;
+        }
+
+        div:hover {
+            background-color: @table-bg-hover;
+        }
+
+        ul {
+            background: linear-gradient(90deg, transparent 20px, @tag-border 20px, @tag-border 22px, transparent 22px);
+            background-size: 100% 20px;
+            background-repeat: no-repeat;
+            padding: 10px 0px 0px 20px;
+            margin-bottom: 0px;
+
+            li {
+                background: linear-gradient(180deg, transparent 8px, @tag-border 8px, @tag-border 10px, transparent 10px);
+                background-repeat: no-repeat;
+                padding-left: 7px;
+                display: inline;
+                list-style: none;
+            }
+
+            li:first-child {
+                padding-left: 15px;
+            }
+
+            li.image-tag-truncated {
+                padding-left: 15px;
+                opacity: 0.5;
+            }
+        }
+    }
+
+    .namespace-filter {
+        margin-top: -3px;
+    }
+
+    .all-images {
+        display: block;
+        float: right;
+        margin-bottom: 10px;
+    }
+
+    .imagestream-lock {
+        display: block;
+        float: right;
+        margin: 9px;
+    }
+
+    .table > tbody > tr > td {
+        border-top: none;
+        font-weight: bold;
+        padding: 0px;
+    }
+
+    .table a {
+        display: block;
+        color: inherit;
+        padding: 8px 15px;
+    }
+
+    dt {
+        font-size: 13px;
+    }
+
+    dt a {
+        text-decoration: none;
+        color: inherit;
+    }
+
+    dd {
+        float: right;
+        margin-left: 20px;
+    }
+
+}
+
+.dashboard-commands {
+    p {
+        font-size: 13px;
+        font-weight: bold;
+    }
+}
+
+.blank-slate-pf {
+    border: none;
+}
+

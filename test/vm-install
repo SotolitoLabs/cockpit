@@ -19,61 +19,28 @@
 import argparse
 import os
 import sys
+import subprocess
 
-import testvm
+from common import testinfra
+from common import vmmanage
 
-parser = argparse.ArgumentParser(description='Install Cockpit on a virtual machine')
-parser.add_argument('-v', '--verbose', action='store_true', help='Display verbose progress details')
-parser.add_argument('-f', '--flavor', action='store', help='The image to modify')
-parser.add_argument('rpms', metavar='RPM', nargs='*', help='RPMS to install')
-args = parser.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Install Cockpit on a virtual machine')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Display verbose progress details')
+    parser.add_argument('-s', '--sit', action='store_true', help='Sit and wait if install script fails')
+    parser.add_argument('-q', '--quick', action='store_true', help='Build faster')
+    parser.add_argument('-b', '--build-image', action='store', help='Build in this image')
+    parser.add_argument('-B', '--build-only', action='store_true', help='Only build and download results')
+    parser.add_argument('-I', '--install-only', action='store_true', help='Only upload and install')
+    parser.add_argument('-c', '--containers', action='store_true', help='Install container images')
+    parser.add_argument('image', nargs='?', default=testinfra.DEFAULT_IMAGE, help='The image to use')
+    args = parser.parse_args()
 
-INSTALL_SCRIPT = """#!/bin/sh
-export TEST_PACKAGES
-export TEST_VERBOSE
-%s"""
-
-def install(machine, rpms):
-    """Install rpms in the pre-built test image"""
-    for rpm in rpms:
-        if not os.path.exists(rpm):
-            raise testvm.Failure("file does not exist: %s" % rpm)
-
-    if not rpms:
-        raise testvm.Failure("Please specify packages to install")
-
-    # see if there is an os-specific install script to use, otherwise use generic
-    install_packages_script = os.path.join(machine.test_dir, "guest/%s-%s-install_packages" % (machine.os, machine.arch))
-    if not os.path.exists(install_packages_script):
-        install_packages_script = os.path.join(machine.test_dir, "guest/default-install_packages")
-
-    target_install_script_path = "~/install_packages.py"
-
-    machine.start(maintain=True)
+    install_image = not args.build_only and args.image
+    build_image = not args.install_only and (args.build_image or args.image)
     try:
-        machine.wait_boot()
-        machine.upload(rpms, "/var/tmp")
-        uploaded = []
-        for rpm in rpms:
-            base = os.path.basename(rpm)
-            dest = os.path.join("/var/tmp", base)
-            uploaded.append(dest)
-        env = {
-            "TEST_OS": machine.os,
-            "TEST_ARCH": machine.arch,
-            "TEST_FLAVOR": machine.flavor,
-            "TEST_PACKAGES": " ".join(uploaded),
-            "TEST_VERBOSE": machine.verbose
-        }
-        machine.upload([install_packages_script], target_install_script_path)
-        script_to_run = INSTALL_SCRIPT % (target_install_script_path)
-        machine.execute(script=script_to_run, environment=env)
-    finally:
-        machine.stop()
-
-try:
-    machine = testvm.VirtMachine(verbose=args.verbose, flavor=args.flavor, label="install")
-    install(machine, args.rpms)
-except testvm.Failure, ex:
-    print >> sys.stderr, "vm-install:", ex
-    sys.exit(1)
+        vmmanage.build_and_install(install_image, build_image, args={"verbose": args.verbose, "sit": args.sit, "quick": args.quick, "build_image": args.build_image,
+                                                            "build_only": args.build_only, "install_only": args.install_only, "containers": args.containers})
+    except Exception as e:
+        print e
+        sys.exit(1)

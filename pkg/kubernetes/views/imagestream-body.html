@@ -1,0 +1,13 @@
+<dl>
+    <dt translatable="yes">Pull repository</dt>
+    <dd ng-if="stream.spec.dockerImageRepository"><tt>{{stream.spec.dockerImageRepository}}</tt></dd>
+    <dd ng-if="!stream.spec.dockerImageRepository"><em translatable="yes">None</em></dd>
+    <dt translatable="yes">Image count</dt>
+    <dd translatable="yes">{{stream.status.tags.length}}</dd>
+</dl>
+<p>
+    <i class="fa fa-info-circle"></i>
+    <span translatable="yes">To push to an image to this image stream:</span>
+</p>
+<pre>$ sudo docker tag <em>myimage</em> <span ng-class="{ placeholder: !settings.registry.host.explicit }">{{settings.registry.host}}</span>/{{ stream.metadata.namespace }}/{{ stream.metadata.name}}:<em>tag</em>
+$ sudo docker push <span ng-class="{ placeholder: !settings.registry.host.explicit }">{{settings.registry.host}}</span>/{{ stream.metadata.namespace }}/{{ stream.metadata.name}}</pre>

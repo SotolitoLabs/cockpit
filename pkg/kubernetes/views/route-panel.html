@@ -1,6 +1,9 @@
-<div class="listing-head" ng-click="select(id, $event)">
+<div class="listing-head" ng-click="listing.toggle(id)">
     <div class="listing-actions">
-        <button title="Delete" class="btn btn-danger btn-delete pficon pficon-delete" disabled></button>
+        <button title="Adjust"  class="btn btn-default pficon pficon-edit" ng-click="modifyRoute(item)"></button>
+        <button title="Delete" class="route-delete btn btn-danger btn-delete pficon pficon-delete "
+            ng-click="deleteItem(item)">
+        </button>
     </div>
     <h3><i class="pficon pficon-route"></i>{{ item.metadata.name }}</h3>
     <ul class="nav nav-tabs nav-tabs-pf">
@@ -11,11 +14,11 @@
     <div class="row">
         <div class="col-sm-6">
             <dl>
-                <dt ng-if="client.flavor == 'openshift'" translatable="yes">Project</dt>
-                <dt ng-if="client.flavor != 'openshift'" translatable="yes">Namespace</dt>
+                <dt ng-if="settings.flavor == 'openshift'" translatable="yes">Project</dt>
+                <dt ng-if="settings.flavor != 'openshift'" translatable="yes">Namespace</dt>
                 <dd>{{ item.metadata.namespace }}</dd>
                 <dt translatable="yes">Created</dt>
-                <dd title="{{ item.metadata.creationTimestamp }}">{{ item.metadata.creationTimestamp | timeAgo }}</dd>
+                <dd title="{{ item.metadata.creationTimestamp }}">{{ item.metadata.creationTimestamp | dateRelative }}</dd>
                 <dt translatable="yes">Host</dt>
                 <dd>{{ item.spec.host }}</dd>
 
@@ -28,15 +31,15 @@
             </dl>
         </div>
         <div class="col-sm-6">
-            <dl class="full">
+            <dl class="full-width">
                 <dt translatable="yes">Labels</dt>
                 <dd ng-repeat="(key, value) in item.metadata.labels">{{key}}={{value}}</dd>
                 <dd ng-if="!item.metadata.labels" translatable="yes">none</dd>
             </dl>
-            <dl class="full">
+            <dl class="full-width">
                 <dt translatable="yes">Annotations</dt>
-                <dd class="full" ng-repeat="(key, value) in item.metadata.annotations">{{key}}={{value}}</dd>
-                <dd class="full" ng-if="!item.metadata.annotations" translatable="yes">none</dd>
+                <dd ng-repeat="(key, value) in item.metadata.annotations">{{key}}={{value}}</dd>
+                <dd ng-if="!item.metadata.annotations" translatable="yes">none</dd>
             </dl>
         </div>
     </div>

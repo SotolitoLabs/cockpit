@@ -138,11 +138,11 @@ shell.plot = function plot(element, x_range_seconds, x_stop_seconds) {
     var grid;
 
     function refresh_now() {
-        if (flot === null) {
-            if (element.height() === 0 || element.width() === 0)
-                return;
+        if (element.height() === 0 || element.width() === 0)
+            return;
+
+        if (flot === null)
             flot = $.plot(element, flot_data, options);
-        }
 
         flot.setData(flot_data);
         var axes = flot.getAxes();
@@ -244,6 +244,7 @@ shell.plot = function plot(element, x_range_seconds, x_stop_seconds) {
         flot_data = [ ];
         flot = null;
         $(element).empty();
+        $(element).data("flot_data", null);
     }
 
     function resize() {
@@ -387,7 +388,7 @@ shell.plot = function plot(element, x_range_seconds, x_stop_seconds) {
         return self;
     }
 
-    function add_metrics_stacked_instances_series(desc, opts, colors) {
+    function add_metrics_stacked_instances_series(desc, opts) {
         var channel = null;
 
         var self = {
@@ -466,15 +467,35 @@ shell.plot = function plot(element, x_range_seconds, x_stop_seconds) {
 
             var instance_data = $.extend({}, opts);
             var factor = desc.factor || 1;
-            var last = last_instance;
+            var threshold = desc.threshold || 0;
             var metrics_row;
+
+            var last = last_instance;
 
             function reset() {
                 metrics_row = grid.add(channel, [ "a", name ]);
                 instance_data.data = grid.add(function(row, x, n) {
                     for (var i = 0; i < n; i++) {
-                        var floor = last? last.data[x + i][2] : 0;
-                        row[x + i] = [(grid.beg + x + i)*interval, floor, floor + (metrics_row[x + i] || 0)*factor];
+                        var value = (metrics_row[x + i] || 0)*factor;
+                        var ts = (grid.beg + x + i)*interval;
+                        var floor = 0;
+
+                        if (last) {
+                            if (last.data[x + i][1])
+                                floor = last.data[x + i][1];
+                            else
+                                floor = last.data[x + i][2];
+                        }
+
+                        if (Math.abs(value) > threshold) {
+                            row[x + i] = [ ts, floor + value, floor ];
+                            if (row[x + i - 1] && row[x + i - 1][1] === null)
+                                row[x + i - 1][1] = row[x + i - 1][2];
+                        } else {
+                            row[x + i] = [ ts, null, floor ];
+                            if (row[x + i - 1] && row[x + i - 1][1] !== null)
+                                row[x + i - 1][1] = row[x + i - 1][2];
+                        }
                     }
                 });
                 sync();
@@ -516,7 +537,7 @@ shell.plot = function plot(element, x_range_seconds, x_stop_seconds) {
 
             for (name in instances) {
                 var d = instances[name].data;
-                if (d[index] && d[index][1] <= pos.y && pos.y <= d[index][2])
+                if (d[index] && d[index][1] && d[index][2] <= pos.y && pos.y <= d[index][1])
                     return name;
             }
             return false;
@@ -581,6 +602,9 @@ shell.plot = function plot(element, x_range_seconds, x_stop_seconds) {
     $(element).on("plotselecting", selecting);
     $(element).on("plotselected", selected);
 
+    // for testing
+    $(element).data("flot_data", flot_data);
+
     reset(x_range_seconds, x_stop_seconds);
 
     $.extend(result, {
@@ -600,23 +624,34 @@ shell.plot = function plot(element, x_range_seconds, x_stop_seconds) {
     return result;
 };
 
+var plot_colors = [ "#006bb4",
+                    "#008ff0",
+                    "#2daaff",
+                    "#69c2ff",
+                    "#a5daff",
+                    "#e1f3ff",
+                    "#00243c",
+                    "#004778"
+                  ];
+
 shell.plot_simple_template = function simple() {
     return {
-        colors: [ "#0099d3" ],
+        colors: plot_colors,
         legend: { show: false },
         series: { shadowSize: 0,
             lines: {
-                lineWidth: 0.0,
-                fill: 1.0
+                lineWidth: 2.0,
+                fill: 0.4
             }
         },
-        xaxis: { tickColor: "#d1d1d1",
+        xaxis: { tickLength: 0,
                  mode: "time",
                  tickFormatter: shell.format_date_tick,
                  minTickSize: [ 1, 'minute' ],
                  reserveSpace: false
                },
         yaxis: { tickColor: "#d1d1d1",
+                 min: 0
                },
         /*
          * The point radius influences the margin around the grid even if no points
@@ -627,37 +662,11 @@ shell.plot_simple_template = function simple() {
         },
         grid: {
             borderWidth: 1,
-            aboveData: true,
+            aboveData: false,
             color: "black",
             borderColor: $.color.parse("black").scale('a', 0.22).toString(),
             labelMargin: 0
         }
-    };
-};
-
-shell.plot_simple_stacked_template = function simple_stacked() {
-    return {
-        colors: [ "#0099d3" ],
-        legend: { show: false },
-        series: { shadowSize: 0,
-                  lines: { lineWidth: 0.0,
-                           fill: 1.0
-                         }
-                },
-        xaxis: { tickFormatter: function() { return ""; } },
-        yaxis: { tickFormatter: function() { return ""; } },
-        // The point radius influences
-        // the margin around the grid
-        // even if no points are plotted.
-        // We don't want any margin, so
-        // we set the radius to zero.
-        points: { radius: 0 },
-        grid: { borderWidth: 1,
-                aboveData: true,
-                color: "black",
-                borderColor: $.color.parse("black").scale('a', 0.22).toString(),
-                labelMargin: 0
-              }
     };
 };
 
@@ -741,19 +750,40 @@ shell.format_date_tick = function format_date_tick(val, axis) {
     return label.substr(0, label.length-1);
 };
 
+shell.bytes_tick_unit = function bytes_tick_unit(axis) {
+    return cockpit.format_bytes(axis.max, 1024, true)[1];
+};
+
+shell.format_bytes_tick_no_unit = function format_bytes_tick_no_unit(val, axis) {
+    return cockpit.format_bytes(val, shell.bytes_tick_unit(axis), true)[0];
+};
+
 shell.format_bytes_tick = function format_bytes_tick(val, axis) {
-    var max = cockpit.format_bytes(axis.max, 1024, true);
-    return cockpit.format_bytes(val, max[1]);
+    return cockpit.format_bytes(val, 1024);
+};
+
+shell.bytes_per_sec_tick_unit = function bytes_per_sec_tick_unit(axis) {
+    return cockpit.format_bytes_per_sec(axis.max, 1024, true)[1];
+};
+
+shell.format_bytes_per_sec_tick_no_unit = function format_bytes_per_sec_tick_no_unit(val, axis) {
+    return cockpit.format_bytes_per_sec(val, shell.bytes_per_sec_tick_unit(axis), true)[0];
 };
 
 shell.format_bytes_per_sec_tick = function format_bytes_per_sec_tick(val, axis) {
-    var max = cockpit.format_bytes_per_sec(axis.max, 1024, true);
-    return cockpit.format_bytes_per_sec(val, max[1]);
+    return cockpit.format_bytes_per_sec(val, 1024);
+};
+
+shell.bits_per_sec_tick_unit = function bits_per_sec_tick_unit(axis) {
+    return cockpit.format_bits_per_sec(axis.max*8, 1000, true)[1];
+};
+
+shell.format_bits_per_sec_tick_no_unit = function format_bits_per_sec_tick_no_tick(val, axis) {
+    return cockpit.format_bits_per_sec(val*8, shell.bits_per_sec_tick_unit(axis), true)[0];
 };
 
 shell.format_bits_per_sec_tick = function format_bits_per_sec_tick(val, axis) {
-    var max = cockpit.format_bits_per_sec(axis.max*8, 1000, true);
-    return cockpit.format_bits_per_sec(val*8, max[1]);
+    return cockpit.format_bits_per_sec(val*8, 1000);
 };
 
 shell.setup_plot_controls = function setup_plot_controls(container, element, plots) {

@@ -1,21 +1,22 @@
-<div ng-init="containers = client.containers(item)">
-    <div class="listing-head" ng-click="select(id, $event)">
+<div>
+    <div class="listing-head" ng-click="listing.toggle(id)">
         <div class="listing-actions">
             <button title="Delete" class="delete-pod btn btn-danger btn-delete pficon pficon-delete"
-                data-toggle="modal" data-target="#delete-pod-dialog"
-                data-link="{{item.metadata.selfLink}}"></button>
+                ng-click="deleteItem(item)"></button>
         </div>
         <h3><i class="fa fa-cubes"></i>{{ item.metadata.name }}</h3>
         <div class="listing-status">
-            <span>{{item.status.phase}}</span>
+            <span>{{ podStatus(item) }}</span>
         </div>
         <ul class="nav nav-tabs nav-tabs-pf">
             <li ng-class="{active: tab('main')}"><a ng-click="tab('main', $event)">Pod</a></li>
             <li ng-class="{active: tab('containers')}"><a ng-click="tab('containers', $event)">Containers</a></li>
             <li ng-class="{active: tab('logs')}">
-                <a ng-click="tab('logs', $event); connect('console')">Logs</a></li>
+                <a ng-click="tab('logs', $event); tabbed = true">Logs</a></li>
             <li ng-class="{active: tab('shell')}">
-                <a ng-click="tab('shell', $event); connect('shell')">Shell</a></li>
+                <a ng-click="tab('shell', $event); tabbed = true">Shell</a></li>
+            <li ng-class="{active: tab('volumes')}">
+                <a ng-click="tab('volumes', $event); tabbed = true">Volumes</a></li>
         </ul>
     </div>
     <div class="listing-body" ng-show="tab('main')">
@@ -23,21 +24,43 @@
         </kube-pod-body>
     </div>
     <div class="listing-body" ng-show="tab('containers')">
-        <kube-container-body ng-repeat="container in containers">
+        <kube-container-body ng-repeat="container in containers(item)">
         </kube-container-body>
     </div>
     <div class="listing-body" ng-show="tab('logs')">
-        <div class="container-fluid" ng-repeat="container in containers">
-            <kube-console namespace="{{item.metadata.namespace}}"
-                pod="{{item.metadata.name}}" container="{{container.spec.name}}">
+        <div class="container-fluid" ng-repeat="container in containers(item)"
+            ng-class="{'container-more': !$first}">
+            <p ng-if="!($first && $last)">{{ container.spec.name }}</p>
+            <kube-console pod="item" container="container.spec.name" prevent="!tabbed">
             </kube-console>
         </div>
     </div>
     <div class="listing-body" ng-show="tab('shell')">
-        <div class="container-fluid" ng-repeat="container in containers">
-            <kube-shell namespace="{{item.metadata.namespace}}"
-                pod="{{item.metadata.name}}" container="{{container.spec.name}}">
-            </kube-shell>
+        <div class="container-fluid" ng-repeat="container in containers(item)"
+            ng-if="item.status.phase == 'Running' && container.status.state.running"
+            ng-class="{'container-more': !$first}">
+            <p ng-if="!($first && $last)">{{ container.spec.name }}</p>
+            <kubernetes-container-terminal pod="item" container="container.spec.name" prevent="!tabbed">
+            </kubernetes-container-terminal>
+        </div>
+    </div>
+
+    <div class="listing-body" ng-show="tab('volumes')">
+        <div class="container-fluid well" ng-repeat="podVolume in volumesForPod(item)"
+            data-id="{{ podVolume.name }}">
+            <dl ng-if="!podVolume.persistentVolumeClaim" volume-body volume="podVolume"></dl>
+            <dl ng-if="podVolume.persistentVolumeClaim" pvc-body settings="settings"
+                item="claimFromVolumeSource(podVolume.persistentVolumeClaim, item.metadata.namespace)"></dl>
+            <dl>
+                <dt translatable="yes">Mount Location</dt>
+                <dd>
+                    <span ng-if="!podVolume.mounts" translatable="yes">None</span>
+                    <dl class="full-width" ng-if="podVolume.mounts">
+                        <dt ng-repeat-start="(name, data) in podVolume.mounts">{{ name }}</dt>
+                        <dd ng-repeat-end>{{ data.mountPath }}</dd>
+                    </dl>
+                </dd>
+            </dl>
         </div>
     </div>
 </div>

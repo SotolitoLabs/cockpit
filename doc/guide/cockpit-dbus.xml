@@ -110,8 +110,9 @@ client = cockpit.dbus(name, [options])
       </varlistentry>
       <varlistentry>
         <term><code>"host"</code></term>
-        <listitem><para>The host to open the channel to. If no host is specified
-          then the correct one will be automatically selected based on the page
+        <listitem><para>The host to open the channel to. If an alternate user or port is
+          required it can be specified as <code>"user@myhost:port"</code>. If no host is
+          specified then the correct one will be automatically selected based on the page
           calling this function.</para></listitem>
       </varlistentry>
       <varlistentry>
@@ -181,7 +182,7 @@ $(client).on("owner", function(event, owner) { ... })
   <refsection id="cockpit-dbus-proxy">
     <title>client.proxy</title>
 <programlisting>
-proxy = client.proxy([interface, path])
+proxy = client.proxy([interface, path], [options])
 </programlisting>
 
     <para>Create proxy javascript object for a DBus <code>interface</code>. At the
@@ -243,7 +244,7 @@ proxy.Method(arg1, arg2)
     <para>All DBus methods on the <code>interface</code> that start with an upper case
       letter (as is convention) will be automatically defined on this proxy. These
       methods are called with arguments as normal javascript arguments. A
-      <ulink url="http://api.jquery.com/category/deferred-object/">jQuery promise</ulink>
+      <ulink url="https://www.promisejs.org/">promise</ulink>
       that will complete successfully when the method returns, or fail if an error occurs.
       The return values from the DBus method will be passed to the <code>done</code> handler
       function directly.</para>
@@ -265,6 +266,10 @@ $(proxy).on("Signal", function(event, arg1, arg2) {
     <para>Signals that do not start with an upper case letter can be subscribed to by
       using <link linkend="cockpit-dbus-proxy-signal"><code>proxy.onsignal</code></link>
       directly.</para>
+
+    <para>Usually a proxy asks the <code>client</code> to watch and notify it of changes
+      to the relevant object or path. You can pass an <code>options</code> argument with
+      the <code>watch</code> field set to <code>false</code> to prevent this.</para>
   </refsection>
 
   <refsection id="cockpit-dbus-proxy-client">
@@ -329,21 +334,23 @@ invocation = proxy.call(method, args, [options])
 
     <para>The returned value is identical to the one returned from
       <link linkend="cockpit-dbus-call">client.call()</link>. It is a
-      <ulink url="http://api.jquery.com/category/deferred-object/">jQuery promise</ulink>
+      <ulink url="https://www.promisejs.org/">promise</ulink>
       that will complete successfully when the method returns, or fail if an error occurs.</para>
   </refsection>
 
   <refsection id="cockpit-dbus-proxy-wait">
     <title>proxy.wait()</title>
 <programlisting>
+promise = proxy.wait()
 proxy.wait(function() {
     ...
 });
 </programlisting>
-    <para>Wait for a proxy to finish loading, and invoke the callback function when ready.
-      If this method is called after a proxy has already loaded, then the callback will
-      be invoked immediately. Use <code>proxy.valid</code> to determine whether the proxy
-      loading resulting in a valid proxy.</para>
+  <para>Wait for a proxy to finish loading. This function returns a promise. If a callback function
+      is passed as an argument then that function will be invoked when the proxy is ready.
+      If this method is called after a proxy has already loaded, then the promise will be
+      resolved immediately, and any callback will be invoked immediately. Use the promise or
+      <code>proxy.valid</code> to determine whether the proxy is valid.</para>
   </refsection>
 
   <refsection id="cockpit-dbus-proxy-onchanged">
@@ -387,7 +394,7 @@ $(proxy).on("signal", function(event, name, args) {
   <refsection id="cockpit-dbus-proxies">
     <title>client.proxies</title>
 <programlisting>
-proxies = client.proxies([interface], [path_namespace])
+proxies = client.proxies([interface], [path_namespace], [options])
 </programlisting>
 
     <para>Create <link linkend="cockpit-dbus-proxy">proxy javascript objects</link> for
@@ -422,18 +429,26 @@ for (proxy in proxies) {
 
     <para>Use the <code>proxies.wait()</code> function to be notified when the initial
       set of proxies has been populated.</para>
+
+    <para>Usually a proxies ask the <code>client</code> to watch and be notified of changes
+      to the relevant object or path. You can pass an <code>options</code> argument with
+      the <code>watch</code> field set to <code>false</code> to prevent this.</para>
   </refsection>
 
   <refsection id="cockpit-dbus-proxies-wait">
     <title>proxies.wait()</title>
 <programlisting>
+promise = proxies.wait()
 proxies.wait(function() {
     ...
 });
 </programlisting>
     <para>Wait for a <code>proxies</code> object to populate its initial set of proxies.
-      If this method is called after the proxies have populated, the callback will be
-      invoked immediately.</para>
+      This function returns a promise. If a callback function is passed as an argument then
+      that function will be invoked when the proxies are ready. If this method is called after
+      the proxies have populated, then the promise will be resolved immediately, and any callback
+      will be invoked immediately.</para>
+
   </refsection>
 
   <refsection id="cockpit-dbus-proxies-client">
@@ -500,7 +515,7 @@ invocation = client.call(path, interface, method, args, [options])
       <code>args</code> may be <code>null</code> if no arguments are to be sent.</para>
 
     <para>The returned value is a
-      <ulink url="http://api.jquery.com/category/deferred-object/">jQuery promise</ulink>
+      <ulink url="https://www.promisejs.org/">promise</ulink>
       that will complete successfully when the method returns, or fail if an error occurs.</para>
 
     <para>If <code>options</code> is specified it should be a plain javascript object,
@@ -527,7 +542,7 @@ invocation = client.call(path, interface, method, args, [options])
 invocation.done(function(args, options) { ... })
 </programlisting>
     <para>This is a standard
-      <ulink url="http://api.jquery.com/category/deferred-object/">jQuery promise</ulink>
+      <ulink url="https://www.promisejs.org/">promise</ulink>
       method. It sets up a handler to be called when the DBus method call finishes
       successfully.</para>
     <para>The <code>args</code> argument is an array of return values from the DBus method.
@@ -705,7 +720,7 @@ watch = client.watch({ "path_namespace": path_namespace, "interface": interface 
     </variablelist>
 
     <para>The returned value is a
-      <ulink url="http://api.jquery.com/category/deferred-object/">jQuery promise</ulink>
+      <ulink url="https://www.promisejs.org/">promise</ulink>
       that will complete successfully when the watch has populated its initial set of properties
       and interfaces, and these have been notified via
       <link linkend="cockpit-dbus-onnotify"><code>client.onnotify</code></link>.</para>
@@ -722,7 +737,7 @@ watch = client.watch({ "path_namespace": path_namespace, "interface": interface 
 watch.done(function() { ... })
 </programlisting>
     <para>This is a standard
-      <ulink url="http://api.jquery.com/category/deferred-object/">jQuery promise</ulink>
+      <ulink url="https://www.promisejs.org/">promise</ulink>
       method. It sets up a handler to be called when the watch has populated its initial
       properties and interfaces.</para>
   </refsection>

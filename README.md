@@ -1,14 +1,10 @@
-[![travis CI build status](https://travis-ci.org/cockpit-project/cockpit.svg?branch=master)](https://travis-ci.org/cockpit-project/cockpit)
-
-[![Fedora 22 build status](http://files.cockpit-project.org/hubbot/status-f22-x86_64.svg?master)](http://files.cockpit-project.org/hubbot/)
-[![Fedora 22 Cloud Atomic Host build status](http://files.cockpit-project.org/hubbot/status-f22-atomic-x86_64.svg?master)](http://files.cockpit-project.org/hubbot/)
-[![Fedora 22 Testing build status](http://files.cockpit-project.org/hubbot/status-f22-t-x86_64.svg?master)](http://files.cockpit-project.org/hubbot/)
-
-[![Fedora 23 build status](http://files.cockpit-project.org/hubbot/status-f23-x86_64.svg?master)](http://files.cockpit-project.org/hubbot/)
-
-[![Fedora Rawhide build status](http://files.cockpit-project.org/hubbot/status-fraw-x86_64.svg?master)](http://files.cockpit-project.org/hubbot/)
-
-[![RHEL 7 build status](http://files.cockpit-project.org/hubbot/status-r7-x86_64.svg?master)](http://files.cockpit-project.org/hubbot/)
+[![travis CI build status](https://travis-ci.org/cockpit-project/cockpit.svg?branch=master)](https://travis-ci.org/cockpit-project/cockpit) <br />
+[![Fedora 23 build status](https://fedorapeople.org/groups/cockpit/status/fedora-23.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-23.html) <br />
+[![Fedora 24 build status](https://fedorapeople.org/groups/cockpit/status/fedora-24.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-24.html) <br />
+[![Fedora 23 Atomic Host status](https://fedorapeople.org/groups/cockpit/status/fedora-atomic.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-atomic.html) <br />
+[![Fedora 24 Testing status](https://fedorapeople.org/groups/cockpit/status/fedora-testing.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-testing.html) <br />
+[![RHEL 7 build status](https://fedorapeople.org/groups/cockpit/status/rhel-7.svg)](https://fedorapeople.org/groups/cockpit/status/rhel-7.html) <br />
+[![Debian Unstable build status](https://fedorapeople.org/groups/cockpit/status/debian-unstable.svg)](https://fedorapeople.org/groups/cockpit/status/debian-unstable.html)
 
 # Cockpit
 **A remote manager for GNU/Linux servers**

@@ -4,11 +4,16 @@
     "linguas": {
         "en": "English",
         "ca": "Catalan",
-        "de": "Deutsch",
         "da": "Dansk",
+        "de": "Deutsch",
+        "es": "Español",
+        "fr": "Français",
         "pl": "Polski",
         "pt_BR": "Portugueses",
-        "tr": "Türk",
-        "uk": "Українська"
-    }
+        "tr": "Türkçe",
+        "uk": "Українська",
+        "zh_CN": "中文"
+    },
+
+    "content-security-policy": "default-src 'self' 'unsafe-inline' 'unsafe-eval'"
 }

@@ -39,6 +39,8 @@
  * type.
  */
 
+gboolean cockpit_dbus_json_allow_external = TRUE;
+
 #define COCKPIT_DBUS_JSON(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), COCKPIT_TYPE_DBUS_JSON, CockpitDBusJson))
 
 typedef struct {
@@ -781,6 +783,8 @@ build_json_error (GError *error)
   g_dbus_error_strip_remote_error (error);
 
   json_array_add_string_element (reply, error_name != NULL ? error_name : "");
+  g_free (error_name);
+
   if (error->message)
     json_array_add_string_element (args, error->message);
   json_array_add_array_element (reply, args);
@@ -1138,7 +1142,7 @@ handle_dbus_call_on_interface (CockpitDBusJson *self,
 {
   GVariant *parameters = NULL;
   GError *error = NULL;
-  GDBusMessage *message;
+  GDBusMessage *message = NULL;
 
   g_return_if_fail (call->param_type != NULL);
   parameters = parse_json (call->args, call->param_type, &error);
@@ -1175,6 +1179,8 @@ out:
     }
   if (call)
     call_data_free (call);
+  if (message)
+    g_object_unref (message);
 }
 
 static void
@@ -1350,7 +1356,8 @@ on_add_match_ready (GObject *source,
   retval = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
   if (error)
     {
-      if (!g_cancellable_is_cancelled (self->cancellable))
+      if (!g_cancellable_is_cancelled (self->cancellable) &&
+          !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CLOSED))
         {
           g_warning ("couldn't add match to bus: %s", error->message);
           cockpit_channel_close (COCKPIT_CHANNEL (self), "internal-error");
@@ -1517,7 +1524,8 @@ on_remove_match_ready (GObject *source,
   retval = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
   if (error)
     {
-      if (!g_cancellable_is_cancelled (self->cancellable))
+      if (!g_cancellable_is_cancelled (self->cancellable) &&
+          !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CLOSED))
         {
           g_warning ("couldn't remove match from bus: %s", error->message);
           cockpit_channel_close (COCKPIT_CHANNEL (self), "internal-error");
@@ -1996,6 +2004,12 @@ cockpit_dbus_json_prepare (CockpitChannel *channel)
       goto out;
     }
 
+  if (!internal && !cockpit_dbus_json_allow_external)
+    {
+      problem = "not-supported";
+      goto out;
+    }
+
   /* An internal peer to peer connection to cockpit-bridge */
   if (internal)
     {
@@ -2008,6 +2022,7 @@ cockpit_dbus_json_prepare (CockpitChannel *channel)
       self->connection = cockpit_dbus_internal_client ();
       if (self->connection == NULL)
         {
+          g_warning ("no internal DBus connection");
           problem = "internal-error";
           goto out;
         }

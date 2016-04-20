@@ -26,7 +26,7 @@ AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([tools])
 AC_CONFIG_MACRO_DIR([tools])
 
-AM_INIT_AUTOMAKE([1.9 foreign dist-bzip2 no-dist-gzip subdir-objects])
+AM_INIT_AUTOMAKE([1.9 foreign dist-xz no-dist-gzip subdir-objects tar-pax])
 AM_MAINTAINER_MODE([enable])
 
 AC_USE_SYSTEM_EXTENSIONS
@@ -184,8 +184,18 @@ else
   AC_CHECK_HEADER([pcp/pmapi.h], ,
     [AC_MSG_ERROR([Couldn't find pcp headers $disable_msg])]
   )
+  AC_CHECK_HEADERS([pcp/import.h pcp/pmda.h], ,
+    [AC_MSG_ERROR([Couldn't find pcp headers $disable_msg])],
+    [#include <pcp/pmapi.h>]
+  )
   AC_CHECK_LIB(pcp, pmNewContext, [ true ],
     [AC_MSG_ERROR([Couldn't find pcp library $disable_msg])]
+  )
+  AC_CHECK_LIB(pcp_pmda, pmdaCacheLookup, [ true ],
+    [AC_MSG_ERROR([Couldn't find pcp_pmda library $disable_msg])]
+  )
+  AC_CHECK_LIB(pcp_import, pmiStart, [ true ],
+    [AC_MSG_ERROR([Couldn't find pcp_import library $disable_msg])]
   )
   COCKPIT_PCP_LIBS="$COCKPIT_PCP_LIBS -lpcp -lm"
 fi
@@ -215,7 +225,7 @@ else
   fi
 fi
 AC_SUBST([systemdunitdir], [$systemdunitdir])
-AC_MSG_RESULT(systemdunitdir)
+AC_MSG_RESULT($systemdunitdir)
 
 # Internationalization
 
@@ -228,8 +238,13 @@ AC_DEFINE_UNQUOTED([GETTEXT_PACKAGE],["$GETTEXT_PACKAGE"],[gettext domain])
 
 # phantomjs
 
-AC_PATH_PROG([PHANTOMJS], [phantomjs])
+AC_PATH_PROG([PHANTOMJS], [phantomjs], [], [$PATH$PATH_SEPARATOR$srcdir/node_modules/.bin/])
 AM_CONDITIONAL([WITH_PHANTOMJS], [test -n "$PHANTOMJS"])
+
+# go
+
+AC_PATH_PROG([GOLANG], [go])
+AM_CONDITIONAL([WITH_GOLANG], [test -n "$GOLANG"])
 
 # usermod
 #
@@ -239,8 +254,23 @@ AM_CONDITIONAL([WITH_PHANTOMJS], [test -n "$PHANTOMJS"])
 AC_PATH_PROG([USERMOD], [usermod], [/usr/sbin/usermod], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
 AC_DEFINE_UNQUOTED([PATH_USERMOD],["$USERMOD"],[Location of usermod binary])
 
+# newusers
+AC_PATH_PROG([NEWUSERS], [newusers], [/usr/sbin/newusers], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
+AC_DEFINE_UNQUOTED([PATH_NEWUSERS],["$NEWUSERS"],[Location of newusers binary])
+AC_MSG_CHECKING(whether $NEWUSERS understands --crypt-method)
+if newusers --help | grep -q -e --crypt-method; then
+  AC_DEFINE_UNQUOTED([HAVE_NEWUSERS_CRYPT_METHOD],[1],[whether newusers understands --crypt-method])
+  AC_MSG_RESULT(yes)
+else
+  AC_MSG_RESULT(no)
+fi
+
+# chpasswd
+AC_PATH_PROG([CHPASSWD], [chpasswd], [/usr/sbin/chpasswd], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
+AC_DEFINE_UNQUOTED([PATH_CHPASSWD],["$CHPASSWD"],[Location of chpasswd binary])
+
 # pkexec
-AC_PATH_PROG([PKEXEC], [pkexec], [/usr/sbin/pkexec], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
+AC_PATH_PROG([PKEXEC], [pkexec], [/usr/bin/pkexec], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
 AC_DEFINE_UNQUOTED([PATH_PKEXEC], ["$PKEXEC"], [Location of pkexec binary])
 
 # sudo
@@ -254,6 +284,10 @@ AC_DEFINE_UNQUOTED([PATH_SSH_ADD], ["$SSH_ADD"], [Location of ssh-add binary])
 # ssh-agent
 AC_PATH_PROG([SSH_AGENT], [ssh-agent], [/usr/bin/ssh-agent], [$PATH:/usr/local/bin:/usr/bin:/bin])
 AC_DEFINE_UNQUOTED([PATH_SSH_AGENT], ["$SSH_AGENT"], [Location of ssh-agent binary])
+
+# chcon
+AC_PATH_PROG([CHCON], [chcon], [/usr/bin/chcon], [$PATH:/usr/local/bin:/usr/bin:/bin])
+AC_DEFINE_UNQUOTED([PATH_CHCON], ["$CHCON"], [Location of chcon binary])
 
 changequote(,)dnl
 if test "x$GCC" = "xyes"; then
@@ -299,7 +333,6 @@ AC_ARG_WITH(cockpit_group,
 			   [Group for running cockpit]
                           )
            )
-
 if test -z "$with_cockpit_user"; then
     COCKPIT_USER=root
     COCKPIT_GROUP=
@@ -314,6 +347,15 @@ fi
 
 AC_SUBST(COCKPIT_USER)
 AC_SUBST(COCKPIT_GROUP)
+
+AC_ARG_WITH(selinux_config_type,
+	    AS_HELP_STRING([--with-selinux-config-type=<type>],
+			   [SELinux context type for cockpit config files]
+                          )
+           )
+
+COCKPIT_SELINUX_CONFIG_TYPE=$with_selinux_config_type
+AC_SUBST(COCKPIT_SELINUX_CONFIG_TYPE)
 
 # Documentation
 
@@ -452,8 +494,6 @@ echo "
         datadir:                    ${datadir}
         sysconfdir:                 ${sysconfdir}
         localstatedir:              ${localstatedir}
-        dbusservicedir:             ${dbusservicedir}
-        dbussystemdir:              ${dbussystemdir}
         pamdir:                     ${pamdir}
 
         compiler:                   ${CC}
@@ -463,6 +503,7 @@ echo "
         cockpit-ws:                 ${enable_ws}
         cockpit-ws user:            ${COCKPIT_USER}
         cockpit-ws group:           ${COCKPIT_GROUP}
+        selinux config type:        ${COCKPIT_SELINUX_CONFIG_TYPE}
 
         Maintainer mode:            ${USE_MAINTAINER_MODE}
         Building docs:              ${enable_doc}
@@ -478,4 +519,5 @@ echo "
         ssh-agent:                  ${SSH_AGENT}
         sudo:                       ${SUDO}
         usermod:                    ${USERMOD}
+        chcon:                      ${CHCON}
 "

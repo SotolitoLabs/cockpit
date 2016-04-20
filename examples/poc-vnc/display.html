@@ -29,18 +29,22 @@ require([
         $("canvas").show();
         $("table").hide();
 
-        var channel = {
-            command: "open",
-            payload: "stream",
-            protocol: "binary",
-            port: parseInt($("#port").val(), 10),
-            binary: "raw"
-        };
+        var query = window.btoa(JSON.stringify({
+                payload: "stream",
+                protocol: "binary",
+                address: "127.0.0.1",
+                port: parseInt($("#port").val(), 10),
+                binary: "raw",
+        }));
 
-        console.log("channel", $("#port").text(), channel.port);
+        console.log("channel", $("#port").val());
+        cockpit.transport.wait(function() {
+            connect("cockpit/channel/" + cockpit.transport.csrf_token + "?" + query);
+        });
+    });
+
+    function connect(path) {
         WebUtil.init_logging('warn');
-
-        var path = "socket?" + encodeURIComponent(JSON.stringify(channel));
 
         var options = {
             target: document.getElementById('canvas'),
@@ -48,7 +52,7 @@ require([
             repeaterID: '',
             true_color: true,
             local_cursor: true,
-            shared: true,
+            shared: false,
             view_only: false,
         };
 
@@ -63,7 +67,7 @@ require([
 
         var rfb = new RFB(options);
         rfb.connect(window.location.hostname, window.location.port, "", path);
-    });
+    }
 });
 </script>
 </head>

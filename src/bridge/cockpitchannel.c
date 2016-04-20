@@ -230,13 +230,16 @@ on_transport_control (CockpitTransport *transport,
     return FALSE;
 
   klass = COCKPIT_CHANNEL_GET_CLASS (self);
-  if (g_str_equal (command, "options"))
+  if (g_str_equal (command, "close"))
     {
-      if (klass->options)
-        (klass->options) (self, options);
+      g_debug ("close channel %s", channel_id);
+      if (!cockpit_json_get_string (options, "problem", NULL, &problem))
+        problem = NULL;
+      cockpit_channel_close (self, problem);
       return TRUE;
     }
-  else if (g_str_equal (command, "done"))
+
+  if (g_str_equal (command, "done"))
     {
       if (self->priv->received_done)
         {
@@ -246,21 +249,13 @@ on_transport_control (CockpitTransport *transport,
       else
         {
           self->priv->received_done = TRUE;
-          if (self->priv->ready)
-            {
-              if (klass->done)
-                (klass->done) (self);
-            }
+          if (!self->priv->ready)
+            return TRUE;
         }
-      return TRUE;
     }
-  else if (g_str_equal (command, "close"))
-    {
-      g_debug ("close channel %s", channel_id);
-      if (!cockpit_json_get_string (options, "problem", NULL, &problem))
-        problem = NULL;
-      cockpit_channel_close (self, problem);
-    }
+
+  if (klass->control)
+    return (klass->control) (self, command, options);
 
   return FALSE;
 }
@@ -649,7 +644,7 @@ cockpit_channel_class_init (CockpitChannelClass *klass)
     {
       inet = g_inet_address_new_loopback (G_SOCKET_FAMILY_IPV4);
       address = g_inet_socket_address_new (inet, atoi (port));
-      cockpit_channel_internal_address ("test-server", address);
+      cockpit_channel_internal_address ("/test-server", address);
       g_object_unref (address);
       g_object_unref (inet);
     }
@@ -748,13 +743,14 @@ cockpit_channel_ready (CockpitChannel *self)
       g_queue_free (queue);
     }
 
+  cockpit_channel_control (self, "ready", NULL);
   self->priv->ready = TRUE;
 
   /* No more data coming? */
   if (self->priv->received_done)
     {
-      if (klass->done)
-        (klass->done) (self);
+      if (klass->control)
+        (klass->control) (self, "done", NULL);
     }
 
   g_object_unref (self);
@@ -873,25 +869,42 @@ cockpit_channel_prepare (CockpitChannel *self)
 }
 
 /**
- * cockpit_channel_done:
+ * cockpit_channel_control:
  * @self: the channel
+ * @command: the control command
+ * @options: optional control message or NULL
  *
- * Send an EOF to the other side. This should only be called once.
- * Whether an EOF should be sent or not depends on the payload type.
+ * Send a control message to the other side.
+ *
+ * If @options is not NULL, then it may be modified by this code.
+ *
+ * With @command of "done" will send an EOF to the other side. This
+ * should only be called once. Whether an EOF should be sent or not
+ * depends on the payload type.
  */
 void
-cockpit_channel_done (CockpitChannel *self)
+cockpit_channel_control (CockpitChannel *self,
+                         const gchar *command,
+                         JsonObject *options)
 {
   JsonObject *object;
   GBytes *message;
 
   g_return_if_fail (COCKPIT_IS_CHANNEL (self));
-  g_return_if_fail (self->priv->sent_done == FALSE);
+  g_return_if_fail (command != NULL);
 
-  self->priv->sent_done = TRUE;
+  if (g_str_equal (command, "done"))
+    {
+      g_return_if_fail (self->priv->sent_done == FALSE);
+      self->priv->sent_done = TRUE;
+    }
 
-  object = json_object_new ();
-  json_object_set_string_member (object, "command", "done");
+  if (options)
+    object = json_object_ref (options);
+  else
+    object = json_object_new ();
+
+  json_object_set_string_member (object, "command", command);
   json_object_set_string_member (object, "channel", self->priv->id);
 
   message = cockpit_json_write_bytes (object);
@@ -909,6 +922,39 @@ safe_unref (gpointer data)
   GObject *object = data;
   if (object != NULL)
     g_object_unref (object);
+}
+
+static gboolean
+lookup_internal (const gchar *name,
+                 GSocketConnectable **connectable)
+{
+  const gchar *env;
+  gboolean ret = FALSE;
+  GSocketAddress *address;
+
+  g_assert (name != NULL);
+  g_assert (connectable != NULL);
+
+  if (internal_addresses)
+    {
+      ret = g_hash_table_lookup_extended (internal_addresses, name, NULL,
+                                          (gpointer *)connectable);
+    }
+
+  if (!ret && g_str_equal (name, "ssh-agent"))
+    {
+      *connectable = NULL;
+      env = g_getenv ("SSH_AUTH_SOCK");
+      if (env != NULL && env[0] != '\0')
+        {
+          address = g_unix_socket_address_new (env);
+          *connectable = G_SOCKET_CONNECTABLE (address);
+          cockpit_channel_internal_address ("ssh-agent", address);
+        }
+      ret = TRUE;
+    }
+
+  return ret;
 }
 
 void
@@ -936,10 +982,10 @@ cockpit_channel_remove_internal_address (const gchar *name)
   return ret;
 }
 
-GSocketConnectable *
-cockpit_channel_parse_connectable (CockpitChannel *self,
-                                   gchar **possible_name,
-                                   gboolean *local_address)
+static GSocketConnectable *
+parse_address (CockpitChannel *self,
+               gchar **possible_name,
+               gboolean *local_address)
 {
   const gchar *problem = "protocol-error";
   GSocketConnectable *connectable = NULL;
@@ -951,6 +997,7 @@ cockpit_channel_parse_connectable (CockpitChannel *self,
   GError *error = NULL;
   const gchar *host;
   gint64 port;
+  gchar *name = NULL;
 
   options = self->priv->open_options;
   if (!cockpit_json_get_string (options, "unix", NULL, &unix_path))
@@ -1016,27 +1063,18 @@ cockpit_channel_parse_connectable (CockpitChannel *self,
         }
       else
         {
-          if (possible_name)
-            *possible_name = g_strdup_printf ("%s:%d", host, (gint)port);
+          name = g_strdup_printf ("%s:%d", host, (gint)port);
         }
     }
   else if (unix_path)
     {
-      if (possible_name)
-        *possible_name = g_strdup (unix_path);
+      name = g_strdup (unix_path);
       connectable = G_SOCKET_CONNECTABLE (g_unix_socket_address_new (unix_path));
       local = FALSE;
     }
   else if (internal)
     {
-      gboolean reg = FALSE;
-      if (internal_addresses)
-        {
-          reg = g_hash_table_lookup_extended(internal_addresses,
-                                             internal,
-                                             NULL,
-                                             (gpointer *)&connectable);
-        }
+      gboolean reg = lookup_internal (internal, &connectable);
 
       if (!connectable)
         {
@@ -1047,8 +1085,7 @@ cockpit_channel_parse_connectable (CockpitChannel *self,
           goto out;
         }
 
-      if (possible_name)
-        *possible_name = g_strdup (internal);
+      name = g_strdup (internal);
       connectable = g_object_ref (connectable);
       local = FALSE;
     }
@@ -1071,9 +1108,13 @@ out:
     }
   else
     {
+      if (possible_name)
+          *possible_name = g_strdup (name);
       if (local_address)
         *local_address = local;
     }
+
+  g_free (name);
   return connectable;
 }
 
@@ -1087,7 +1128,7 @@ cockpit_channel_parse_address (CockpitChannel *self,
   GError *error = NULL;
   gchar *name = NULL;
 
-  connectable = cockpit_channel_parse_connectable (self, &name, NULL);
+  connectable = parse_address (self, &name, NULL);
   if (!connectable)
     return NULL;
 
@@ -1305,14 +1346,13 @@ parse_cert_option_as_database (JsonObject *options,
   return problem;
 }
 
-CockpitStreamOptions *
-cockpit_channel_parse_stream (CockpitChannel *self,
-                              gboolean local_address)
+static gboolean
+parse_stream_options (CockpitChannel *self,
+                      CockpitConnectable *connectable)
 {
   const gchar *problem = "protocol-error";
   GTlsCertificate *cert = NULL;
   GTlsDatabase *database = NULL;
-  CockpitStreamOptions *ret;
   gboolean use_tls = FALSE;
   GError *error = NULL;
   GString *pem = NULL;
@@ -1320,7 +1360,7 @@ cockpit_channel_parse_stream (CockpitChannel *self,
   JsonNode *node;
 
   /* No validation for local servers by default */
-  gboolean validate = !local_address;
+  gboolean validate = !connectable->local;
 
   node = json_object_get_member (self->priv->open_options, "tls");
   if (node && !JSON_NODE_HOLDS_OBJECT (node))
@@ -1381,30 +1421,27 @@ out:
   if (problem)
     {
       cockpit_channel_close (self, problem);
-      ret = NULL;
     }
   else
     {
-      ret = g_new0 (CockpitStreamOptions, 1);
-      ret->refs = 1;
-      ret->tls_client = use_tls;
-      ret->tls_cert = cert;
+      connectable->tls = use_tls;
+      connectable->tls_cert = cert;
       cert = NULL;
 
       if (database)
         {
-          ret->tls_database = database;
-          ret->tls_client_flags = G_TLS_CERTIFICATE_VALIDATE_ALL;
+          connectable->tls_database = database;
+          connectable->tls_flags = G_TLS_CERTIFICATE_VALIDATE_ALL;
           if (!validate)
-              ret->tls_client_flags &= ~(G_TLS_CERTIFICATE_INSECURE | G_TLS_CERTIFICATE_BAD_IDENTITY);
+              connectable->tls_flags &= ~(G_TLS_CERTIFICATE_INSECURE | G_TLS_CERTIFICATE_BAD_IDENTITY);
           database = NULL;
         }
       else
         {
           if (validate)
-            ret->tls_client_flags = G_TLS_CERTIFICATE_VALIDATE_ALL;
+            connectable->tls_flags = G_TLS_CERTIFICATE_VALIDATE_ALL;
           else
-            ret->tls_client_flags = G_TLS_CERTIFICATE_GENERIC_ERROR;
+            connectable->tls_flags = G_TLS_CERTIFICATE_GENERIC_ERROR;
         }
     }
 
@@ -1415,5 +1452,32 @@ out:
   if (database)
     g_object_unref (database);
 
-  return ret;
+  return problem == NULL;
+}
+
+CockpitConnectable *
+cockpit_channel_parse_stream (CockpitChannel *self)
+{
+  CockpitConnectable *connectable;
+  GSocketConnectable *address;
+  gboolean local;
+  gchar *name;
+
+  address = parse_address (self, &name, &local);
+  if (!address)
+    return NULL;
+
+  connectable = g_new0 (CockpitConnectable, 1);
+  connectable->address = address;
+  connectable->name = name;
+  connectable->refs = 1;
+  connectable->local = local;
+
+  if (!parse_stream_options (self, connectable))
+    {
+      cockpit_connectable_unref (connectable);
+      connectable = NULL;
+    }
+
+  return connectable;
 }

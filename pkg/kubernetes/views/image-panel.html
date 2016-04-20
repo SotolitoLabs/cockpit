@@ -1,0 +1,33 @@
+<div>
+    <div class="listing-head" ng-click="listing.collapse(id, $event)">
+        <div class="listing-actions">
+            <button class="btn btn-danger btn-delete pficon pficon-delete"
+                ng-click="deleteTag(stream, tag)"></button>
+        </div>
+        <h3>
+            <i class="pficon pficon-image"></i>
+            <span ng-if="labels.name">{{ labels.name }}</span>
+            <span ng-if="!labels.name">{{ names[0] }}</span>
+        </h3>
+        <ul class="nav nav-tabs nav-tabs-pf">
+            <li ng-class="{active: tab('main')}">
+                <a ng-click="tab('main', $event)" translatable="yes">Image</a>
+            </li>
+            <li ng-class="{active: tab('config')}">
+                <a ng-click="tab('config', $event)" translatable="yes">Container</a>
+            </li>
+            <li ng-class="{active: tab('meta')}">
+                <a ng-click="tab('meta', $event)" translatable="yes">Metadata</a>
+            </li>
+        </ul>
+    </div>
+
+    <div image-body class="listing-body" ng-show="tab('main')">
+    </div>
+
+    <div image-config class="listing-body" ng-show="tab('config')">
+    </div>
+
+    <div image-meta class="listing-body" ng-if="tab('meta')">
+    </div>
+</div>

@@ -37,8 +37,9 @@ channel = cockpit.channel(options)
       </varlistentry>
       <varlistentry>
         <term><code>"host"</code></term>
-        <listitem><para>The host to open the channel to. If no host is specified
-          then the correct one will be automatically selected based on the page
+        <listitem><para>The host to open the channel to. If an alternate user or port is
+          required it can be specified as <code>"user@myhost:port"</code>. If no host
+          is specified then the correct one will be automatically selected based on the page
           calling this function.</para></listitem>
       </varlistentry>
       <varlistentry>
@@ -182,6 +183,15 @@ cockpit.transport.host
     <para>The host that this transport is going to talk to by default. This is
       read-only, you should not assign a value. If the value is null that means that the
       transport has not been setup yet.</para>
+  </refsection>
+
+  <refsection id="cockpit-transport-csrf-token">
+    <title>cockpit.transport.csrf_token</title>
+<programlisting>
+cockpit.transport.csrf_token
+</programlisting>
+    <para>A cross site request forgery token for use with external channels. This becomes
+      valid once the connection is properly established.</para>
   </refsection>
 
   <refsection id="cockpit-transport-options">

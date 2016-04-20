@@ -22,10 +22,8 @@ define([
     "base1/cockpit",
     "base1/mustache",
     "docker/util",
-    "base1/bootstrap-select",
 ], function($, cockpit, Mustache, util) {
     var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
 
     /* RUN IMAGE DIALOG */
 
@@ -75,6 +73,21 @@ define([
                     items.hide();
                 }
                 self.update('changeFocus', 'links');
+            });
+
+            var restart_policy_dropdown = $("#restart-policy-dropdown");
+            var restart_policy_dropdown_selected = $("#restart-policy-select > button span.pull-left");
+
+            restart_policy_dropdown.find("a").on('click', function () {
+                restart_policy_dropdown_selected.text($(this).text());
+
+                var name = $(this).data('value');
+                restart_policy_dropdown_selected.data('name', name);
+                if (name === 'on-failure') {
+                    $("#restart-policy-retries-container").removeClass('hidden');
+                } else {
+                    $("#restart-policy-retries-container").addClass('hidden');
+                }
             });
 
             this.validator = this.configuration_validator();
@@ -169,6 +182,12 @@ define([
             } else {
                 $('#expose-ports').prop('checked', false);
             }
+
+            var restart_policy_select_button = $('#restart-policy-select > button span.pull-left');
+            restart_policy_select_button.text(_("No"));
+            restart_policy_select_button.data('name', 'no');
+            $('#restart-policy-retries').val('0');
+            $('#restart-policy-retries-container').addClass('hidden');
         },
 
         configuration_validator: function() {
@@ -269,7 +288,7 @@ define([
                     if ((input_ports[0].val() !== "") || (input_ports[1].val() !== "")) {
                         exposed_ports.container.push(input_ports[0]);
                         exposed_ports.host.push(input_ports[1]);
-                        exposed_ports.protocol.push(element.find('select').val().toLowerCase());
+                        exposed_ports.protocol.push(element.find('button span').text().toLowerCase());
                     } else {
                         /* if they are empty, make sure they are both cleared of errors */
                         clear_control_error(input_ports[0], 0);
@@ -363,11 +382,12 @@ define([
                 /* gather all aliases */
                 $('#select-linked-containers').children('form').each(function() {
                     var element = $(this);
-                    var container = element.find('select');
+                    var container = element.find('button span');
+                    var containername = container[0].nodeValue;
                     var alias = element.find('input[name="alias"]');
 
-                    if ((alias.val() !== "") || (container.val() !== "")) {
-                        if (container.val() === "")
+                    if ((alias.val() !== "") || (containername !== "")) {
+                        if (containername === "")
                             show_link_message(container, 'has-error', _("No container specified"), 0);
                         else
                             clear_control_error(container, 0);
@@ -488,18 +508,17 @@ define([
                 row_host_input.on('input', $.proxy(self, "update", "input", "ports"));
                 row_host_input.on('focusout change', $.proxy(self, "update", "changeFocus", "ports"));
 
-                var protocol_select = row.find("div select.selectpicker");
+                var protocol_select = row.find("div .port-expose-protocol");
                 if (port_internal_editable) {
-                    protocol_select.on('change', $.proxy(self, "update", "changeOption", "ports"));
+                    protocol_select.find("a").on('click', function() {
+                        protocol_select.find("button span").text($(this).text());
+                        self.update("changeOption", "ports");
+                    });
                 } else {
                     protocol_select.attr('disabled', true);
                 }
 
-                protocol_select.selectpicker('refresh');
-                if (port_protocol.toUpperCase() === _("UDP"))
-                    protocol_select.selectpicker('val', _("UDP"));
-                else
-                    protocol_select.selectpicker('val', _("TCP"));
+                protocol_select.find("button span").text(port_protocol.toUpperCase());
 
                 $("#select-exposed-ports").append(row);
             }
@@ -539,9 +558,11 @@ define([
                 row_input.on('keydown', $.proxy(self, "update", "keydown", "links"));
                 row_input.on('input', $.proxy(self, "update", "input", "links"));
                 row_input.on('focusout change', $.proxy(self, "update", "changeFocus", "links"));
-                var container_select = row.find("div select.selectpicker");
-                container_select.on('change', $.proxy(self, "update", "changeOption", "links"));
-                container_select.selectpicker('refresh');
+                var container_select = row.find("div .link-container");
+                container_select.find('a').on('click', function() {
+                    container_select.find("button span").text($(this).text());
+                    self.update("changeOption", "links");
+                });
                 $("#select-linked-containers").append(row);
             }
 
@@ -568,7 +589,7 @@ define([
                     }).get();
                     map_from = input_ports[0];
                     map_to = input_ports[1];
-                    map_protocol = $(this).find('select').val().toLowerCase();
+                    map_protocol = $(this).find('button span').text().toLowerCase();
 
                     if (map_from === '' || map_to === '')
                         return;
@@ -581,7 +602,7 @@ define([
             if ($("#link-containers").prop('checked')) {
                 $("#select-linked-containers form").each(function() {
                     var element = $(this);
-                    var container = element.find('select[name="container"]').val();
+                    var container = element.find('button span').text();
                     var alias = element.find('input[name="alias"]').val();
                     if (!container || !alias) {
                         return;
@@ -593,6 +614,7 @@ define([
             $("#containers_run_image_dialog").modal('hide');
 
             var tty = $("#containers-run-image-with-terminal").prop('checked');
+
             var options = {
                 "Cmd": util.unquote_cmdline(cmd),
                 "Image": PageRunImage.image_info.Id,
@@ -602,7 +624,12 @@ define([
                 "Tty": tty,
                 "ExposedPorts": exposed_ports,
                 "HostConfig": {
-                    "Links": links
+                    "PortBindings": port_bindings,
+                    "Links": links,
+                    "RestartPolicy": {
+                        "Name": $("#restart-policy-select > button span.pull-left").data('name'),
+                        "MaximumRetryCount": parseInt($("#restart-policy-retries").val(), 10) || 0
+                    }
                 }
             };
 
@@ -621,7 +648,7 @@ define([
                     util.show_unexpected_error(ex);
                 }).
                 done(function(result) {
-                    PageRunImage.client.start(result.Id, { "PortBindings": port_bindings }).
+                    PageRunImage.client.start(result.Id).
                         fail(function(ex) {
                             util.show_unexpected_error(ex);
                         });

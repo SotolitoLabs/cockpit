@@ -17,7 +17,7 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
+require([
     "jquery",
     "base1/cockpit",
     "base1/mustache",
@@ -31,7 +31,7 @@ define([
 var _ = cockpit.gettext;
 var C_ = cockpit.gettext;
 
-var permission = cockpit.permission({ group: "wheel" });
+var permission = cockpit.permission({ admin: true });
 $(permission).on("changed", update_accounts_privileged);
 
 function update_accounts_privileged() {
@@ -135,8 +135,8 @@ function passwd_change(user, new_pass) {
     var dfd = $.Deferred();
 
     var buffer = "";
-    cockpit.spawn(["/usr/bin/passwd", "--stdin", user ], {superuser: "require", err: "out" })
-        .input(new_pass)
+    cockpit.spawn([ "chpasswd" ], {superuser: "require", err: "out" })
+        .input(user + ":" + new_pass)
         .done(function() {
             dfd.resolve();
         })
@@ -187,9 +187,9 @@ function chain(functions) {
     return dfd.promise();
 }
 
-function parse_passwd_content(content, tag, error) {
-    if (content === null) {
-        console.warn("Couldn't read /etc/passwd", error);
+function parse_passwd_content(content) {
+    if (!content) {
+        console.warn("Couldn't read /etc/passwd");
         return [ ];
     }
 
@@ -201,22 +201,24 @@ function parse_passwd_content(content, tag, error) {
         if (! lines[i])
             continue;
         column = lines[i].split(':');
-        ret[i] = [];
-        ret[i]["name"] = column[0];
-        ret[i]["password"] = column[1];
-        ret[i]["uid"] = parseInt(column[2], 10);
-        ret[i]["gid"] = parseInt(column[3], 10);
-        ret[i]["gecos"] = column[4];
-        ret[i]["home"] = column[5];
-        ret[i]["shell"] = column[6];
+        ret.push({
+            name: column[0],
+            password: column[1],
+            uid: parseInt(column[2], 10),
+            gid: parseInt(column[3], 10),
+            gecos: column[4].replace(/,*$/, ''),
+            home: column[5],
+            shell: column[6],
+        });
     }
 
     return ret;
 }
 
-function parse_group_content(content, tag, error) {
-    if (content === null) {
-        console.warn("Couldn't read /etc/group", error);
+function parse_group_content(content) {
+    content = (content || "").trim();
+    if (!content) {
+        console.warn("Couldn't read /etc/group");
         return [ ];
     }
 
@@ -228,11 +230,12 @@ function parse_group_content(content, tag, error) {
         if (! lines[i])
             continue;
         column = lines[i].split(':');
-        ret[i] = [];
-        ret[i]["name"] = column[0];
-        ret[i]["password"] = column[1];
-        ret[i]["gid"] = parseInt(column[2], 10);
-        ret[i]["userlist"] = column[3].split(',');
+        ret.push({
+            name: column[0],
+            password: column[1],
+            gid: parseInt(column[2], 10),
+            userlist: column[3].split(','),
+        });
     }
 
     return ret;
@@ -329,7 +332,8 @@ PageAccounts.prototype = {
         list.empty();
         for (var i = 0; i < this.accounts.length; i++) {
             if ((this.accounts[i]["uid"] < 1000 && this.accounts[i]["uid"] !== 0) ||
-                  this.accounts[i]["shell"] == "/sbin/nologin")
+                  this.accounts[i]["shell"].match(/^(\/usr)?\/sbin\/nologin/) ||
+                  this.accounts[i]["shell"] === '/bin/false')
                 continue;
             var img =
                 $('<div/>', { 'class': "cockpit-account-pic pficon pficon-user" });
@@ -370,7 +374,7 @@ PageAccountsCreate.prototype = {
         var self = this;
         $('#accounts-create-cancel').on('click', $.proxy(this, "cancel"));
         $('#accounts-create-create').on('click', $.proxy(this, "create"));
-        $('#accounts-create-dialog .check-passwords').on('keydown', $.proxy(this, "validate"));
+        $('#accounts-create-dialog .check-passwords').on('keydown change', $.proxy(this, "validate"));
         $('#accounts-create-real-name').on('input', $.proxy(this, "suggest_username"));
         $('#accounts-create-user-name').on('input', function() { self.username_dirty = true; });
     },
@@ -438,7 +442,7 @@ PageAccountsCreate.prototype = {
                 ex.target = "#accounts-create-user-name";
             });
 
-        return $.when(dfd, promise_password, promise_username);
+        return cockpit.all(dfd, promise_password, promise_username);
     },
 
     cancel: function() {
@@ -498,8 +502,9 @@ PageAccountsCreate.prototype = {
 
         for (var i = 0; i < username.length; i++) {
             if (! this.is_valid_char_username(username[i])) {
-                dfd.reject(new Error(_("The user name can only consist of letters" +
-                            "from a-z, digits, dots, dashes and underscores.")));
+                dfd.reject(new Error(
+                  _("The user name can only consist of letters from a-z, digits, dots, dashes and underscores.")
+                ));
                 return dfd.promise();
             }
         }
@@ -608,7 +613,7 @@ PageAccount.prototype = {
         $('#account-set-password').on('click', $.proxy (this, "set_password"));
         $('#account-delete').on('click', $.proxy (this, "delete_account"));
         $('#account-logout').on('click', $.proxy (this, "logout_account"));
-        $('#account-locked').on('change', $.proxy (this, "change_locked"));
+        $('#account-locked').on('change', $.proxy (this, "change_locked", true, null));
         $('#add-authorized-key').on('click', $.proxy (this, "add_key"));
         $('#add-authorized-key-dialog').on('hidden.bs.modal', function () {
             $("#authorized-keys-text").val("");
@@ -676,21 +681,25 @@ PageAccount.prototype = {
     get_roles: function() {
         var self = this;
 
+        var role_groups = {
+            "wheel":   _("Server Administrator"),
+            "sudo":    _("Server Administrator"),
+            "docker":  _("Container Administrator")
+        };
+
         function parse_groups(content) {
-            var i, j;
-            self.groups = parse_group_content(content);
+            var groups = parse_group_content(content);
             while (self.roles.length > 0)
                 self.roles.pop();
-            for (i = 0, j = 0; i < self.groups.length; i++) {
-                if (self.groups[i]["name"] == "wheel" || self.groups[i]["name"] == "docker") {
-                   self.roles[j] = { };
-                   self.roles[j]["name"] = self.groups[i]["name"];
-                   self.roles[j]["desc"] = self.groups[i]["name"] == "wheel" ?
-                                           _("Server Administrator") :
-                                           _("Container Administrator");
-                   self.roles[j]["id"] = self.groups[i]["gid"];
-                   self.roles[j]["member"] = is_user_in_group(self.account_id, self.groups[i]);
-                   j++;
+            for (var i = 0; i < groups.length; i++) {
+                var name = groups[i]["name"];
+                if (role_groups[name]) {
+                    self.roles.push({
+                        name: name,
+                        desc: role_groups[name],
+                        id: groups[i]["gid"],
+                        member: is_user_in_group(self.account_id, groups[i]),
+                    });
                 }
             }
             $(self).triggerHandler("roles");
@@ -732,18 +741,30 @@ PageAccount.prototype = {
            });
     },
 
-    get_locked: function() {
+    get_locked: function(update_display) {
+        update_display = typeof update_display !== 'undefined' ? update_display : true;
+        var dfd = $.Deferred();
         var self = this;
 
         function parse_locked(content) {
-            self.locked = content.indexOf("Password locked.") > -1;
-            self.update();
+            var status = content.split(" ")[1];
+            // libuser uses "LK", shadow-utils use "L".
+            return status && (status == "LK" || status == "L");
         }
 
         cockpit.spawn(["/usr/bin/passwd", "-S", self.account_id],
                       { "environ": [ "LC_ALL=C" ], "superuser": "require" })
-           .done(parse_locked)
-           .fail(log_unexpected_error);
+            .done(function(content) {
+                    self.locked = parse_locked(content);
+                    if (update_display)
+                        self.update();
+                    dfd.resolve(self.locked);
+                })
+            .fail(function(error) {
+                    dfd.reject(error);
+                });
+
+        return dfd.promise();
     },
 
     get_logged: function() {
@@ -928,11 +949,31 @@ PageAccount.prototype = {
            .fail(show_unexpected_error);
     },
 
-    change_locked: function() {
+    change_locked: function(verify_status, desired_lock_state) {
+        desired_lock_state = desired_lock_state !== null ?
+            desired_lock_state : $('#account-locked').prop('checked');
+        var self = this;
         cockpit.spawn(["/usr/sbin/usermod",
                        this.account["name"],
-                       $('#account-locked').prop('checked') ? "--lock" : "--unlock"], { "superuser": "require"})
-           .done($.proxy (this, "get_locked"))
+                       desired_lock_state ? "--lock" : "--unlock"], { "superuser": "require"})
+            .done(function() {
+                self.get_locked(false)
+                    .done(function(locked) {
+                        /* if we care about what the lock state should be and it doesn't match, try to change again
+                           this is a workaround for different ways of handling a locked account
+                           https://github.com/cockpit-project/cockpit/issues/1216
+                           https://bugzilla.redhat.com/show_bug.cgi?id=853153
+                           This seems to be fixed in fedora 23 (usermod catches the different locking behavior)
+                        */
+                        if (verify_status && desired_lock_state !== locked) {
+                            console.log("Account locked state doesn't match desired value, trying again.");
+                            // only retry once to avoid uncontrolled recursion
+                            self.change_locked(false, desired_lock_state);
+                        } else {
+                            self.update();
+                        }
+                    });
+                })
            .fail(show_unexpected_error);
     },
 
@@ -1021,7 +1062,7 @@ PageAccountSetPassword.prototype = {
 
     setup: function() {
         $('#account-set-password-apply').on('click', $.proxy(this, "apply"));
-        $('#account-set-password-dialog .check-passwords').on('keydown', $.proxy(this, "validate"));
+        $('#account-set-password-dialog .check-passwords').on('keydown change', $.proxy(this, "validate"));
     },
 
     enter: function() {
@@ -1067,7 +1108,7 @@ PageAccountSetPassword.prototype = {
                 }
             });
 
-        return $.when(dfd, promise);
+        return cockpit.all(dfd, promise);
     },
 
     apply: function() {
@@ -1184,6 +1225,6 @@ function init() {
     navigate();
 }
 
-return init;
+$(init);
 
 });

@@ -20,6 +20,8 @@
 /* TODO: This file has not yet been updated to match the new Patternfly */
 @import url("patternfly.css");
 @import url("patternfly-additions.css");
+@import url("angular-csp.css");
+@import url("term.css");
 
 a {
     cursor: pointer;
@@ -67,9 +69,9 @@ a {
     background: #F5F5F5;
 }
 
-/* Container is glued to the navigation and sides */
+/* HACK: Workaround for https://github.com/patternfly/patternfly/issues/174*/
 
-.container-fluid {
+.page {
     margin-top: 20px;
 }
 
@@ -89,6 +91,7 @@ a {
     padding-left: 0.75em;
     padding-top: 0.25em;
     vertical-align: top;
+    line-height: 26px;
 }
 
 .cockpit-info-table td:first-child {
@@ -120,12 +123,11 @@ a {
 .cockpit-form-table td {
     padding-left: 0.75em;
     padding-top: 0.25em;
-    vertical-align: middle;
+    line-height: 26px;
 }
 
 .cockpit-form-table td.top {
     vertical-align: top;
-    padding-top: 6px;
 }
 
 .cockpit-form-table td:first-child {
@@ -156,16 +158,13 @@ a {
     padding: 20px 0 10px 0;
 }
 
+.cockpit-form-table label input[type='radio'],
 .cockpit-form-table label input[type='checkbox'] {
     margin-right: 4px;
 }
 
 .cockpit-form-table label {
     margin-bottom: 0px;
-}
-
-.cockpit-form-table td.top label {
-    margin-top: 4px;
 }
 
 .cockpit-form-table label span {
@@ -248,11 +247,13 @@ a {
  * Make the table row hover color match the list-group-item.
  */
 .table-hover > tbody > tr > td,
-.table-hover > tbody > tr > th {
+.table-hover > tbody > tr > th,
+.dialog-list .list-group-item {
     cursor: pointer;
 }
 .table-hover > tbody > tr:hover > td,
-.table-hover > tbody > tr:hover > th {
+.table-hover > tbody > tr:hover > th,
+.dialog-list .list-group-item:hover:not(.active) {
     background-color: #d4edfa;
 }
 
@@ -308,6 +309,15 @@ a {
     min-width: 26px;
 }
 
+.list-group h4 {
+    margin-top: 0px;
+    margin-bottom: 5px;
+}
+
+.list-group p {
+    margin: 0px;
+}
+
 /* Well and Blankslate */
 
 .curtains {
@@ -328,11 +338,6 @@ a {
     padding-top: 40px;
 }
 
-/* HACK: https://github.com/patternfly/patternfly/issues/75 */
-.blank-slate-pf .fa {
-    color: #999999;
-}
-
 .blank-slate-pf .spinner-lg {
     height: 58px;
     width: 58px;
@@ -347,15 +352,21 @@ a {
 
 /* Alert fixups */
 
-.alert {
+.modal-content .alert {
     text-align: left;
+    padding-top: 5px;
+    padding-bottom: 5px;
 }
 
-.alert .fa {
+.modal-content .alert .fa {
     position: absolute;
-    left: 7px;
-    top: 7px;
+    left: 10px;
+    top: 6px;
     font-size: 20px;
+}
+
+.modal-content .alert .pficon {
+    top: 5px;
 }
 
 .alert.alert-danger .fa {
@@ -384,7 +395,7 @@ a {
 }
 
 .console {
-    font-family: monospace, courier new;
+    font-family: Menlo, Monaco, Consolas, monospace;
     margin-top: 0;
     margin-bottom: 0;
     font-size: 10px;
@@ -449,16 +460,21 @@ a {
   display: none;
 }
 
-/* HACK: https://github.com/patternfly/patternfly/issues/65 */
-.bootstrap-select.btn-group {
-  margin-bottom: 0px !important;
-}
-
 @media (min-width: 500px) {
   .cockpit-modal-md {
     width: 400px;
   }
 }
+
+/* Scrollable modal body, needs max-height set elsewhere */
+.modal-scrollable {
+    overflow-y: auto;
+    margin-right: 7px;
+    padding-right: 8px;
+    margin-top: 15px;
+    padding-top: 0px;
+}
+
 /* Password strength meter */
 
 .password-strength-meter {
@@ -497,6 +513,8 @@ a {
 .navbar-pf .navbar-brand {
     text-transform: uppercase;
     margin: 0 8px;
+    height: 25px;
+    padding: 2px 0;
 }
 
 .navbar-pf .navbar-brand:hover {
@@ -542,13 +560,6 @@ a {
     color: white !important;
 }
 
-/* HACK - https://github.com/patternfly/patternfly/issues/122
- * Make button in alerts fit.
- */
-.alert .btn-default {
-    margin-top: -3px;
-}
-
 /* Listing pattern */
 
 table.listing {
@@ -560,10 +571,20 @@ table.listing > thead h3 {
     font-size: 22px;
     padding: 10px 0px 10px;
     font-weight: 300;
+    margin-top: 0px;
 }
 
-table.listing > thead:first-child h3 {
-    margin-top: 0px;
+table.listing > thead td {
+    padding-top: 20px;
+}
+
+table.listing > thead:first-child td {
+    padding-top: 0px;
+}
+
+table.listing > thead td > a {
+    line-height: 30px;
+    padding: 10px 0px 10px;
 }
 
 table.listing thead th {
@@ -667,11 +688,7 @@ div.listing-maybe div.listing-body {
 
 /* When panel is a row of a table: head is white */
 tr.listing-item + tr.listing-panel div.listing-head {
-    background-color: white;
     border-top: 3px solid #0099d3;
-}
-tr.listing-item + tr.listing-panel div.listing-body {
-    background-color: #f6f6f6;
 }
 
 tbody.active .listing-head {
@@ -730,6 +747,14 @@ tbody.active .listing-head {
     padding: 20px 25px;
     font-size: 13px;
     border: 1px solid #ccc;
+    background-color: white;
+}
+
+.listing-inline .listing-body {
+    border: none;
+    padding-top: 0px;
+    padding-left: 20px;
+    padding-bottom: 0px;
 }
 
 .listing-actions {
@@ -742,6 +767,16 @@ tbody.active .listing-head {
     clear: right;
 }
 
+.listing-error {
+    border-top: 1px solid #ccc;
+    border-left: 1px solid #ccc;
+    border-right: 1px solid #ccc;
+}
+
+.listing-error.alert {
+    margin-bottom: 0;
+}
+
 .listing-body tt {
     font-size: 12px
 }
@@ -750,27 +785,36 @@ tbody.active .listing-head {
     margin: 0;
 }
 
-.listing-body dl + dl {
-    margin-top: 26px;
-}
-
+.listing-body dl dd dl.inline-dl dt,
 .listing-body dt {
     clear: left;
     float: left;
-    width: 35%;
-    min-width: 100px;
-    max-width: 250px;
+    width: 100px;
     min-height: 26px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-align: right;
-    padding-right: 10px;
     color: #888;
     font-weight: normal;
 }
 
-.listing-body dl.full dt {
+.listing-body dt {
+    text-align: right;
+}
+
+.listing-body dl dd dl dt {
+    text-align: left;
+}
+
+.listing-body dd {
+    margin-left: 110px;
+    min-height: 26px;
+    max-width: 1000px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.listing-body dl.full-width dt {
     text-align: left;
     min-width: none;
     max-width: none;
@@ -778,11 +822,16 @@ tbody.active .listing-head {
     width: auto;
 }
 
-.listing-body dd {
-    min-height: 26px;
-    max-width: 1000px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+.listing-body dl.full-width dd {
+    margin-left: 0px;
+}
+
+.listing-body dl.wide-terms dt {
+    width: 180px;
+}
+
+.listing-body dl.wide-terms dd {
+    margin-left: 190px;
 }
 
 table.listing tbody.open {
@@ -815,6 +864,7 @@ tbody.open tr.listing-head {
     border-style: solid;
     border-width: 1px 1px 0px 1px;
     border-top: 3px solid #0099d3;
+    background-color: #f6f6f6;
 }
 
 tr.listing-head + tr.listing-head {
@@ -828,21 +878,6 @@ tr.listing-head + tr.listing-head td {
 tr.listing-body td {
     padding: 20px 25px;
     font-size: 13px;
-    background-color: #f6f6f6;
-}
-
-.listing-body .alert {
-    border: none;
-    margin: 0px 0px 10px 0px;
-    padding: 0px;
-    background-color: transparent;
-}
-
-.listing-body .alert .fa {
-    position: relative;
-    left: 0px;
-    top: 3px;
-    padding-right: 5px;
 }
 
 .listing-empty {
@@ -853,7 +888,8 @@ tr.listing-body td {
 }
 
 /* Used at the end of a group of tbody to show an 'empty' message */
-thead.listing-empty td {
+thead.listing-empty td,
+table.listing > thead.listing-empty td {
     padding: 10px;
 }
 
@@ -920,7 +956,7 @@ div.timeline div.listing-panel {
 
 div.timeline.timeline-end {
     min-height: 30px;
-    padding-left: 40px;
+    padding-left: 36px;
     background-repeat: repeat-y;
     background-position: 0% 100%;
     background-size: 6px 5px;
@@ -949,4 +985,33 @@ div.timeline.timeline-end .timeline-md {
 .nav-tabs-pf > li.active a:before {
     height: 3px;
     left: 0px;
+}
+
+/* Small list inside a dialog */
+.dialog-list {
+    max-height: 230px;
+    overflow-x: auto;
+    border: 1px solid #CCC;
+    margin-bottom: 0px;
+}
+
+/* Input combo replacement */
+
+.input-combo .input-group-btn {
+    position: static;
+}
+
+.input-combo .dropdown-menu {
+    left: 0;
+    right: 0;
+}
+
+/* HACK: https://github.com/patternfly/patternfly/issues/255 */
+input[type=number] {
+  padding: 0 0 0 5px;
+}
+
+/* Make a dialog visible */
+.dialog-visible {
+    display: block;
 }

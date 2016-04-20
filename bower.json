@@ -1,0 +1,30 @@
+{
+    "name": "Cockpit build-time Deps",
+    "private": true,
+    "dependencies": {
+        "angular": "#1.3.14",
+        "angular-animate": "#1.3.14",
+        "angular-bootstrap": "#0.13.0",
+        "angular-route": "#1.3.14",
+        "angular-patternfly": "2.2.0",
+        "bootstrap": "3.3.6",
+        "bootstrap-datepicker": "1.4.0",
+        "bootstrap-combobox": "1.1.6",
+        "d3": "3.5.5",
+        "jquery": "2.1.4",
+        "jquery-flot": "#0.8.3",
+        "less-cockpit": ">=2.5.0",
+        "kubernetes-object-describer": "1.0.0",
+        "kubernetes-container-terminal": "0.0.9",
+        "kubernetes-topology-graph": "0.0.21",
+        "momentjs": "~2.10.6",
+        "mustache": "#0.8.1",
+        "patternfly": "#3.2.0",
+        "qunit": "#1.14.0",
+        "qunit-tap": "#1.5.0",
+        "react-lite-cockpit": "#0.15.6",
+        "requirejs": "#2.1.16",
+        "term.js-cockpit": "#0.0.7",
+        "jquery-amend": "cockpit-project/jquery-amend"
+    }
+}

@@ -39,6 +39,27 @@ test_password (void)
 }
 
 static void
+test_gssapi (void)
+{
+  CockpitCreds *creds;
+
+  creds = cockpit_creds_new ("user", "test", COCKPIT_CRED_PASSWORD, "password", NULL);
+  g_assert (creds != NULL);
+
+  g_assert_false (cockpit_creds_has_gssapi (creds));
+
+  cockpit_creds_unref (creds);
+
+  creds = cockpit_creds_new ("user", "test", COCKPIT_CRED_GSSAPI, "bad-but-present", NULL);
+  g_assert (creds != NULL);
+
+  g_assert_true (cockpit_creds_has_gssapi (creds));
+
+  cockpit_creds_unref (creds);
+
+}
+
+static void
 test_poison (void)
 {
   CockpitCreds *creds;
@@ -143,6 +164,54 @@ test_equal (void)
   cockpit_creds_unref (app);
 }
 
+static void
+test_login_data (void)
+{
+  JsonObject *object;
+  const gchar *invalid = "invalid";
+  const gchar *no_data = "{ \"no-data\" : \"none\" }";
+  const gchar *invalid_login = "{ \"login-data\" : \"invalid\" }";
+  const gchar *valid = "{ \"login-data\" : { \"login\": \"data\" } }";
+  CockpitCreds *creds;
+  CockpitCreds *creds2;
+  CockpitCreds *creds3;
+  CockpitCreds *creds4;
+  CockpitCreds *creds5;
+
+  creds = cockpit_creds_new ("user", "app", NULL);
+
+  cockpit_expect_warning ("*received bad json data:*");
+  creds2 = cockpit_creds_new ("user", "app",
+                              COCKPIT_CRED_LOGIN_DATA, invalid, NULL);
+
+  creds3 = cockpit_creds_new ("user", "app",
+                              COCKPIT_CRED_LOGIN_DATA, no_data, NULL);
+
+  cockpit_expect_warning ("*received bad login-data:*");
+  creds4 = cockpit_creds_new ("user", "app",
+                              COCKPIT_CRED_LOGIN_DATA, invalid_login, NULL);
+
+  creds5 = cockpit_creds_new ("user", "app",
+                              COCKPIT_CRED_LOGIN_DATA, valid, NULL);
+
+  g_assert (creds != NULL);
+
+  g_assert_null (cockpit_creds_get_login_data (creds));
+  g_assert_null (cockpit_creds_get_login_data (creds2));
+  g_assert_null (cockpit_creds_get_login_data (creds3));
+  g_assert_null (cockpit_creds_get_login_data (creds4));
+
+  object = cockpit_creds_get_login_data (creds5);
+  g_assert_cmpstr ("data", ==, json_object_get_string_member (object, "login"));
+
+  cockpit_creds_unref (creds);
+  cockpit_creds_unref (creds2);
+  cockpit_creds_unref (creds3);
+  cockpit_creds_unref (creds4);
+  cockpit_creds_unref (creds5);
+
+  cockpit_assert_expected ();
+}
 
 int
 main (int argc,
@@ -156,6 +225,8 @@ main (int argc,
   g_test_add_func ("/creds/multiple", test_multiple);
   g_test_add_func ("/creds/hash", test_hash);
   g_test_add_func ("/creds/equal", test_equal);
+  g_test_add_func ("/creds/has_gssapi", test_gssapi);
+  g_test_add_func ("/creds/login-data", test_login_data);
 
   return g_test_run ();
 }

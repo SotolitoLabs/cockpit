@@ -25,11 +25,10 @@ define([
     "docker/run",
     "docker/search",
     "docker/docker",
-    "shell/controls",
+    "docker/bar",
     "shell/shell",
     "shell/plot",
-    "base1/bootstrap-select",
-], function($, cockpit, Mustache, util, run_image, search_image, docker, controls, shell) {
+], function($, cockpit, Mustache, util, run_image, search_image, docker, bar, shell) {
     var _ = cockpit.gettext;
     var C_ = cockpit.gettext;
 
@@ -52,37 +51,16 @@ define([
                                      set_danger_enabled(!danger_enabled);
                                  });
 
-        $('#containers-containers-filter').on('change', function () {
-            var filter = $(this).val();
-            $("#containers-containers table").toggleClass("filter-unimportant", filter === "running");
+        $('#containers-containers-filter a').on('click', function() {
+            var el = $(this);
+            $("#containers-containers-filter button span").text(el.text());
+            $("#containers-containers table").toggleClass("filter-unimportant", el.attr('value') === "running");
         });
 
         $('#containers-images-search').on("click", function() {
             search_image(client);
             return false;
         });
-
-        $('.selectpicker').selectpicker();
-
-        var reds = [ "#250304",
-                     "#5c080c",
-                     "#970911",
-                     "#ce0e15",
-                     "#ef2930",
-                     "#f36166",
-                     "#f7999c",
-                     "#fbd1d2"
-                   ];
-
-        var blues = [ "#006bb4",
-                      "#008ff0",
-                      "#2daaff",
-                      "#69c2ff",
-                      "#a5daff",
-                      "#e1f3ff",
-                      "#00243c",
-                      "#004778"
-                    ];
 
         function highlight_container_row(event, id) {
             id = client.container_from_cgroup(id) || id;
@@ -98,10 +76,8 @@ define([
         };
 
         var cpu_options = shell.plot_simple_template();
-        $.extend(cpu_options.yaxis, { tickFormatter: function(v) { return v.toFixed(0) + "%"; },
-                                      labelWidth: 60
+        $.extend(cpu_options.yaxis, { tickFormatter: function(v) { return v.toFixed(0); }
                                     });
-        cpu_options.colors = blues;
         $.extend(cpu_options.grid,  { hoverable: true,
                                       autoHighlight: false
                                     });
@@ -132,10 +108,8 @@ define([
 
         var mem_options = shell.plot_simple_template();
         $.extend(mem_options.yaxis, { ticks: shell.memory_ticks,
-                                      tickFormatter: shell.format_bytes_tick,
-                                      labelWidth: 60
+                                      tickFormatter: shell.format_bytes_tick_no_unit
                                     });
-        mem_options.colors = blues;
         $.extend(mem_options.grid,  { hoverable: true,
                                       autoHighlight: false
                                     });
@@ -146,6 +120,8 @@ define([
             else
                 axes.yaxis.options.max = null;
             axes.yaxis.options.min = 0;
+
+            $("#containers-mem-unit").text(shell.bytes_tick_unit(axes.yaxis));
         };
 
         var mem_plot = shell.plot($("#containers-mem-graph"), 300);
@@ -157,6 +133,11 @@ define([
         mem_plot.start_walking();
         $(mem_series).on('hover', highlight_container_row);
 
+        $(window).on('resize', function () {
+            cpu_plot.resize();
+            mem_plot.resize();
+        });
+
         function render_container(id, container) {
             if (container && container.CGroup) {
                 cpu_series.add_instance(container.CGroup);
@@ -167,7 +148,12 @@ define([
         }
 
         function render_image(id, image) {
-            var tr = $("#" + id);
+
+            // Docker ID can contain funny characters such as ":" so
+            // we take care not to embed them into jQuery query
+            // strings or HTML.
+
+            var tr = $(document.getElementById(id));
 
             if (!image ||
                 !image.RepoTags ||
@@ -184,7 +170,7 @@ define([
                         run_image(client, id);
                         return false;
                     });
-                tr = $('<tr id="' + id + '">').append(
+                tr = $('<tr>', { 'id': id }).append(
                     $('<td class="image-col-tags">'),
                     $('<td class="image-col-created">'),
                     $('<td class="image-col-size-graph">'),
@@ -279,15 +265,15 @@ define([
                     // sparse file based devices
                     if (avail) {
                         $('#containers-storage').tooltip('destroy');
-                        b_total = docker.bytes_from_format(avail);
-                        total = cockpit.format_bytes(b_used + b_total);
+                        b_total = b_used + docker.bytes_from_format(avail);
+                        total = cockpit.format_bytes(b_total);
                     } else {
                         var warning = _("WARNING: Docker may be reporting the size it has allocated to it's storage pool using sparse files, not the actual space available to the underlying storage device.");
-                        $('#containers-storage').tooltip({ title : warning });
+                        $('#containers-storage').tooltip({ title : warning, placement : "auto" });
                     }
 
                     var formated = used + " / " + total;
-                    var bar_row = controls.BarRow();
+                    var bar_row = bar.create();
                     bar_row.attr("value", b_used + "/" + b_total);
                     bar_row.toggleClass("bar-row-danger", used > 0.95 * total);
 
@@ -297,6 +283,8 @@ define([
                     $('#containers-storage .bar').html();
                     $('#containers-storage .data').html("Unknown");
                 }
+
+                bar.update();
             });
         }
 

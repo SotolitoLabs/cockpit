@@ -17,7 +17,7 @@
 # along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
 
 SELF=vm-reset
-. ./testlib.sh
+BASE=$(dirname $0)
 
 usage()
 {
@@ -31,4 +31,4 @@ case ${1:-} in
 	;;
 esac
 
-rm -rf ./run
+rm -rf $BASE/tmp/run/* $BASE/tmp/run/.*??

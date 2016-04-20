@@ -25,6 +25,7 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
   <link href="../base1/cockpit.css" rel="stylesheet">
   <link href="subscriptions.css" rel="stylesheet">
   <script type="text/javascript" src="../base1/bundle.js"></script>
+  <script type="text/javascript" src="subscriptions.js"></script>
 </head>
 
 <body>
@@ -61,7 +62,7 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
       </div>
     </script>
 
-    <div id="subscription-manager-not-found" class="container-fluid" hidden>
+    <div id="subscription-manager-not-found" class="container-fluid page" hidden>
       <br/>
       <span class="subscriptions-block-center" translatable="yes">
         In order to manage this system's subscriptions, please verify subscription-manager is installed.
@@ -95,7 +96,7 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
       </button>
     </div>
 
-    <div id="subscriptions-system-status" class="container-fluid" hidden>
+    <div id="subscriptions-system-status" class="container-fluid page" hidden>
       <div class="panel panel-default">
         <div class="panel-heading">
           <span translatable="yes">Installed Products</span>
@@ -128,13 +129,18 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
                   </label>
                 </td>
                 <td id="registration-url-field" class="dialog-wrapper">
-                  <div id="subscription-register-url-area">
-                    <select id="subscription-register-url" class="form-control selectpicker">
-                      <option translatable="yes" value="Default">Default</option>
-                      <option translatable="yes" value="Custom URL">Custom URL</option>
-                    </select>
+                    <div class="btn-group bootstrap-select dropdown form-control" id="subscription-register-url">
+                        <button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown">
+                            <span class="pull-left" translatable="yes">Default</span>
+                            <div class="caret"></div>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li value="default"><a>Default</a></li>
+                            <li value="custom"><a>Custom URL</a></li>
+                        </ul>
+                    </div>
                     <input id="subscription-register-url-custom" class="form-control" type="text"
-                           value="subscription.rhn.redhat.com">
+                           value="subscription.rhn.redhat.com" hidden>
                   </div>
                 </td>
               </tr>
@@ -197,15 +203,6 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
     <div id="subscriptions-subscribed" class="container-fluid" hidden>
 
     </div>
-
-    <script>
-        require([
-            "subscriptions/subscriptions",
-            "base1/bootstrap-select",
-        ], function(subscriptions) {
-            subscriptions.init();
-        });
-    </script>
 </body>
 
 </html>

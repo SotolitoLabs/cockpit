@@ -36,14 +36,18 @@ define([
         jobs_tmpl = $("#jobs-tmpl").html();
         mustache.parse(jobs_tmpl);
 
-        /* As a special service, we try to also show UDisks2 jobs.  As
-         * a shortcut, we assume that we can blindly transform a
-         * UDisks2 object path into a Storaged object path for the
-         * same object.
+        /* As a special service, we try to also show UDisks2 jobs.
+         * (But only if storaged itself isn't behind
+         * org.freedesktop.UDisks2, of course.)  As a shortcut, we
+         * assume that we can blindly transform a UDisks2 object path
+         * into a Storaged object path for the same object.
          */
 
         function udisks_path_to_storaged_path(upath) {
-            return upath.replace("/org/freedesktop/UDisks2/", "/org/storaged/Storaged/");
+            if (client.udisks_client)
+                return upath.replace("/org/freedesktop/UDisks2/", "/org/storaged/Storaged/");
+            else
+                return upath;
         }
 
         function update_job_spinners(parent) {
@@ -140,6 +144,8 @@ define([
                 'lvm-vg-resize':               _("Resizing $target")
             };
 
+            var server_now = new Date().getTime() + client.time_offset;
+
             function make_description(job) {
                 var fmt = descriptions[job.Operation];
                 if (!fmt)
@@ -171,12 +177,19 @@ define([
                 return job(a).StartTime - job(b).StartTime;
             }
 
+            function job_is_stable(path) {
+                var j = job(path);
+
+                var age_ms = server_now - j.StartTime/1000;
+                return age_ms >= 2000;
+            }
+
             function make_job(path) {
                 var j = job(path);
 
                 var remaining = null;
                 if (j.ExpectedEndTime > 0) {
-                    var d = job.ExpectedEndTime/1000 - new Date().getTime() - client.time_offset;
+                    var d = j.ExpectedEndTime/1000 - server_now;
                     if (d > 0)
                         remaining = utils.format_delay (d);
                 }
@@ -190,7 +203,11 @@ define([
                 };
             }
 
-            var js = Object.keys(client.storaged_jobs).concat(Object.keys(client.udisks_jobs)).sort(cmp_job).map(make_job);
+            var js = (Object.keys(client.storaged_jobs).concat(Object.keys(client.udisks_jobs)).
+                      filter(job_is_stable).
+                      sort(cmp_job).
+                      map(make_job));
+
             return mustache.render(jobs_tmpl,
                                    { Jobs: js,
                                      HasJobs: js.length > 0

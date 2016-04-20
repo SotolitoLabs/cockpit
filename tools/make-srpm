@@ -18,53 +18,17 @@
 
 set -eu
 
-if [ $# != 0 ]; then
-	echo "usage: make-srpm" >&2
+if [ $# -gt 1 ]; then
+    echo "usage: make-srpm [tarball]" >&2
     exit 2
 fi
 
 base=$(cd $(dirname $0); pwd -P)
-rpm_tmpdir=$(mktemp -d -t rpmbuild.XXXXXX)
 
-# First make a .tar.gz with the source code
-(
-    cd $base/..
+if [ -z ${1-} ]; then
+    source=$("$base/make-source")
+else
+    source="$1"
+fi
 
-    if [ -d .git ]; then
-        git archive HEAD --prefix cockpit-wip/ --output $rpm_tmpdir/cockpit-wip.tar
-        if [ -d tools/node_modules ]; then
-            tar -rf $rpm_tmpdir/cockpit-wip.tar --transform='s|^|cockpit-wip/|S' tools/node_modules
-        fi
-    else
-        tar -cf $rpm_tmpdir/cockpit-wip.tar --transform='s|^|cockpit-wip/|S' .
-    fi
-
-    # Make sure to include the .tarball in our tarball
-    echo "wip" > $rpm_tmpdir/.tarball
-    tar -rf $rpm_tmpdir/cockpit-wip.tar --transform='s|^|cockpit-wip/|S' -C $rpm_tmpdir .tarball
-
-    gzip --fast $rpm_tmpdir/cockpit-wip.tar
-    sed '1i\
-%define gitcommit wip' tools/cockpit.spec > $rpm_tmpdir/cockpit.spec
-)
-
-(
-    cd ${rpm_tmpdir}
-    rpmbuild -bs \
-        --quiet \
-        --define "_sourcedir `pwd`" \
-        --define "_specdir `pwd`" \
-        --define "_builddir `pwd`" \
-        --define "_srcrpmdir `pwd`" \
-        --define "_rpmdir `pwd`" \
-        --define "_buildrootdir `pwd`/.build" \
-        --define "optflags -ggdb3 -O0" \
-        cockpit.spec
-)
-
-for f in "${rpm_tmpdir}"/*.src.rpm; do
-    echo $(basename $f)
-    mv "$f" .
-done
-
-rm -rf "${rpm_tmpdir}"
+exec "$base/../test/images/scripts/lib/make-srpm" "$source"

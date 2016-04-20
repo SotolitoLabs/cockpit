@@ -91,52 +91,69 @@ define([
     /* D-Bus proxies
      */
 
+    var STORAGED_SERVICE =   "org.storaged.Storaged";
+    var STORAGED_OPATH_PFX = "/org/storaged/Storaged";
+    var STORAGED_IFACE_PFX = "org.storaged.Storaged";
+
+    /* This might happen eventually.
+     */
+    if (false) {
+       STORAGED_SERVICE =   "org.freedesktop.UDisks2";
+       STORAGED_OPATH_PFX = "/org/freedesktop/UDisks2";
+       STORAGED_IFACE_PFX = "org.freedesktop.UDisks2";
+    }
+
     client.time_offset = undefined;  /* Number of milliseconds that the server is ahead of us. */
+    client.features = undefined;
 
-    client.storaged_features = undefined;
+    client.storaged_client = cockpit.dbus(STORAGED_SERVICE);
 
-    client.storaged_client = cockpit.dbus("org.storaged.Storaged");
-    client.manager = client.storaged_client.proxy("org.storaged.Storaged.Manager",
-                                                  "/org/storaged/Storaged/Manager");
-    client.manager_lvm2 = client.storaged_client.proxy("org.storaged.Storaged.Manager.LVM2",
-                                                       "/org/storaged/Storaged/Manager");
+    function proxy(iface, path) {
+        return client.storaged_client.proxy(STORAGED_IFACE_PFX + "." + iface,
+                                            STORAGED_OPATH_PFX + "/" + path,
+                                            { watch: true });
+    }
 
-    client.mdraids = client.storaged_client.proxies("org.storaged.Storaged.MDRaid",
-                                                    "/org/storaged/Storaged/mdraid");
+    function proxies(iface) {
+        /* We create the proxies here with 'watch' set to false and
+         * establish a general watch for all of them.  This is more
+         * efficient since it reduces the number of D-Bus calls done
+         * by the cache.
+         */
+        return client.storaged_client.proxies(STORAGED_IFACE_PFX + "." + iface,
+                                              STORAGED_OPATH_PFX,
+                                              { watch: false });
+    }
 
-    client.vgroups = client.storaged_client.proxies("org.storaged.Storaged.VolumeGroup",
-                                                    "/org/storaged/Storaged/lvm");
+    client.storaged_client.watch({ path_namespace: STORAGED_OPATH_PFX });
 
-    client.lvols = client.storaged_client.proxies("org.storaged.Storaged.LogicalVolume",
-                                                  "/org/storaged/Storaged/lvm");
+    client.manager = proxy("Manager", "Manager");
+    client.manager_lvm2 = proxy("Manager.LVM2", "Manager");
+    client.manager_iscsi = proxy("Manager.ISCSI.Initiator", "Manager");
 
-    client.drives = client.storaged_client.proxies("org.storaged.Storaged.Drive",
-                                                   "/org/storaged/Storaged/drives");
+    client.mdraids = proxies("MDRaid");
+    client.vgroups = proxies("VolumeGroup");
+    client.lvols = proxies("LogicalVolume");
+    client.drives = proxies("Drive");
+    client.drives_ata = proxies("Drive.Ata");
+    client.blocks = proxies("Block");
+    client.blocks_ptable = proxies("PartitionTable");
+    client.blocks_part = proxies("Partition");
+    client.blocks_lvm2 = proxies("Block.LVM2");
+    client.blocks_pvol = proxies("PhysicalVolume");
+    client.blocks_fsys = proxies("Filesystem");
+    client.blocks_crypto = proxies("Encrypted");
+    client.iscsi_sessions = proxies("ISCSI.Session");
+    client.storaged_jobs = proxies("Job");
 
-    client.drives_ata = client.storaged_client.proxies("org.storaged.Storaged.Drive.Ata",
-                                                       "/org/storaged/Storaged/drives");
-
-    client.blocks = client.storaged_client.proxies("org.storaged.Storaged.Block",
-                                                   "/org/storaged/Storaged/block_devices");
-    client.blocks_ptable = client.storaged_client.proxies("org.storaged.Storaged.PartitionTable",
-                                                          "/org/storaged/Storaged/block_devices");
-    client.blocks_part = client.storaged_client.proxies("org.storaged.Storaged.Partition",
-                                                        "/org/storaged/Storaged/block_devices");
-    client.blocks_lvm2 = client.storaged_client.proxies("org.storaged.Storaged.Block.LVM2",
-                                                        "/org/storaged/Storaged/block_devices");
-    client.blocks_pvol = client.storaged_client.proxies("org.storaged.Storaged.PhysicalVolume",
-                                                        "/org/storaged/Storaged/block_devices");
-    client.blocks_fsys = client.storaged_client.proxies("org.storaged.Storaged.Filesystem",
-                                                        "/org/storaged/Storaged/block_devices");
-    client.blocks_crypto = client.storaged_client.proxies("org.storaged.Storaged.Encrypted",
-                                                          "/org/storaged/Storaged/block_devices");
-
-    client.storaged_jobs = client.storaged_client.proxies("org.storaged.Storaged.Job",
-                                                          "/org/storaged/Storaged/jobs");
-
-    client.udisks_client = cockpit.dbus("org.freedesktop.UDisks2");
-    client.udisks_jobs = client.udisks_client.proxies("org.freedesktop.UDisks2.Job",
-                                                      "/org/freedesktop/UDisks2/jobs");
+    if (STORAGED_SERVICE != "org.freedesktop.UDisks2") {
+        client.udisks_client = cockpit.dbus("org.freedesktop.UDisks2");
+        client.udisks_jobs = client.udisks_client.proxies("org.freedesktop.UDisks2.Job",
+                                                          "/org/freedesktop/UDisks2");
+    } else {
+        client.udisks_client = null;
+        client.udisks_jobs = { };
+    }
 
     /* Monitors
      */
@@ -332,13 +349,22 @@ define([
                          client.features = false;
                          callback();
                      } else {
-                         client.features = { lvm2: client.manager_lvm2.valid };
+                         client.features = { lvm2: client.manager_lvm2.valid,
+                                             iscsi: client.manager_iscsi.valid
+                                           };
 
-                         // The LVM2 manager might appear asynchronously some time
-                         // after the modules are loaded, so we have to watch it and
-                         // react dynamically.
+                         // Additional interfaces like the LVM2
+                         // manager might appear asynchronously some
+                         // time after the modules are loaded, so we
+                         // have to watch them and react dynamically.
+
                          $(client.manager_lvm2).on("changed", function () {
                              client.features.lvm2 = client.manager_lvm2.valid;
+                             $(client.features).triggerHandler("changed");
+                         });
+
+                         $(client.manager_iscsi).on("changed", function () {
+                             client.features.iscsi = client.manager_iscsi.valid;
                              $(client.features).triggerHandler("changed");
                          });
 

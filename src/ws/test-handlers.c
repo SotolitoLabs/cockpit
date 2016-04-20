@@ -24,6 +24,7 @@
 #include "cockpithandlers.h"
 #include "cockpitws.h"
 
+#include "common/cockpitconf.h"
 #include "common/cockpittest.h"
 #include "common/mock-io-stream.h"
 #include "common/cockpitwebserver.h"
@@ -92,7 +93,7 @@ setup (Test *test,
 
   user = g_get_user_name ();
   test->auth = mock_auth_new (user, PASSWORD);
-  test->roots = cockpit_web_server_resolve_roots (SRCDIR "/src/static", SRCDIR "/branding/default", NULL);
+  test->roots = cockpit_web_server_resolve_roots (SRCDIR "/static", SRCDIR "/branding/default", NULL);
 
   test->data.auth = test->auth;
   test->data.static_roots = (const gchar **)test->roots;
@@ -268,6 +269,7 @@ test_login_accept (Test *test,
   const gchar *output;
   GHashTable *headers;
   CockpitCreds *creds;
+  const gchar *token;
 
   user = g_get_user_name ();
   headers = mock_auth_basic_header (user, PASSWORD);
@@ -290,6 +292,9 @@ test_login_accept (Test *test,
   creds = cockpit_web_service_get_creds (service);
   g_assert_cmpstr (cockpit_creds_get_user (creds), ==, user);
   g_assert_cmpstr (cockpit_creds_get_password (creds), ==, PASSWORD);
+
+  token = cockpit_creds_get_csrf_token (creds);
+  g_assert (strstr (output, token));
 
   g_hash_table_destroy (headers);
   g_object_unref (service);
@@ -335,6 +340,7 @@ typedef struct {
   const gchar *path;
   const gchar *auth;
   const gchar *expect;
+  const gchar *config;
   gboolean with_home;
 } DefaultFixture;
 
@@ -348,6 +354,8 @@ setup_default (Test *test,
   GAsyncResult *result = NULL;
   GHashTable *headers;
   const gchar *user;
+
+  cockpit_config_file = fixture->config;
 
   g_setenv ("XDG_DATA_DIRS", SRCDIR "/src/bridge/mock-resource/system", TRUE);
   if (fixture->with_home)
@@ -387,6 +395,7 @@ teardown_default (Test *test,
   g_unsetenv ("XDG_DATA_HOME");
 
   teardown (test, fixture->path);
+  cockpit_conf_cleanup ();
 };
 
 static void
@@ -410,7 +419,7 @@ test_default (Test *test,
 }
 
 static const DefaultFixture fixture_resource_checksum = {
-  .path = "/cockpit/$71100b932eb766ef9043f855974ae8e3834173e2/test/sub/file.ext",
+  .path = "/cockpit/$386257ed81a663cdd7ee12633056dee18d60ddca/test/sub/file.ext",
   .auth = "/cockpit",
   .expect = "HTTP/1.1 200*"
     "These are the contents of file.ext*"
@@ -464,11 +473,21 @@ static const DefaultFixture fixture_shell_index = {
       "<title>In home dir</title>*"
 };
 
+static const DefaultFixture fixture_shell_configured_index = {
+  .path = "/",
+  .auth = "/cockpit",
+  .with_home = TRUE,
+  .config = SRCDIR "/src/ws/mock-config.conf",
+  .expect = "HTTP/1.1 200*"
+      "<base href=\"/cockpit/@localhost/second/test.html\">*"
+      "<title>In system dir</title>*"
+};
+
 static const DefaultFixture fixture_shell_package = {
   .path = "/system/host",
   .auth = "/cockpit",
   .expect = "HTTP/1.1 200*"
-      "<base href=\"/cockpit/$71100b932eb766ef9043f855974ae8e3834173e2/another/test.html\">*"
+      "<base href=\"/cockpit/$386257ed81a663cdd7ee12633056dee18d60ddca/another/test.html\">*"
       "<title>In system dir</title>*"
 };
 
@@ -563,17 +582,128 @@ static const DefaultFixture fixture_static_simple = {
   .path = "/cockpit/static/branding.css",
   .auth = NULL,
   .expect = "HTTP/1.1 200*"
-    "#index-brand*"
-    "url(\"brand.png\");*"
+    "#badge*"
+    "url(\"logo.png\");*"
 };
 
 static const DefaultFixture fixture_static_application = {
   .path = "/cockpit+application/static/branding.css",
   .auth = NULL,
   .expect = "HTTP/1.1 200*"
-    "#index-brand*"
-    "url(\"brand.png\");*"
+    "#badge*"
+    "url(\"logo.png\");*"
 };
+
+static void
+make_io_streams (GIOStream **io_a,
+                 GIOStream **io_b)
+{
+  GSocket *socket1, *socket2;
+  GError *error = NULL;
+  int fds[2];
+
+  if (socketpair (PF_UNIX, SOCK_STREAM, 0, fds) < 0)
+    g_assert_not_reached ();
+
+  socket1 = g_socket_new_from_fd (fds[0], &error);
+  g_assert_no_error (error);
+
+  socket2 = g_socket_new_from_fd (fds[1], &error);
+  g_assert_no_error (error);
+
+  *io_a = G_IO_STREAM (g_socket_connection_factory_create_connection (socket1));
+  *io_b = G_IO_STREAM (g_socket_connection_factory_create_connection (socket2));
+
+  g_object_unref (socket1);
+  g_object_unref (socket2);
+}
+
+static void
+on_error_not_reached (WebSocketConnection *ws,
+                      GError *error,
+                      gpointer user_data)
+{
+  g_assert (error != NULL);
+
+  /* At this point we know this will fail, but is informative */
+  g_assert_no_error (error);
+}
+
+static void
+on_message_get_bytes (WebSocketConnection *ws,
+                      WebSocketDataType type,
+                      GBytes *message,
+                      gpointer user_data)
+{
+  GBytes **received = user_data;
+  g_assert_cmpint (type, ==, WEB_SOCKET_DATA_TEXT);
+  if (*received != NULL)
+    {
+      gsize length;
+      gconstpointer data = g_bytes_get_data (message, &length);
+      g_test_message ("received unexpected extra message: %.*s", (int)length, (gchar *)data);
+      g_assert_not_reached ();
+    }
+  *received = g_bytes_ref (message);
+}
+
+static void
+test_socket_unauthenticated (void)
+{
+  WebSocketConnection *client;
+  GBytes *received = NULL;
+  GIOStream *io_a, *io_b;
+  GBytes *payload;
+  const gchar *problem;
+  const gchar *command;
+  const gchar *unused;
+  gchar *channel;
+  JsonObject *options;
+
+  make_io_streams (&io_a, &io_b);
+
+  client = g_object_new (WEB_SOCKET_TYPE_CLIENT,
+                         "url", "ws://127.0.0.1/unused",
+                         "origin", "http://127.0.0.1",
+                         "io-stream", io_a,
+                         NULL);
+
+  g_signal_connect (client, "error", G_CALLBACK (on_error_not_reached), NULL);
+
+  /* Matching the above origin */
+  cockpit_ws_default_host_header = "127.0.0.1";
+
+  g_assert (cockpit_handler_socket (NULL, "/cockpit/socket", io_b, NULL, NULL, NULL));
+
+  g_signal_connect (client, "message", G_CALLBACK (on_message_get_bytes), &received);
+
+  /* Should close right after opening */
+  while (web_socket_connection_get_ready_state (client) != WEB_SOCKET_STATE_CLOSED)
+    g_main_context_iteration (NULL, TRUE);
+
+  /* And we should have received a message */
+  g_assert (received != NULL);
+
+  payload = cockpit_transport_parse_frame (received, &channel);
+  g_assert (payload != NULL);
+  g_assert (channel == NULL);
+  g_bytes_unref (received);
+
+  g_assert (cockpit_transport_parse_command (payload, &command, &unused, &options));
+  g_bytes_unref (payload);
+
+  g_assert_cmpstr (command, ==, "init");
+  g_assert (cockpit_json_get_string (options, "problem", NULL, &problem));
+  g_assert_cmpstr (problem, ==, "no-session");
+  json_object_unref (options);
+
+  g_object_unref (client);
+
+  while (g_main_context_iteration (NULL, FALSE));
+
+  g_object_unref (io_a);
+  g_object_unref (io_b);
+}
 
 int
 main (int argc,
@@ -599,6 +729,8 @@ main (int argc,
               setup, test_ping, teardown);
 
   g_test_add ("/handlers/shell/index", Test, &fixture_shell_index,
+              setup_default, test_default, teardown_default);
+  g_test_add ("/handlers/shell/configured_index", Test, &fixture_shell_configured_index,
               setup_default, test_default, teardown_default);
   g_test_add ("/handlers/shell/package", Test, &fixture_shell_package,
               setup_default, test_default, teardown_default);
@@ -640,6 +772,8 @@ main (int argc,
 
   g_test_add ("/handlers/favicon", Test, "/favicon.ico",
               setup, test_favicon_ico, teardown);
+
+  g_test_add_func ("/handlers/noauth", test_socket_unauthenticated);
 
   return g_test_run ();
 }

@@ -93,10 +93,19 @@ void        cockpit_transport_emit_closed    (CockpitTransport *transport,
 GBytes *    cockpit_transport_parse_frame    (GBytes *message,
                                               gchar **channel);
 
+GBytes *    cockpit_transport_maybe_frame    (GBytes *message,
+                                              gchar **channel);
+
 gboolean    cockpit_transport_parse_command  (GBytes *payload,
                                               const gchar **command,
                                               const gchar **channel,
                                               JsonObject **options);
+
+JsonObject *cockpit_transport_build_json     (const gchar *name,
+                                              ...) G_GNUC_NULL_TERMINATED;
+
+GBytes *    cockpit_transport_build_control  (const gchar *name,
+                                              ...) G_GNUC_NULL_TERMINATED;
 
 G_END_DECLS
 

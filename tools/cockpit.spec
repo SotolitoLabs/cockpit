@@ -9,32 +9,17 @@
 #
 # Globals that may be defined elsewhere
 #  * gitcommit xxxx
-#  * selinux 1
-#  * tag 0.71
+#  * tag 0.91
 #
 
-%define branding auto
 %define rev 1
 
 %if %{defined gitcommit}
 %define extra_flags CFLAGS='-O2 -Wall -Werror -fPIC -g -DWITH_DEBUG'
-%define branding default
 %endif
 
-#Defaults for our SELinux policy toggle
-%if %{undefined selinux}
-%if %{defined gitcommit}
-%define selinux 1
-%endif
-%if 0%{?fedora} > 0 && 0%{?fedora} <= 21
-%define selinux 1
-%endif
-%if 0%{?rhel}
-%define selinux 1
-%endif
 %if 0%{?centos}
 %define rhel 0
-%endif
 %endif
 
 %define _hardened_build 1
@@ -59,7 +44,7 @@ URL:            http://cockpit-project.org/
 %if %{defined gitcommit}
 Source0:        cockpit-%{version}.tar.gz
 %else
-Source0:        https://github.com/cockpit-project/cockpit/releases/download/%{version}/cockpit-%{version}.tar.bz2
+Source0:        https://github.com/cockpit-project/cockpit/releases/download/%{version}/cockpit-%{version}.tar.xz
 %endif
 
 BuildRequires: pkgconfig(gio-unix-2.0)
@@ -81,6 +66,7 @@ BuildRequires: sed
 
 BuildRequires: glib2-devel >= 2.37.4
 BuildRequires: systemd-devel
+BuildRequires: polkit
 BuildRequires: pcp-libs-devel
 BuildRequires: gdb
 
@@ -91,28 +77,35 @@ BuildRequires: nodejs
 BuildRequires: krb5-server
 %endif
 
-# For selinux
-%if 0%{?selinux}
-BuildRequires: selinux-policy-devel
-BuildRequires: checkpolicy
-BuildRequires: selinux-policy-doc
-BuildRequires: sed
-%endif
-
 # For documentation
 BuildRequires: xmlto
 
+# Mandatory components of "cockpit"
 Requires: %{name}-bridge = %{version}-%{release}
-Requires: %{name}-networkmanager = %{version}-%{release}
 Requires: %{name}-ws = %{version}-%{release}
 Requires: %{name}-shell = %{version}-%{release}
+
+# Optional components (for f24 we use soft deps)
+%if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
+Recommends: %{name}-networkmanager = %{version}-%{release}
+Recommends: %{name}-storaged = %{version}-%{release}
+%ifarch x86_64 armv7hl
+Recommends: %{name}-docker = %{version}-%{release}
+%endif
+Suggests: %{name}-pcp = %{version}-%{release}
+Suggests: %{name}-kubernetes = %{version}-%{release}
+Suggests: %{name}-selinux = %{version}-%{release}
+
+# Older releases need to have strict requirements
+%else
+Requires: %{name}-networkmanager = %{version}-%{release}
 Requires: %{name}-storaged = %{version}-%{release}
 %ifarch x86_64 armv7hl
 Requires: %{name}-docker = %{version}-%{release}
 %endif
-%if 0%{?rhel}
-Requires: %{name}-subscriptions = %{version}-%{release}
+
 %endif
+
 
 %description
 Cockpit runs in a browser and can manage your network of GNU/Linux
@@ -150,6 +143,7 @@ Requires: glib-networking
 Requires: openssl
 Requires: glib2 >= 2.37.4
 Requires: libssh >= %{libssh_version}
+Obsoletes: cockpit-selinux-policy <= 0.83
 Requires(post): systemd
 Requires(preun): systemd
 Requires(postun): systemd
@@ -159,29 +153,20 @@ The Cockpit Web Service listens on the network, and authenticates users.
 
 %prep
 %setup -q
-%if 0%{?fedora} == 20
-	sed -i s/unconfined_service_t/unconfined_t/g src/ws/test-server.service.in
-%endif
 
 %build
-%if %{defined gitcommit}
-env NOCONFIGURE=1 ./autogen.sh
-%endif
-%configure --disable-static --disable-silent-rules --with-cockpit-user=cockpit-ws --with-branding=%{branding}
-make -j %{?extra_flags} all
-%if 0%{?selinux}
-make selinux
-%endif
+exec 2>&1
+%configure --disable-silent-rules --with-cockpit-user=cockpit-ws --with-branding=auto --with-selinux-config-type=etc_t
+make -j4 %{?extra_flags} all
 
 %check
-make -j check
+exec 2>&1
+make -j4 check
 
 %install
 make install DESTDIR=%{buildroot}
 %if %{defined gitcommit}
 make install-test-assets DESTDIR=%{buildroot}
-mkdir -p %{buildroot}/%{_datadir}/polkit-1/rules.d
-cp src/bridge/polkit-workarounds.rules %{buildroot}/%{_datadir}/polkit-1/rules.d
 %else
 rm -rf %{buildroot}/%{_datadir}/%{name}/playground
 %endif
@@ -189,9 +174,10 @@ mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/pam.d
 install -p -m 644 tools/cockpit.pam $RPM_BUILD_ROOT%{_sysconfdir}/pam.d/cockpit
 rm -f %{buildroot}/%{_libdir}/cockpit/*.so
 install -p -m 644 AUTHORS COPYING README.md %{buildroot}%{_docdir}/%{name}/
-%if 0%{?selinux}
-install -d %{buildroot}%{_datadir}/selinux/targeted
-install -p -m 644 cockpit.pp %{buildroot}%{_datadir}/selinux/targeted/
+
+# On RHEL we don't yet show options for changing language
+%if 0%{?rhel}
+echo '{ "linguas": null, "machine-limit": 5 }' > %{buildroot}%{_datadir}/%{name}/shell/override.json
 %endif
 
 # Build the package lists for resource packages
@@ -201,8 +187,11 @@ find %{buildroot}%{_datadir}/%{name}/base1 -type f >> shell.list
 echo '%dir %{_datadir}/%{name}/dashboard' >> shell.list
 find %{buildroot}%{_datadir}/%{name}/dashboard -type f >> shell.list
 
-echo '%dir %{_datadir}/%{name}/domain' >> shell.list
-find %{buildroot}%{_datadir}/%{name}/domain -type f >> shell.list
+echo '%dir %{_datadir}/%{name}/realmd' >> shell.list
+find %{buildroot}%{_datadir}/%{name}/realmd -type f >> shell.list
+
+echo '%dir %{_datadir}/%{name}/tuned' >> shell.list
+find %{buildroot}%{_datadir}/%{name}/tuned -type f >> shell.list
 
 echo '%dir %{_datadir}/%{name}/shell' >> shell.list
 find %{buildroot}%{_datadir}/%{name}/shell -type f >> shell.list
@@ -213,6 +202,9 @@ find %{buildroot}%{_datadir}/%{name}/system -type f >> shell.list
 echo '%dir %{_datadir}/%{name}/users' >> shell.list
 find %{buildroot}%{_datadir}/%{name}/users -type f >> shell.list
 
+echo '%dir %{_datadir}/%{name}/sosreport' > sosreport.list
+find %{buildroot}%{_datadir}/%{name}/sosreport -type f >> sosreport.list
+
 echo '%dir %{_datadir}/%{name}/subscriptions' > subscriptions.list
 find %{buildroot}%{_datadir}/%{name}/subscriptions -type f >> subscriptions.list
 
@@ -221,6 +213,17 @@ find %{buildroot}%{_datadir}/%{name}/storage -type f >> storaged.list
 
 echo '%dir %{_datadir}/%{name}/network' > networkmanager.list
 find %{buildroot}%{_datadir}/%{name}/network -type f >> networkmanager.list
+
+echo '%dir %{_datadir}/%{name}/ostree' > ostree.list
+find %{buildroot}%{_datadir}/%{name}/ostree -type f >> ostree.list
+
+# on RHEL systems we don't have the required setroubleshoot-server packages
+%if 0%{?rhel}
+rm -rf %{buildroot}%{_datadir}/%{name}/selinux
+%else
+echo '%dir %{_datadir}/%{name}/selinux' > selinux.list
+find %{buildroot}%{_datadir}/%{name}/selinux -type f >> selinux.list
+%endif
 
 %ifarch x86_64 armv7hl
 echo '%dir %{_datadir}/%{name}/docker' > docker.list
@@ -231,6 +234,10 @@ touch docker.list
 %endif
 
 %ifarch x86_64
+%if %{defined gitcommit}
+%else
+rm %{buildroot}/%{_datadir}/%{name}/kubernetes/override.json
+%endif
 echo '%dir %{_datadir}/%{name}/kubernetes' > kubernetes.list
 find %{buildroot}%{_datadir}/%{name}/kubernetes -type f >> kubernetes.list
 %else
@@ -246,10 +253,14 @@ sed -i "s|%{buildroot}/usr/src/debug||" debug.list
 tar -C %{buildroot}/usr/src/debug -cf - . | tar -C %{buildroot} -xf -
 rm -rf %{buildroot}/usr/src/debug
 
-# On RHEL subscriptions, networkmanager, and docker are part of the shell package
+# On RHEL subscriptions, networkmanager, and sosreport are part of the shell package
 %if 0%{?rhel}
-cat subscriptions.list docker.list networkmanager.list >> shell.list
+cat subscriptions.list sosreport.list networkmanager.list >> shell.list
 %endif
+
+# dwz has trouble with the go binaries
+# https://fedoraproject.org/wiki/PackagingDrafts/Go
+%global _dwz_low_mem_die_limit 0
 
 # Only strip out debug info in non wip builds
 %if %{defined gitcommit}
@@ -269,9 +280,10 @@ cat subscriptions.list docker.list networkmanager.list >> shell.list
 %{_docdir}/%{name}/COPYING
 %{_docdir}/%{name}/README.md
 %dir %{_datadir}/%{name}
-%{_datadir}/appdata
-%{_datadir}/applications
-%{_datadir}/pixmaps
+%{_datadir}/appdata/cockpit.appdata.xml
+%{_datadir}/applications/cockpit.desktop
+%{_datadir}/pixmaps/cockpit.png
+%doc %{_mandir}/man1/cockpit.1.gz
 
 %files bridge
 %doc %{_mandir}/man1/cockpit-bridge.1.gz
@@ -310,6 +322,7 @@ cat subscriptions.list docker.list networkmanager.list >> shell.list
 %{_sbindir}/remotectl
 %{_libdir}/security/pam_ssh_add.so
 %{_libexecdir}/cockpit-ws
+%{_libexecdir}/cockpit-stub
 %attr(4750, root, cockpit-ws) %{_libexecdir}/cockpit-session
 %attr(775, -, wheel) %{_localstatedir}/lib/%{name}
 %{_datadir}/%{name}/static
@@ -358,6 +371,7 @@ This package contains the Cockpit shell UI assets.
 
 %package storaged
 Summary: Cockpit user interface for storage, using Storaged
+Requires: %{name}-shell = %{version}-%{release}
 Requires: storaged >= 2.1.1
 Requires: storaged-lvm2 >= 2.1.1
 Requires: device-mapper-multipath
@@ -368,12 +382,39 @@ The Cockpit component for managing storage.  This package uses Storaged.
 
 %files storaged -f storaged.list
 
+%package ostree
+Summary: Cockpit user interface for rpm-ostree
+Requires: %{name}-shell = %{version}-%{release}
+%if 0%{?fedora} > 0 && 0%{?fedora} < 24
+Requires: rpm-ostree >= 2015.10-1
+%else
+Requires: /usr/libexec/rpm-ostreed
+%endif
+
+%description ostree
+The Cockpit components for managing software updates for ostree based systems.
+
+%files ostree -f ostree.list
+
 # Conditionally built packages below
 
 %if 0%{?rhel} == 0
 
+%package sosreport
+Summary: Cockpit user interface for diagnostic reports
+Requires: %{name}-shell = %{version}-%{release}
+Requires: sos
+BuildArch: noarch
+
+%description sosreport
+The Cockpit component for creating diagnostic reports with the
+sosreport tool.
+
+%files sosreport -f sosreport.list
+
 %package subscriptions
 Summary: Cockpit subscription user interface package
+Requires: %{name}-shell = %{version}-%{release}
 Requires: subscription-manager >= 1.13
 BuildArch: noarch
 
@@ -383,8 +424,21 @@ subscription management.
 
 %files subscriptions -f subscriptions.list
 
+%package selinux
+Summary: Cockpit SELinux package
+Requires: %{name}-shell = %{version}-%{release}
+Requires: setroubleshoot-server >= 3.3.3
+BuildArch: noarch
+
+%description selinux
+This package contains the Cockpit user interface integration with the
+utility setroubleshoot to diagnose and resolve SELinux issues.
+
+%files selinux -f selinux.list
+
 %package networkmanager
 Summary: Cockpit user interface for networking, using NetworkManager
+Requires: %{name}-shell = %{version}-%{release}
 Requires: NetworkManager
 BuildArch: noarch
 
@@ -393,10 +447,13 @@ The Cockpit component for managing networking.  This package uses NetworkManager
 
 %files networkmanager -f networkmanager.list
 
+%endif
+
 %ifarch x86_64 armv7hl
 
 %package docker
 Summary: Cockpit user interface for Docker containers
+Requires: %{name}-shell = %{version}-%{release}
 Requires: docker >= 1.3.0
 
 %description docker
@@ -407,19 +464,22 @@ This package is not yet complete.
 
 %endif
 
-%endif
-
 %ifarch x86_64
 
 %package kubernetes
 Summary: Cockpit user interface for Kubernetes cluster
 Requires: /usr/bin/kubectl
+Requires: %{name}-shell = %{version}-%{release}
+BuildRequires: golang-bin
+BuildRequires: golang-src
 
 %description kubernetes
 The Cockpit components for visualizing and configuring a Kubernetes
 cluster. Installed on the Kubernetes master. This package is not yet complete.
 
 %files kubernetes -f kubernetes.list
+%{_libexecdir}/cockpit-kube-auth
+%{_libexecdir}/cockpit-kube-launch
 
 %endif
 
@@ -427,6 +487,7 @@ cluster. Installed on the Kubernetes master. This package is not yet complete.
 
 %package test-assets
 Summary: Additional stuff for testing Cockpit
+Requires: %{name}-shell = %{version}-%{release}
 Requires: openssh-clients
 
 %description test-assets
@@ -436,45 +497,6 @@ pulls in some necessary packages via dependencies.
 %files test-assets
 %{_datadir}/%{name}/playground
 %{_datadir}/cockpit-test-assets
-%{_datadir}/polkit-1/rules.d
-%{_unitdir}/cockpit-testing.service
-%{_unitdir}/cockpit-testing.socket
-%{_unitdir}/test-server.service
-%{_unitdir}/test-server.socket
-
-%endif
-
-%if 0%{?selinux}
-
-%package selinux-policy
-Summary: SELinux policy for Cockpit testing
-Requires: %{name} = %{version}-%{release}
-Requires: selinux-policy
-Requires: selinux-policy-targeted
-Requires(post): /usr/sbin/semodule, /sbin/restorecon, /sbin/fixfiles
-Requires(postun): /usr/sbin/semodule, /sbin/restorecon, /sbin/fixfiles
-BuildArch: noarch
-
-%description selinux-policy
-SELinux policy for Cockpit testing.
-
-%files selinux-policy
-%defattr(-,root,root,0755)
-%{_datadir}/selinux/targeted/cockpit.pp
-
-%post selinux-policy
-/usr/sbin/semodule -s targeted -i %{_datadir}/selinux/targeted/cockpit.pp
-/sbin/fixfiles -R cockpit restore || :
-/sbin/fixfiles -R cockpit-test-assets restore || :
-/sbin/restorecon -R %{_localstatedir}/lib/%{name}
-
-%postun selinux-policy
-if [ $1 -eq 0 ] ; then
-  /usr/sbin/semodule -s targeted -r cockpit &> /dev/null || :
-  /sbin/fixfiles -R cockpit-selinux-policy restore || :
-  [ -d %{_localstatedir}/lib/%{name} ]  && \
-    /sbin/restorecon -R %{_localstatedir}/lib/%{name} &> /dev/null || :
-fi
 
 %endif
 

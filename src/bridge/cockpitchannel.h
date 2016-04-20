@@ -23,7 +23,7 @@
 #include <glib-object.h>
 #include <json-glib/json-glib.h>
 
-#include "common/cockpitstream.h"
+#include "common/cockpitconnect.h"
 #include "common/cockpittransport.h"
 
 G_BEGIN_DECLS
@@ -60,10 +60,9 @@ struct _CockpitChannelClass
   void        (* recv)        (CockpitChannel *channel,
                                GBytes *message);
 
-  void        (* options)     (CockpitChannel *channel,
+  gboolean    (* control)     (CockpitChannel *channel,
+                               const gchar *command,
                                JsonObject *options);
-
-  void        (* done)        (CockpitChannel *channel);
 
   void        (* close)       (CockpitChannel *channel,
                                const gchar *problem);
@@ -80,13 +79,15 @@ const gchar *       cockpit_channel_get_id            (CockpitChannel *self);
 
 void                cockpit_channel_prepare           (CockpitChannel *self);
 
+void                cockpit_channel_control           (CockpitChannel *self,
+                                                       const gchar *command,
+                                                       JsonObject *message);
+
 void                cockpit_channel_ready             (CockpitChannel *self);
 
 void                cockpit_channel_send              (CockpitChannel *self,
                                                        GBytes *payload,
                                                        gboolean valid_utf8);
-
-void                cockpit_channel_done              (CockpitChannel *self);
 
 JsonObject *        cockpit_channel_get_options       (CockpitChannel *self);
 
@@ -100,12 +101,7 @@ void                cockpit_channel_internal_address  (const gchar *name,
 
 gboolean            cockpit_channel_remove_internal_address (const gchar *name);
 
-GSocketConnectable * cockpit_channel_parse_connectable (CockpitChannel *self,
-                                                       gchar **possible_name,
-                                                       gboolean *local_address);
-
-CockpitStreamOptions * cockpit_channel_parse_stream   (CockpitChannel *self,
-                                                       gboolean local_address);
+CockpitConnectable * cockpit_channel_parse_stream     (CockpitChannel *self);
 
 G_END_DECLS
 

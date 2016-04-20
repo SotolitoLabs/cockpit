@@ -1,0 +1,10 @@
+{
+    "version": 0,
+
+    "tools": {
+        "setroubleshoot": {
+            "label": "SELinux Troubleshoot",
+            "order": 8
+        }
+    }
+}

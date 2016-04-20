@@ -1,4 +1,4 @@
-realmddir = $(pkgdatadir)/domain
+realmddir = $(pkgdatadir)/realmd
 nodist_realmd_DATA = \
 	pkg/realmd/bundle.min.js.gz \
 	$(NULL)
@@ -34,8 +34,5 @@ CLEANFILES += \
 
 EXTRA_DIST += \
 	pkg/realmd/bundle.min.js \
-	$(realmd_DATA) \
-	$(realmddebug_DATA) \
-	$(realmd_TESTS) \
 	$(realmd_BUNDLE) \
 	$(NULL)

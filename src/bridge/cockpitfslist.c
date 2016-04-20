@@ -78,7 +78,7 @@ error_to_problem (GError *error)
   else if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_NOT_DIRECTORY))
     return "not-found";
   else
-    return "internal-error";
+    return NULL;
 }
 
 static void
@@ -109,22 +109,14 @@ on_files_listed (GObject *source_object,
 
   if (files == NULL)
     {
-      JsonObject *msg;
-      GBytes *msg_bytes;
-
-      msg = json_object_new ();
-      json_object_set_string_member (msg, "event", "present-done");
-      msg_bytes = cockpit_json_write_bytes (msg);
-      json_object_unref (msg);
-      cockpit_channel_send (COCKPIT_CHANNEL(self), msg_bytes, FALSE);
-      g_bytes_unref (msg_bytes);
-
       g_clear_object (&self->cancellable);
       g_object_unref (source_object);
 
+      cockpit_channel_ready (COCKPIT_CHANNEL (self));
+
       if (self->monitor == NULL)
         {
-          cockpit_channel_done (COCKPIT_CHANNEL (self));
+          cockpit_channel_control (COCKPIT_CHANNEL (self), "done", NULL);
           cockpit_channel_close (COCKPIT_CHANNEL (self), NULL);
         }
       return;
@@ -166,6 +158,7 @@ on_enumerator_ready (GObject *source_object,
   GError *error = NULL;
   GFileEnumerator *enumerator;
   JsonObject *options;
+  const gchar *problem;
 
   enumerator = g_file_enumerate_children_finish (G_FILE (source_object), res, &error);
   if (enumerator == NULL)
@@ -173,10 +166,14 @@ on_enumerator_ready (GObject *source_object,
       if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
         {
           CockpitFslist *self = COCKPIT_FSLIST (user_data);
-          g_message ("%s: couldn't list directory: %s", self->path, error->message);
+          problem = error_to_problem (error);
+          if (problem)
+            g_debug ("%s: couldn't list directory: %s", self->path, error->message);
+          else
+            g_warning ("%s: couldn't list directory: %s", self->path, error->message);
           options = cockpit_channel_close_options (COCKPIT_CHANNEL (self));
           json_object_set_string_member (options, "message", error->message);
-          cockpit_channel_close (COCKPIT_CHANNEL (self), error_to_problem (error));
+          cockpit_channel_close (COCKPIT_CHANNEL (self), problem ? problem : "internal-error");
         }
       g_clear_error (&error);
       return;
@@ -236,13 +233,6 @@ cockpit_fslist_prepare (CockpitChannel *channel)
   self->cancellable = g_cancellable_new ();
 
   file = g_file_new_for_path (self->path);
-  g_file_enumerate_children_async (file,
-                                   G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
-                                   G_FILE_QUERY_INFO_NONE,
-                                   G_PRIORITY_DEFAULT,
-                                   self->cancellable,
-                                   on_enumerator_ready,
-                                   self);
 
   if (watch)
     {
@@ -259,7 +249,13 @@ cockpit_fslist_prepare (CockpitChannel *channel)
       self->sig_changed = g_signal_connect (self->monitor, "changed", G_CALLBACK (on_changed), self);
     }
 
-  cockpit_channel_ready (channel);
+  g_file_enumerate_children_async (file,
+                                   G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                                   G_FILE_QUERY_INFO_NONE,
+                                   G_PRIORITY_DEFAULT,
+                                   self->cancellable,
+                                   on_enumerator_ready,
+                                   self);
   problem = NULL;
 
 out:

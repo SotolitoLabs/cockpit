@@ -35,6 +35,7 @@
 
 #include <glib/gstdio.h>
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -82,29 +83,54 @@ typedef struct {
   const gchar *problem;
   gchar *host_key;
   gchar *host_fingerprint;
+  GHashTable *auth_results;
 
   /* When connect is done this flag is cleared */
   gint *connecting;
 } CockpitSshData;
 
+static const gchar *
+auth_method_description (int method)
+{
+  if (method == SSH_AUTH_METHOD_NONE)
+    return "none";
+  else if (method == SSH_AUTH_METHOD_PASSWORD)
+    return "password";
+  else if (method == SSH_AUTH_METHOD_PUBLICKEY)
+    return "public-key";
+  else if (method == SSH_AUTH_METHOD_HOSTBASED)
+    return "host-based";
+  else if (method == SSH_AUTH_METHOD_GSSAPI_MIC)
+    return "gssapi-mic";
+  else
+    return "unknown";
+}
+
 static gchar *
-auth_method_description (int methods)
+auth_methods_line (int methods)
 {
   GString *string;
+  int i = 0;
+  int check[5] = {
+    SSH_AUTH_METHOD_NONE,
+    SSH_AUTH_METHOD_PASSWORD,
+    SSH_AUTH_METHOD_PUBLICKEY,
+    SSH_AUTH_METHOD_HOSTBASED,
+    SSH_AUTH_METHOD_GSSAPI_MIC
+  };
 
   string = g_string_new ("");
   if (methods == 0)
-    g_string_append (string, "unknown");
-  if (methods & SSH_AUTH_METHOD_NONE)
-    g_string_append (string, "none ");
-  if (methods & SSH_AUTH_METHOD_PASSWORD)
-    g_string_append (string, "password ");
-  if (methods & SSH_AUTH_METHOD_PUBLICKEY)
-    g_string_append (string, "public-key ");
-  if (methods & SSH_AUTH_METHOD_HOSTBASED)
-    g_string_append (string, "host-based ");
-  if (methods & SSH_AUTH_METHOD_GSSAPI_MIC)
-    g_string_append (string, "gssapi-mic ");
+    g_string_append (string, auth_method_description (methods));
+
+  for (i = 0; i < G_N_ELEMENTS (check); i++)
+    {
+      if (methods & check[i])
+        {
+          g_string_append (string, auth_method_description (check[i]));
+          g_string_append (string, " ");
+        }
+    }
 
   return g_string_free (string, FALSE);
 }
@@ -117,6 +143,49 @@ ssh_msg_is_disconnected (const gchar *msg)
                      strstr (msg, "Socket error: Success") ||
                      strstr (msg, "Socket error: Connection reset by peer"));
 }
+
+/*
+ * HACK: SELinux prevents us from writing to the directories we want to
+ * write to, so we have to try multiple locations.
+ *
+ * https://bugzilla.redhat.com/show_bug.cgi?id=1279430
+ */
+static gchar *
+create_knownhosts_temp (void)
+{
+  const gchar *directories[] = {
+      PACKAGE_LOCALSTATE_DIR,
+      "/tmp",
+      NULL,
+  };
+
+  gchar *name;
+  int i, fd, err;
+
+  for (i = 0; directories[i] != NULL; i++)
+    {
+      name = g_build_filename (directories[i], "known-hosts.XXXXXX", NULL);
+      fd = g_mkstemp (name);
+      err = errno;
+
+      if (fd >= 0)
+        {
+          close (fd);
+          return name;
+        }
+
+      g_free (name);
+
+      if ((err == ENOENT || err == EPERM || err == EACCES) && directories[i + 1] != NULL)
+        continue;
+
+      g_warning ("couldn't make temporary file for knownhosts line in %s: %m", directories[i]);
+      break;
+    }
+
+  return NULL;
+}
+
 
 /*
  * NOTE: This function changes the SSH_OPTIONS_KNOWNHOSTS option on
@@ -132,19 +201,14 @@ ssh_msg_is_disconnected (const gchar *msg)
 static gchar *
 get_knownhosts_line (ssh_session session)
 {
-  char name[] = "/tmp/cockpit-XXXXXX";
-  int fd;
+
+  gchar *name = NULL;
   GError *error = NULL;
   gchar *line = NULL;
 
-  fd = mkstemp (name);
-  if (fd == -1)
-    {
-      g_warning ("Couldn't make temporary name for knownhosts line: %m");
-      goto out;
-    }
-
-  close (fd);
+  name = create_knownhosts_temp ();
+  if (!name)
+    goto out;
 
   if (ssh_options_set (session, SSH_OPTIONS_KNOWNHOSTS, name) != SSH_OK)
     {
@@ -168,8 +232,11 @@ get_knownhosts_line (ssh_session session)
   g_strstrip (line);
 
 out:
-  if (fd != -1)
-    g_unlink (name);
+  if (name)
+    {
+      g_unlink (name);
+      g_free (name);
+    }
 
   return line;
 }
@@ -177,7 +244,7 @@ out:
 static const gchar *
 verify_knownhost (CockpitSshData *data)
 {
-  const gchar *ret = "unknown-hostkey";
+  const gchar *ret = "invalid-hostkey";
   ssh_key key = NULL;
   unsigned char *hash = NULL;
   const char *type = NULL;
@@ -278,6 +345,7 @@ verify_knownhost (CockpitSshData *data)
           g_debug ("Couldn't find the known hosts file");
           /* fall through */
         case SSH_SERVER_NOT_KNOWN:
+          ret = "unknown-hostkey";
           g_message ("%s: %s host key for server is not known: %s",
                      data->logname, type, data->host_fingerprint);
           break;
@@ -291,16 +359,171 @@ done:
 }
 
 static const gchar *
+auth_result_string (int rc)
+{
+  switch (rc)
+    {
+    case SSH_AUTH_SUCCESS:
+      return "succeeded";
+    case SSH_AUTH_DENIED:
+      return "denied";
+    case SSH_AUTH_PARTIAL:
+      return "partial";
+      break;
+    case SSH_AUTH_AGAIN:
+      return "again";
+    default:
+      return "error";
+    }
+}
+
+static int
+do_password_auth (CockpitSshData *data)
+{
+  const gchar *msg;
+  const gchar *password = NULL;
+  int rc;
+
+  password = cockpit_creds_get_password (data->creds);
+  g_assert (password != NULL);
+
+  rc = ssh_userauth_password (data->session, NULL, password);
+  switch (rc)
+    {
+    case SSH_AUTH_SUCCESS:
+      g_debug ("%s: password auth succeeded", data->logname);
+      break;
+    case SSH_AUTH_DENIED:
+      g_debug ("%s: password auth failed", data->logname);
+      break;
+    case SSH_AUTH_PARTIAL:
+      g_message ("%s: password auth worked, but server wants more authentication",
+                 data->logname);
+      break;
+    case SSH_AUTH_AGAIN:
+      g_message ("%s: password auth failed: server asked for retry",
+                 data->logname);
+      break;
+    default:
+      msg = ssh_get_error (data->session);
+      if (g_atomic_int_get (data->connecting))
+        g_message ("%s: couldn't authenticate: %s", data->logname, msg);
+    }
+
+  return rc;
+}
+
+static int
+do_key_auth (CockpitSshData *data)
+{
+  int rc;
+  const gchar *msg;
+
+  rc = ssh_userauth_agent (data->session, NULL);
+  switch (rc)
+    {
+    case SSH_AUTH_SUCCESS:
+      g_debug ("%s: key auth succeeded", data->logname);
+      break;
+    case SSH_AUTH_DENIED:
+      g_debug ("%s: key auth failed", data->logname);
+      break;
+    case SSH_AUTH_PARTIAL:
+      g_message ("%s: key auth worked, but server wants more authentication",
+                 data->logname);
+      break;
+    case SSH_AUTH_AGAIN:
+      g_message ("%s: key auth failed: server asked for retry",
+                 data->logname);
+      break;
+    default:
+      msg = ssh_get_error (data->session);
+      /*
+        HACK: https://red.libssh.org/issues/201
+        libssh returns error instead of denied
+        when agent has no keys. For now treat as
+        denied.
+       */
+      if (strstr (msg, "Access denied"))
+        {
+          rc = SSH_AUTH_DENIED;
+        }
+      else
+        {
+          if (g_atomic_int_get (data->connecting))
+            g_message ("%s: couldn't key authenticate: %s", data->logname, msg);
+        }
+    }
+
+  return rc;
+}
+
+static int
+do_gss_auth (CockpitSshData *data)
+{
+  int rc;
+  const gchar *msg;
+  gss_cred_id_t gsscreds = GSS_C_NO_CREDENTIAL;
+
+  gsscreds = cockpit_creds_push_thread_default_gssapi (data->creds);
+  if (gsscreds != GSS_C_NO_CREDENTIAL)
+    {
+#ifdef HAVE_SSH_GSSAPI_SET_CREDS
+      ssh_gssapi_set_creds (data->session, gsscreds);
+#else
+      g_warning ("unable to forward delegated gssapi kerberos credentials because the "
+                 "version of libssh on this system does not support it.");
+#endif
+
+      rc = ssh_userauth_gssapi (data->session);
+
+#ifdef HAVE_SSH_GSSAPI_SET_CREDS
+      ssh_gssapi_set_creds (data->session, NULL);
+#endif
+
+      switch (rc)
+        {
+        case SSH_AUTH_SUCCESS:
+          g_debug ("%s: gssapi auth succeeded", data->logname);
+          break;
+        case SSH_AUTH_DENIED:
+          g_debug ("%s: gssapi auth failed", data->logname);
+          break;
+        case SSH_AUTH_PARTIAL:
+          g_message ("%s: gssapi auth worked, but server wants more authentication",
+                     data->logname);
+          break;
+        default:
+          msg = ssh_get_error (data->session);
+          if (g_atomic_int_get (data->connecting))
+            g_message ("%s: couldn't authenticate: %s", data->logname, msg);
+        }
+    }
+  else
+    {
+      rc = SSH_AUTH_DENIED;
+    }
+
+  cockpit_creds_pop_thread_default_gssapi (data->creds, gsscreds);
+  return rc;
+}
+
+static const gchar *
 cockpit_ssh_authenticate (CockpitSshData *data)
 {
-  gss_cred_id_t gsscreds = GSS_C_NO_CREDENTIAL;
-  const gchar *password = NULL;
   const gchar *problem;
-  gboolean tried = FALSE;
+  gboolean have_final_result = FALSE;
   gchar *description;
   const gchar *msg;
-  int methods;
   int rc;
+  int methods_server;
+  int methods_tried = 0;
+  int methods_to_try = SSH_AUTH_METHOD_PASSWORD |
+                       SSH_AUTH_METHOD_GSSAPI_MIC;
+
+#ifdef HAVE_SSH_SET_AGENT_SOCKET
+  methods_to_try = methods_to_try | SSH_AUTH_METHOD_PUBLICKEY;
+#endif
 
   problem = "authentication-failed";
 
@@ -320,151 +543,91 @@ cockpit_ssh_authenticate (CockpitSshData *data)
       goto out;
     }
 
-  methods = ssh_userauth_list (data->session, NULL);
-  if (methods & SSH_AUTH_METHOD_PUBLICKEY)
+  methods_server = ssh_userauth_list (data->session, NULL);
+  while (methods_to_try != 0)
     {
-      tried = TRUE;
-      rc = ssh_userauth_agent (data->session, NULL);
-      switch (rc)
+      int (*auth_func)(CockpitSshData *data);
+      const gchar *result_string;
+      int method;
+      gboolean has_creds = FALSE;
+
+      if (methods_to_try & SSH_AUTH_METHOD_PUBLICKEY)
         {
-        case SSH_AUTH_SUCCESS:
-          g_debug ("%s: key auth succeeded", data->logname);
-          problem = NULL;
-          goto out;
-        case SSH_AUTH_DENIED:
-          g_debug ("%s: key auth failed", data->logname);
-          break;
-        case SSH_AUTH_PARTIAL:
-          g_message ("%s: key auth worked, but server wants more authentication",
-                     data->logname);
-          break;
-        case SSH_AUTH_AGAIN:
-          g_message ("%s: key auth failed: server asked for retry",
-                     data->logname);
-          break;
-        default:
-          msg = ssh_get_error (data->session);
-          /*
-            HACK: https://red.libssh.org/issues/201
-            libssh returns error instead of denied
-            when agent has no keys. For now treat as
-            denied.
-           */
-          if (!strstr (msg, "Access denied"))
+            auth_func = do_key_auth;
+            method = SSH_AUTH_METHOD_PUBLICKEY;
+            has_creds = TRUE;
+        }
+      else if (methods_to_try & SSH_AUTH_METHOD_PASSWORD)
+        {
+            auth_func = do_password_auth;
+            method = SSH_AUTH_METHOD_PASSWORD;
+            has_creds = cockpit_creds_get_password (data->creds) != NULL;
+        }
+      else
+        {
+          auth_func = do_gss_auth;
+          method = SSH_AUTH_METHOD_GSSAPI_MIC;
+          has_creds = cockpit_creds_has_gssapi (data->creds);
+        }
+
+      methods_to_try = methods_to_try & ~method;
+
+      if (!(methods_server & method))
+        {
+          result_string = "no-server-support";
+        }
+      else if (!has_creds)
+        {
+          result_string = "not-provided";
+          methods_tried = methods_tried | method;
+        }
+      else
+        {
+          methods_tried = methods_tried | method;
+          if (!have_final_result)
             {
-              if (g_atomic_int_get (data->connecting))
-                g_message ("%s: couldn't key authenticate: %s", data->logname, msg);
-              if (ssh_msg_is_disconnected (msg))
-                problem = "terminated";
-              else
-                problem = "internal-error";
-              goto out;
+              rc = auth_func (data);
+              result_string = auth_result_string (rc);
+              if (rc == SSH_AUTH_SUCCESS)
+                {
+                  have_final_result = TRUE;
+                  problem = NULL;
+                }
+              else if (rc == SSH_AUTH_ERROR)
+                {
+                  have_final_result = TRUE;
+                  msg = ssh_get_error (data->session);
+                  if (g_atomic_int_get (data->connecting))
+                    g_message ("%s: couldn't authenticate: %s", data->logname, msg);
+                  if (ssh_msg_is_disconnected (msg))
+                    problem = "terminated";
+                  else
+                    problem = "internal-error";
+                }
+            }
+          else
+            {
+              result_string = "not-tried";
             }
         }
+
+        g_hash_table_insert (data->auth_results,
+                             g_strdup (auth_method_description (method)),
+                             g_strdup (result_string));
     }
 
-  if (methods & SSH_AUTH_METHOD_PASSWORD)
+  if (have_final_result)
+    goto out;
+
+  if (methods_tried == 0)
     {
-      password = cockpit_creds_get_password (data->creds);
-      if (password)
-        {
-          tried = TRUE;
-          rc = ssh_userauth_password (data->session, NULL, password);
-          switch (rc)
-            {
-            case SSH_AUTH_SUCCESS:
-              g_debug ("%s: password auth succeeded", data->logname);
-              problem = NULL;
-              goto out;
-            case SSH_AUTH_DENIED:
-              g_debug ("%s: password auth failed", data->logname);
-              break;
-            case SSH_AUTH_PARTIAL:
-              g_message ("%s: password auth worked, but server wants more authentication",
-                         data->logname);
-              break;
-            case SSH_AUTH_AGAIN:
-              g_message ("%s: password auth failed: server asked for retry",
-                         data->logname);
-              break;
-            default:
-              msg = ssh_get_error (data->session);
-              if (g_atomic_int_get (data->connecting))
-                g_message ("%s: couldn't authenticate: %s", data->logname, msg);
-              if (ssh_msg_is_disconnected (msg))
-                problem = "terminated";
-              else
-                problem = "internal-error";
-              goto out;
-            }
-        }
-    }
-
-  if (methods & SSH_AUTH_METHOD_GSSAPI_MIC)
-    {
-      tried = TRUE;
-
-      gsscreds = cockpit_creds_push_thread_default_gssapi (data->creds);
-      if (gsscreds != GSS_C_NO_CREDENTIAL)
-        {
-#ifdef HAVE_SSH_GSSAPI_SET_CREDS
-          ssh_gssapi_set_creds (data->session, gsscreds);
-#else
-          g_warning ("unable to forward delegated gssapi kerberos credentials because the "
-                     "version of libssh on this system does not support it.");
-#endif
-
-          rc = ssh_userauth_gssapi (data->session);
-
-#ifdef HAVE_SSH_GSSAPI_SET_CREDS
-          ssh_gssapi_set_creds (data->session, NULL);
-#endif
-
-          switch (rc)
-            {
-            case SSH_AUTH_SUCCESS:
-              g_debug("%s: gssapi auth succeeded", data->logname);
-              problem = NULL;
-              goto out;
-            case SSH_AUTH_DENIED:
-              g_debug ("%s: gssapi auth failed", data->logname);
-              break;
-            case SSH_AUTH_PARTIAL:
-              g_message ("%s: gssapi auth worked, but server wants more authentication",
-                         data->logname);
-              break;
-            default:
-              msg = ssh_get_error (data->session);
-              if (g_atomic_int_get (data->connecting))
-                g_message ("%s: couldn't authenticate: %s", data->logname, msg);
-              if (ssh_msg_is_disconnected (msg))
-                problem = "terminated";
-              else
-                problem = "internal-error";
-              goto out;
-            }
-        }
-    }
-
-  if (!tried)
-    {
-      description = auth_method_description (methods);
+      description = auth_methods_line (methods_server);
       g_message ("%s: server offered unsupported authentication methods: %s",
                  data->logname, description);
       g_free (description);
-      problem = "authentication-not-supported";
-    }
-  else if (!password && gsscreds == GSS_C_NO_CREDENTIAL)
-    {
-      problem = "no-forwarding";
-    }
-  else
-    {
-      problem = "authentication-failed";
     }
 
 out:
-  cockpit_creds_pop_thread_default_gssapi (data->creds, gsscreds);
   return problem;
 }
 
@@ -553,6 +716,8 @@ cockpit_ssh_data_free (CockpitSshData *data)
     ssh_string_free_char (data->host_fingerprint);
   ssh_free (data->session);
   g_free (data->knownhosts_file);
+  if (data->auth_results)
+    g_hash_table_destroy (data->auth_results);
   g_free (data);
 }
 
@@ -611,9 +776,14 @@ struct _CockpitSshTransport {
   /* Input */
   GByteArray *buffer;
   gboolean drain_buffer;
+  gboolean received_frame;
   gboolean received_eof;
   gboolean received_close;
   gboolean received_exit;
+
+  /* Error Data */
+  GString *errbuf;
+  gboolean not_cockpit;
 };
 
 struct _CockpitSshTransportClass {
@@ -681,15 +851,18 @@ on_channel_data (ssh_session session,
 
   if (is_stderr)
     {
-      g_debug ("%s: received %d stderr bytes", self->logname, (int)len);
-      g_printerr ("%.*s", (int)len, (const char *)data);
+      g_debug ("%s: received %d error bytes", self->logname, (int)len);
+      g_string_append_len (self->errbuf, data, len);
     }
   else
     {
       g_debug ("%s: received %d bytes", self->logname, (int)len);
-      g_byte_array_append (self->buffer, data, len);
-      self->drain_buffer = TRUE;
+      if (self->not_cockpit)
+        g_string_append_len (self->errbuf, data, len);
+      else
+        g_byte_array_append (self->buffer, data, len);
     }
+  self->drain_buffer = TRUE;
   return len;
 }
 
@@ -781,9 +954,18 @@ on_channel_exit_status (ssh_session session,
       g_debug ("%s: received exit status %d", self->logname, exit_status);
       problem = "no-cockpit";        /* cockpit-bridge not installed */
     }
+  else if (self->not_cockpit)
+    {
+      problem = "no-cockpit";
+    }
+  else if (!self->received_frame)
+    {
+      g_message ("%s: spawning remote bridge failed with %d status", self->logname, exit_status);
+      problem = "no-cockpit";
+    }
   else if (exit_status)
     {
-      g_warning ("%s: bridge exited with %d status", self->logname, exit_status);
+      g_message ("%s: remote bridge exited with %d status", self->logname, exit_status);
       problem = "internal-error";
     }
   if (!self->problem)
@@ -811,9 +993,11 @@ cockpit_ssh_transport_init (CockpitSshTransport *self)
     g_main_context_ref (self->data->context);
 
   self->data->session = ssh_new ();
+  self->data->auth_results = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   g_return_if_fail (self->data->session != NULL);
 
   self->buffer = g_byte_array_new ();
+  self->errbuf = g_string_sized_new (64);
   self->queue = g_queue_new ();
 
   memcpy (&self->channel_cbs, &channel_cbs, sizeof (channel_cbs));
@@ -860,7 +1044,12 @@ close_immediately (CockpitSshTransport *self,
       cockpit_ssh_agent_close (self->agent);
 
   if (problem == NULL)
-    problem = self->problem;
+    {
+      if (self->not_cockpit)
+        problem = "no-cockpit";
+      else
+        problem = self->problem;
+    }
 
   g_object_ref (self);
 
@@ -891,7 +1080,43 @@ close_immediately (CockpitSshTransport *self,
 }
 
 static void
-drain_buffer (CockpitSshTransport *self)
+drain_error_buffer (CockpitSshTransport *self)
+{
+  gchar *data = self->errbuf->str;
+  gsize len = self->errbuf->len;
+  gchar *pos = data;
+
+  for (;;)
+    {
+      pos = memchr (data, '\n', len);
+      if (pos == NULL)
+        break;
+
+      pos[0] = '\0';
+      pos += 1;
+
+      g_printerr ("%s", data);
+
+      len -= (pos - data);
+      data = pos;
+    }
+
+  if (self->received_eof)
+    {
+      if (len > 0)
+          g_printerr ("%s", data);
+      g_string_erase (self->errbuf, 0, self->errbuf->len);
+      pos = NULL;
+    }
+  else
+    {
+      /* Drain the stuff that was consumed */
+      g_string_erase (self->errbuf, 0, self->errbuf->len - len);
+    }
+}
+
+static void
+drain_output_buffer (CockpitSshTransport *self)
 {
   GBytes *message;
   GBytes *payload;
@@ -919,10 +1144,27 @@ drain_buffer (CockpitSshTransport *self)
           break;
         }
 
+      /*
+       * So we may be talking to a process that's not cockpit-bridge. How does
+       * that happen? ssh always executes commands inside of a shell ... and
+       * bash prints its 'cockpit-bridge: not found' message on stdout (!)
+       *
+       * So we degrade gracefully in this case, and start to treat output as
+       * error output.
+       */
       if (data[i] != '\n')
         {
-          g_warning ("%s: incorrect protocol: received invalid length prefix", self->logname);
-          close_immediately (self, "protocol-error");
+          if (self->received_frame)
+            {
+              g_message ("%s: incorrect protocol: received invalid length prefix", self->logname);
+              close_immediately (self, "protocol-error");
+            }
+          else
+            {
+              g_string_append_len (self->errbuf, (gchar *)self->buffer->data, self->buffer->len);
+              cockpit_pipe_skip (self->buffer, self->buffer->len);
+              self->not_cockpit = TRUE;
+            }
           break;
         }
 
@@ -934,13 +1176,29 @@ drain_buffer (CockpitSshTransport *self)
         }
 
       message = cockpit_pipe_consume (self->buffer, i + 1, size, 0);
-      payload = cockpit_transport_parse_frame (message, &channel);
+      if (self->received_frame)
+        payload = cockpit_transport_parse_frame (message, &channel);
+      else
+        payload = cockpit_transport_maybe_frame (message, &channel);
       if (payload)
         {
           g_debug ("%s: received a %d byte payload", self->logname, (int)g_bytes_get_size (payload));
+          self->received_frame = TRUE;
           cockpit_transport_emit_recv ((CockpitTransport *)self, channel, payload);
           g_bytes_unref (payload);
           g_free (channel);
+        }
+      else if (self->received_frame)
+        {
+          close_immediately (self, "protocol-error");
+          break;
+        }
+      else
+        {
+          g_string_append_len (self->errbuf, (gchar *)self->buffer->data, self->buffer->len);
+          cockpit_pipe_skip (self->buffer, self->buffer->len);
+          self->not_cockpit = TRUE;
+          break;
         }
       g_bytes_unref (message);
     }
@@ -950,8 +1208,8 @@ drain_buffer (CockpitSshTransport *self)
       /* Received a partial message */
       if (self->buffer->len > 0)
         {
-          g_warning ("%s: received truncated %d byte frame", self->logname, (int)self->buffer->len);
-          close_immediately (self, "internal-error");
+          g_debug ("%s: received truncated %d byte frame", self->logname, (int)self->buffer->len);
+          close_immediately (self, "disconnected");
         }
     }
 }
@@ -1205,7 +1463,8 @@ cockpit_ssh_source_dispatch (GSource *source,
   if (self->drain_buffer)
     {
       self->drain_buffer = 0;
-      drain_buffer (self);
+      drain_output_buffer (self);
+      drain_error_buffer (self);
     }
 
   if (cond & (G_IO_HUP | G_IO_ERR))
@@ -1265,7 +1524,8 @@ cockpit_ssh_source_dispatch (GSource *source,
   if (self->drain_buffer)
     {
       self->drain_buffer = 0;
-      drain_buffer (self);
+      drain_output_buffer (self);
+      drain_error_buffer (self);
     }
 
   if (cond & G_IO_OUT)
@@ -1355,7 +1615,7 @@ cockpit_ssh_transport_set_property (GObject *obj,
     case PROP_KNOWN_HOSTS:
       string = g_value_get_string (value);
       if (string == NULL)
-        string = PACKAGE_LOCALSTATE_DIR "/lib/cockpit/known_hosts";
+        string = PACKAGE_LOCALSTATE_DIR "/known_hosts";
       ssh_options_set (self->data->session, SSH_OPTIONS_KNOWNHOSTS, string);
       self->data->knownhosts_file = g_strdup (string);
       break;
@@ -1436,6 +1696,7 @@ cockpit_ssh_transport_finalize (GObject *object)
 
   g_queue_free_full (self->queue, (GDestroyNotify)g_bytes_unref);
   g_byte_array_free (self->buffer, TRUE);
+  g_string_free (self->errbuf, TRUE);
 
   g_assert (self->io == NULL);
 
@@ -1608,4 +1869,32 @@ cockpit_ssh_transport_get_host_fingerprint (CockpitSshTransport *self)
   if (!self->data)
     return NULL;
   return self->data->host_fingerprint;
+}
+
+/**
+ * cockpit_ssh_transport_get_auth_method_results
+ * @self: the ssh tranpsort
+ *
+ * This is only valid after the transport opens ...
+ * and since you can't detect that reliably, you really
+ * should only be calling this after the transport closes.
+ *
+ * Returns: (transfer none): a GHashTable with a key for
+ * each supported auth method. Possible values are:
+ *   not-provided
+ *   no-server-support
+ *   succeeded
+ *   denied
+ *   partial
+ *   error
+ */
+GHashTable *
+cockpit_ssh_transport_get_auth_method_results (CockpitSshTransport *self)
+{
+  g_return_val_if_fail (COCKPIT_IS_SSH_TRANSPORT (self), NULL);
+
+  if (!self->data)
+    return NULL;
+
+  return self->data->auth_results;
 }

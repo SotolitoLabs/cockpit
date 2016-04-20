@@ -22,16 +22,15 @@ define([
     "base1/cockpit",
     "docker/util",
     "shell/shell",
-    "shell/dbus",
     "shell/cockpit-plot",
     "shell/cockpit-util",
-], function($, cockpit, util, shell, dbusx) {
+], function($, cockpit, util, shell) {
 
     /* DOCKER CLIENT
      */
 
     function DockerClient() {
-        var me = this;
+        var self = this;
         var events;
         var watch;
         var http;
@@ -44,7 +43,7 @@ define([
             if (!later) {
                 later = window.setTimeout(function() {
                     later = null;
-                    $(me).trigger("event");
+                    $(self).trigger("event");
                 }, 300);
             }
         }
@@ -109,7 +108,18 @@ define([
                 container.State = { };
             if (container.Config === undefined)
                 container.Config = { };
-            $.extend(container, containers_meta[id]);
+
+            // Add in the fields of the short form of the container
+            // info, but never overwrite fields that are already in
+            // the long form.
+            //
+            // TODO: Figure out and document why we do this at all.
+
+            for (var m in containers_meta[id]) {
+                if (container[m] === undefined)
+                    container[m] = containers_meta[id][m];
+            }
+
             var name = container_to_name(container);
             if (name)
                 containers_by_name[name] = id;
@@ -118,13 +128,13 @@ define([
         }
 
         function remove_container(id) {
-            var container = me.containers[id];
+            var container = self.containers[id];
             if (container) {
                 var name = container_to_name(container);
                 if (name && containers_by_name[name] == id)
                     delete containers_by_name[name];
-                delete me.containers[id];
-                $(me).trigger("container", [id, undefined]);
+                delete self.containers[id];
+                $(self).trigger("container", [id, undefined]);
             }
         }
 
@@ -153,7 +163,7 @@ define([
                             done(function(data) {
                                 var container = JSON.parse(data);
                                 populate_container(id, container);
-                                me.containers[id] = container;
+                                self.containers[id] = container;
                                 usage_samples[id] = [ usage_grid.add(usage_metrics_channel,
                                                                      [ "cgroup.memory.usage", container.CGroup ]),
                                                       usage_grid.add(usage_metrics_channel,
@@ -163,12 +173,12 @@ define([
                                                       usage_grid.add(usage_metrics_channel,
                                                                      [ "cgroup.cpu.shares", container.CGroup ])
                                                     ];
-                                $(me).trigger("container", [id, container]);
+                                $(self).trigger("container", [id, container]);
                             });
                     });
 
                     var removed = [];
-                    $.each(me.containers, function(id) {
+                    $.each(self.containers, function(id) {
                         if (!seen[id])
                             removed.push(id);
                     });
@@ -181,13 +191,13 @@ define([
                     if (connected.state() == "pending")
                         connected.reject(ex);
                     got_failure = true;
-                    $(me).trigger("failure", [ex]);
+                    $(self).trigger("failure", [ex]);
                 });
         }
 
         function handle_usage_samples() {
             for (var id in usage_samples) {
-                var container = me.containers[id];
+                var container = self.containers[id];
                 if (!container)
                     continue;
                 var samples = usage_samples[id];
@@ -208,7 +218,7 @@ define([
                     container.MemoryLimit = limit;
                     container.CpuUsage = cpu;
                     container.CpuPriority = priority;
-                    $(me).trigger("container", [id, container]);
+                    $(self).trigger("container", [id, container]);
                 }
             }
         }
@@ -228,9 +238,9 @@ define([
         }
 
         function remove_image(id) {
-            if (me.images[id]) {
-                delete me.images[id];
-                $(me).trigger("image", [id, undefined]);
+            if (self.images[id]) {
+                delete self.images[id];
+                $(self).trigger("image", [id, undefined]);
             }
         }
 
@@ -257,13 +267,13 @@ define([
                             done(function(data) {
                                 var image = JSON.parse(data);
                                 populate_image(id, image);
-                                me.images[id] = image;
-                                $(me).trigger("image", [id, image]);
+                                self.images[id] = image;
+                                $(self).trigger("image", [id, image]);
                             });
                     });
 
                     var removed = [];
-                    $.each(me.images, function(id) {
+                    $.each(self.images, function(id) {
                         if (!seen[id])
                             removed.push(id);
                     });
@@ -276,11 +286,11 @@ define([
                     if (connected.state() == "pending")
                         connected.reject(ex);
                     got_failure = true;
-                    $(me).trigger("failure", [ex]);
+                    $(self).trigger("failure", [ex]);
                 });
         }
 
-        $(me).on("event", function() {
+        $(self).on("event", function() {
             fetch_containers();
             fetch_images();
         });
@@ -306,11 +316,11 @@ define([
                         console.warn("monitor for docker directory failed: " + options.problem);
                 });
 
-                $(me).triggerHandler("event");
+                $(self).triggerHandler("event");
             }).fail(function(err) {
                 if (err != "not-found")
                     console.warn("monitor for docker directory failed: " + err);
-                $(me).triggerHandler("event");
+                $(self).triggerHandler("event");
             });
 
             usage_metrics_channel = cockpit.metrics(1000,
@@ -366,25 +376,25 @@ define([
         }
 
         function trigger_id(id) {
-            if (id in me.containers)
-                $(me).trigger("container", [id, me.containers[id]]);
-            else if (id in me.images)
-                $(me).trigger("image", [id, me.images[id]]);
+            if (id in self.containers)
+                $(self).trigger("container", [id, self.containers[id]]);
+            else if (id in self.images)
+                $(self).trigger("image", [id, self.images[id]]);
         }
 
         function waiting(id, yes) {
-            if (id in me.waiting) {
-                me.waiting[id]++;
+            if (id in self.waiting) {
+                self.waiting[id]++;
             } else {
-                me.waiting[id] = 1;
+                self.waiting[id] = 1;
                 trigger_id(id);
             }
         }
 
         function not_waiting(id) {
-            me.waiting[id]--;
-            if (me.waiting[id] === 0) {
-                delete me.waiting[id];
+            self.waiting[id]--;
+            if (self.waiting[id] === 0) {
+                delete self.waiting[id];
                 trigger_id(id);
             }
         }
@@ -434,10 +444,17 @@ define([
                 });
         };
 
-        this.restart = function restart(id) {
+        this.restart = function restart(id, timeout) {
             waiting(id);
+            if (timeout === undefined)
+                timeout = 10;
             util.docker_debug("restarting:", id);
-            return http.post("/v1.12/containers/" + encodeURIComponent(id) + "/restart")
+            return http.request({
+                method: "POST",
+                path: "/v1.12/containers/" + encodeURIComponent(id) + "/restart",
+                params: { 't': timeout },
+                body: ""
+            })
                 .fail(function(ex) {
                     util.docker_debug("restart failed:", id, ex);
                 })
@@ -450,13 +467,14 @@ define([
         };
 
         this.create = function create(name, options) {
-            util.docker_debug("creating:", name);
+            var body = JSON.stringify(options || { });
+            util.docker_debug("creating:", name, body);
             return http.request({
                 method: "POST",
                 path: "/v1.12/containers/create",
                 params: { "name": name },
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(options || { })
+                body: body,
             })
                 .fail(function(ex) {
                     util.docker_debug("create failed:", name, ex);

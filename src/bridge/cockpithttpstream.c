@@ -21,9 +21,11 @@
 
 #include "cockpithttpstream.h"
 
+#include "common/cockpitconnect.h"
 #include "common/cockpitjson.h"
 #include "common/cockpitpipe.h"
 #include "common/cockpitstream.h"
+#include "common/cockpitwebresponse.h"
 
 #include "websocket/websocket.h"
 
@@ -43,9 +45,7 @@
 typedef struct {
   gint refs;
   gchar *name;
-  gchar *host;
-  GSocketConnectable *connectable;
-  CockpitStreamOptions *options;
+  CockpitConnectable *connectable;
   CockpitStream *stream;
   gulong sig_close;
   guint timeout;
@@ -77,11 +77,8 @@ cockpit_http_client_unref (gpointer data)
     {
       cockpit_http_client_reset (client);
       if (client->connectable)
-        g_object_unref (client->connectable);
-      if (client->options)
-        cockpit_stream_options_unref (client->options);
+        cockpit_connectable_unref (client->connectable);
       g_free (client->name);
-      g_free (client->host);
       g_slice_free (CockpitHttpClient, client);
     }
 }
@@ -204,13 +201,16 @@ typedef struct _CockpitHttpStream {
 
   /* The connection */
   CockpitStream *stream;
+  gulong sig_open;
   gulong sig_read;
+  gulong sig_rejected_cert;
   gulong sig_close;
 
   gint state;
   gboolean failed;
   gboolean binary;
   gboolean keep_alive;
+  gboolean headers_inline;
 
   /* The request */
   GList *request;
@@ -292,21 +292,23 @@ parse_transfer_encoding (CockpitHttpStream *self,
   return TRUE;
 }
 
-static gboolean
-parse_keep_alive (CockpitHttpStream *self,
-                  const gchar *version,
-                  GHashTable *headers)
+gboolean
+cockpit_http_stream_parse_keep_alive (const gchar *version,
+                                      GHashTable *headers)
 {
   const gchar *header;
 
   header = g_hash_table_lookup (headers, "Connection");
 
-  g_debug ("%s: got Connection of %s on %s response", self->name, header, version);
-
   if (!header)
     {
+      g_debug ("got no \"Connection\" header on %s response", version);
       if (version && g_ascii_strcasecmp (version, "HTTP/1.1") == 0)
         header = "keep-alive";
+    }
+  else
+    {
+      g_debug ("got \"Connection\" header of %s on %s response", header, version);
     }
 
   /*
@@ -317,7 +319,15 @@ parse_keep_alive (CockpitHttpStream *self,
    * to tell us.
    */
 
-  self->keep_alive = (header && strstr (header, "keep-alive") != NULL);
+  return (header && strstr (header, "keep-alive") != NULL);
+}
+
+static gboolean
+parse_keep_alive (CockpitHttpStream *self,
+                  const gchar *version,
+                  GHashTable *headers)
+{
+  self->keep_alive = cockpit_http_stream_parse_keep_alive (version, headers);
   return TRUE;
 }
 
@@ -397,11 +407,19 @@ relay_headers (CockpitHttpStream *self,
     json_object_set_string_member (heads, key, value);
 
   json_object_set_object_member (object, "headers", heads);
-  message = cockpit_json_write_bytes (object);
-  json_object_unref (object);
 
-  cockpit_channel_send (channel, message, TRUE);
-  g_bytes_unref (message);
+  if (self->headers_inline)
+    {
+      message = cockpit_json_write_bytes (object);
+      cockpit_channel_send (channel, message, TRUE);
+      g_bytes_unref (message);
+    }
+  else
+    {
+      cockpit_channel_control (channel, "response", object);
+    }
+
+  json_object_unref (object);
 
 out:
   if (problem)
@@ -562,6 +580,14 @@ relay_all (CockpitHttpStream *self,
 }
 
 static void
+on_stream_open (CockpitStream *stream,
+                gpointer user_data)
+{
+  CockpitChannel *channel = user_data;
+  cockpit_channel_ready (channel);
+}
+
+static void
 on_stream_read (CockpitStream *stream,
                 GByteArray *buffer,
                 gboolean end_of_data,
@@ -610,6 +636,22 @@ on_stream_read (CockpitStream *stream,
 }
 
 static void
+on_rejected_cert (CockpitStream *stream,
+                  const gchar *pem_data,
+                  gpointer user_data)
+{
+  CockpitHttpStream *self = user_data;
+  CockpitChannel *channel = user_data;
+  JsonObject *close_options = NULL; // owned by channel
+
+  if (self->state != FINISHED)
+    {
+      close_options = cockpit_channel_close_options (channel);
+      json_object_set_string_member (close_options, "rejected-certificate", pem_data);
+    }
+}
+
+static void
 on_stream_close (CockpitStream *stream,
                  const gchar *problem,
                  gpointer user_data)
@@ -637,20 +679,6 @@ on_stream_close (CockpitStream *stream,
           cockpit_channel_close (channel, "protocol-error");
         }
     }
-}
-
-static gboolean
-simple_token (const gchar *string)
-{
-  string += strcspn (string, " \t\r\n\v");
-  return string[0] == '\0';
-}
-
-static gboolean
-single_line (const gchar *string)
-{
-  string += strcspn (string, "\r\n\v");
-  return string[0] == '\0';
 }
 
 static gboolean
@@ -743,7 +771,7 @@ send_http_request (CockpitHttpStream *self)
       g_warning ("%s: missing \"path\" field in HTTP stream request", self->name);
       goto out;
     }
-  else if (!simple_token (path))
+  else if (!cockpit_web_response_is_simple_token (path))
     {
       g_warning ("%s: invalid \"path\" field in HTTP stream request", self->name);
       goto out;
@@ -759,7 +787,7 @@ send_http_request (CockpitHttpStream *self)
       g_warning ("%s: missing \"method\" field in HTTP stream request", self->name);
       goto out;
     }
-  else if (!simple_token (method))
+  else if (!cockpit_web_response_is_simple_token (method))
     {
       g_warning ("%s: invalid \"method\" field in HTTP stream request", self->name);
       goto out;
@@ -786,7 +814,7 @@ send_http_request (CockpitHttpStream *self)
       for (l = names; l != NULL; l = g_list_next (l))
         {
           header = l->data;
-          if (!simple_token (header))
+          if (!cockpit_web_response_is_simple_token (header))
             {
               g_warning ("%s: invalid header in HTTP stream request: %s", self->name, header);
               goto out;
@@ -803,7 +831,7 @@ send_http_request (CockpitHttpStream *self)
               g_warning ("%s: disallowed header in HTTP stream request: %s", self->name, header);
               goto out;
             }
-          if (!single_line (value))
+          if (!cockpit_web_response_is_header_value (value))
             {
               g_warning ("%s: invalid header value in HTTP stream request: %s", self->name, header);
               goto out;
@@ -820,7 +848,11 @@ send_http_request (CockpitHttpStream *self)
     }
 
   if (!had_host)
-    g_string_append_printf (string, "Host: %s\r\n", self->client->host);
+    {
+      g_string_append (string, "Host: ");
+      g_string_append_uri_escaped (string, self->client->connectable->name, "[]!%$&()*+,-.:;=\\_~", FALSE);
+      g_string_append (string, "\r\n");
+    }
   if (!had_encoding)
     g_string_append (string, "Accept-Encoding: identity\r\n");
 
@@ -867,14 +899,22 @@ cockpit_http_stream_recv (CockpitChannel *channel,
   self->request = g_list_prepend (self->request, g_bytes_ref (message));
 }
 
-static void
-cockpit_http_stream_done (CockpitChannel *channel)
+static gboolean
+cockpit_http_stream_control (CockpitChannel *channel,
+                             const gchar *command,
+                             JsonObject *options)
 {
   CockpitHttpStream *self = COCKPIT_HTTP_STREAM (channel);
 
-  g_return_if_fail (self->state == BUFFER_REQUEST);
-  self->state = RELAY_REQUEST;
-  send_http_request (self);
+  if (g_str_equal (command, "done"))
+    {
+      g_return_val_if_fail (self->state == BUFFER_REQUEST, FALSE);
+      self->state = RELAY_REQUEST;
+      send_http_request (self);
+      return TRUE;
+    }
+
+  return FALSE;
 }
 
 static void
@@ -893,13 +933,16 @@ cockpit_http_stream_close (CockpitChannel *channel,
     {
       g_debug ("%s: relayed response", self->name);
       self->state = FINISHED;
-      cockpit_channel_done (channel);
+      cockpit_channel_control (channel, "done", NULL);
 
       /* Save this for another round? */
       if (self->keep_alive)
         {
+          if (self->sig_open)
+            g_signal_handler_disconnect (self->stream, self->sig_open);
           g_signal_handler_disconnect (self->stream, self->sig_read);
           g_signal_handler_disconnect (self->stream, self->sig_close);
+          g_signal_handler_disconnect (self->stream, self->sig_rejected_cert);
           cockpit_http_client_checkin (self->client, self->stream);
           g_object_unref (self->stream);
           self->stream = NULL;
@@ -928,13 +971,11 @@ static void
 cockpit_http_stream_prepare (CockpitChannel *channel)
 {
   CockpitHttpStream *self = COCKPIT_HTTP_STREAM (channel);
-  GSocketConnectable *connectable = NULL;
-  CockpitStreamOptions *opts = NULL;
+  CockpitConnectable *connectable = NULL;
+  const gchar *payload;
   const gchar *connection;
   JsonObject *options;
   const gchar *path;
-  gchar *host = NULL;
-  gboolean local = FALSE;
 
   COCKPIT_CHANNEL_CLASS (cockpit_http_stream_parent_class)->prepare (channel);
 
@@ -956,71 +997,60 @@ cockpit_http_stream_prepare (CockpitChannel *channel)
       goto out;
     }
 
+  /*
+   * In http-stream1 the headers are sent as first message.
+   * In http-stream2 the headers are in a control message.
+   */
+  if (cockpit_json_get_string (options, "payload", NULL, &payload) &&
+      payload && g_str_equal (payload, "http-stream1"))
+    {
+      self->headers_inline = TRUE;
+    }
+
   self->client = cockpit_http_client_ensure (connection);
 
   if (!self->client->connectable ||
       json_object_has_member (options, "unix") ||
       json_object_has_member (options, "port") ||
       json_object_has_member (options, "internal") ||
+      json_object_has_member (options, "tls") ||
       json_object_has_member (options, "address"))
     {
-      g_free (self->client->host);
-      self->client->host = NULL;
-      connectable = cockpit_channel_parse_connectable (channel, &host, &local);
+      connectable = cockpit_channel_parse_stream (channel);
       if (!connectable)
         goto out;
-    }
 
-  if (!self->client->options ||
-      json_object_has_member (options, "tls"))
-    {
-      opts = cockpit_channel_parse_stream (channel, local);
-      if (!opts)
-        goto out;
-    }
-
-  if (connectable)
-    {
       if (self->client->connectable)
-        g_object_unref (self->client->connectable);
-      self->client->connectable = connectable;
-      connectable = NULL;
+        cockpit_connectable_unref (self->client->connectable);
+      self->client->connectable = cockpit_connectable_ref (connectable);
     }
 
-  if (host)
-    {
-      g_free (self->client->host);
-      self->client->host = host;
-      host = NULL;
-    }
-
-  if (opts)
-    {
-      if (self->client->options)
-        cockpit_stream_options_unref (self->client->options);
-      self->client->options = cockpit_stream_options_ref (opts);
-    }
-
-  self->name = g_strdup_printf ("%s://%s%s", self->client->options->tls_client ? "https" : "http",
-                                self->client->host, path);
+  self->name = g_strdup_printf ("%s://%s%s",
+                                self->client->connectable->tls ? "https" : "http",
+                                self->client->connectable->name, path);
 
   self->stream = cockpit_http_client_checkout (self->client);
   if (!self->stream)
-    self->stream = cockpit_stream_connect (self->name, self->client->connectable, self->client->options);
+    {
+      self->stream = cockpit_stream_connect (self->name, self->client->connectable);
+      self->sig_open = g_signal_connect (self->stream, "open", G_CALLBACK (on_stream_open), self);
+    }
 
   /* Parsed elsewhere */
   self->binary = json_object_has_member (options, "binary");
 
   self->sig_read = g_signal_connect (self->stream, "read", G_CALLBACK (on_stream_read), self);
   self->sig_close = g_signal_connect (self->stream, "close", G_CALLBACK (on_stream_close), self);
+  self->sig_rejected_cert = g_signal_connect (self->stream, "rejected-cert",
+                                              G_CALLBACK (on_rejected_cert), self);
 
-  cockpit_channel_ready (channel);
+  /* If not waiting for open */
+  if (!self->sig_open)
+    cockpit_channel_ready (channel);
 
 out:
   if (connectable)
-    g_object_unref (connectable);
-  if (opts)
-    cockpit_stream_options_unref (opts);
+    cockpit_connectable_unref (connectable);
 }
 
 static void
@@ -1030,8 +1060,11 @@ cockpit_http_stream_dispose (GObject *object)
 
   if (self->stream)
     {
+      if (self->sig_open)
+        g_signal_handler_disconnect (self->stream, self->sig_open);
       g_signal_handler_disconnect (self->stream, self->sig_read);
       g_signal_handler_disconnect (self->stream, self->sig_close);
+      g_signal_handler_disconnect (self->stream, self->sig_rejected_cert);
       cockpit_stream_close (self->stream, NULL);
       g_object_unref (self->stream);
     }
@@ -1077,7 +1110,7 @@ cockpit_http_stream_class_init (CockpitHttpStreamClass *klass)
   gobject_class->constructed = cockpit_http_stream_constructed;
 
   channel_class->prepare = cockpit_http_stream_prepare;
+  channel_class->control = cockpit_http_stream_control;
   channel_class->recv = cockpit_http_stream_recv;
-  channel_class->done = cockpit_http_stream_done;
   channel_class->close = cockpit_http_stream_close;
 }

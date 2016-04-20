@@ -29,31 +29,7 @@ body.login-pf {
     font-weight: bold;
 }
 
-.navbar-pf .navbar-brand {
-    padding: 2px 0;
-}
-
 .login-note {
     color: transparent;
     position: relative;
-}
-
-.login-note:after {
-    content: "Cockpit - Technology Preview";
-    color: white;
-    position: absolute;
-    top: 0px;
-    left: 0px;
-}
-
-.dashboard-machine-warning {
-    display: block !important;
-}
-
-.dashboard-machine-limit span {
-    display: none
-}
-
-.dashboard-machine-limit:after {
-    content: "5";
 }

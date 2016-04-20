@@ -13,17 +13,26 @@ disks or network adapters.
 
 ## Using Vagrant
 
-It's possible to test and work on on Cockpit web assets by just using
+It's possible to test and work on Cockpit web assets by just using
 Vagrant. In the top level directory of the repository, you can run:
 
     $ sudo vagrant up
 
 Cockpit will listen on port 9090 of the vagrant VM started, and also
-port 9090 of localhost if cockpit is not running locally. Any changes
-you make to the system in the Vagrant VM won't affect the host machine.
+port 9090 of localhost if cockpit is not running locally. Access Cockpit
+at:
+
+    http://localhost:9090
+
+and login with user `admin` and password `foobar`. Any changes you
+make to the system in the Vagrant VM won't affect the host machine.
 
 You can edit files in the `pkg/` subdirectory of the Cockpit sources
-and the changes should take effect immediately in the Vagrant VM.
+and the changes should take effect after syncing them to the Vagrant
+VM. Use one of the folowing commands to sync:
+
+    $ sudo vagrant rsync
+    $ sudo vagrant rsync-auto
 
 The Vagrant VM is in debug mode, which means that resources will load
 into your web browser more slowly than in a production install of
@@ -36,8 +45,8 @@ You may need to rebuild the Vagrant VM periodically, by running:
 
 ## Development Dependencies
 
-For more complex hacking no Cockpit, you need to build Cockpit locally
-and install the relevant dependencies. Currently recent x86_64
+For more complex hacking on Cockpit, you need to build Cockpit locally
+and install the relevant dependencies. Currently, recent x86_64
 architectures of Fedora are most often used for development.
 
 Check `tools/cockpit.spec` for the concrete Fedora build dependencies.
@@ -51,25 +60,37 @@ In addition for testing the following dependencies are required:
     $ sudo yum install python-libguestfs qemu mock qemu-kvm rpm-build \
          curl libvirt-client libvirt-python libvirt python-lxml \
          krb5-workstation krb5-server selinux-policy-devel
-    $ sudo npm install -g phantomjs
 
-## Building and installing
+    $ npm install phantomjs-prebuilt
+
+## Building and Installing RPMs
+
+If you wish to test out a development branch on Fedora, you can just
+build installable RPMs.
+
+    $ tools/make-rpms --verbose
+    $ sudo yum install noarch/cockpit*-wip-1.rpm x86_64/cockpit*-wip-1.rpm
+
+If you want to develop Cockpit, then skip this section, and build from
+source.
+
+## Building and Installing from source
 
 Cockpit uses the autotools and thus there are the familiar `./configure`
 script and the familar Makefile targets.
 
 But after a fresh clone of the Cockpit sources, you need to prepare
-them by running autogen.sh.  Maybe like so:
+them by running `autogen.sh`.  Maybe like so:
 
     $ mkdir build
     $ cd build
     $ ../autogen.sh --prefix=/usr --enable-maintainer-mode --enable-debug
 
-As shown, autogen.sh also runs 'configure' with the given options, and it
+As shown, `autogen.sh` also runs 'configure' with the given options, and it
 also prepares the build tree by downloading various nodejs dependencies.
 
 When working with a Git clone, it is therefore best to simply always
-run ../autogen.sh instead of `../configure`.
+run `../autogen.sh` instead of `../configure`.
 
 Creating a build directory puts the output of the build in a separate
 directory, rather than mixing it in with the sources, which is confusing.
@@ -195,7 +216,7 @@ only for the user which ran the above command.
 
 To revert the above change, run:
 
-    $ rm ~/.local/share/cockpit
+    $ rm ~/.local/share/cockpit/*
 
 ## Debug logging of Cockpit processes
 
@@ -281,8 +302,8 @@ cockpit sources checked out, here's how you get it running:
     $ cd /path/to/src/cockpit
     $ cd ./test
     $ ./vm-prep
-    $ ./vm-download -f ipa
-    $ ./vm-run -f ipa
+    $ ./vm-download ipa
+    $ ./vm-run ipa
 
 The IP address of the IPA server will be printed. The root password
 is `foobar`. The IPA admin password is `foobarfoo`.

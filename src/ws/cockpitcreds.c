@@ -22,6 +22,7 @@
 #include "cockpitcreds.h"
 
 #include "common/cockpitmemory.h"
+#include "common/cockpitjson.h"
 
 #include <krb5/krb5.h>
 #include <gssapi/gssapi.h>
@@ -35,13 +36,14 @@ struct _CockpitCreds {
   gint poisoned;
   gchar *user;
   gchar *application;
-  gchar *fullname;
   gchar *password;
   gchar *rhost;
   gchar *gssapi_creds;
+  gchar *csrf_token;
   krb5_context krb5_ctx;
   krb5_ccache krb5_ccache;
   gchar *krb5_ccache_name;
+  JsonObject *login_data;
 };
 
 G_DEFINE_BOXED_TYPE (CockpitCreds, cockpit_creds, cockpit_creds_ref, cockpit_creds_unref);
@@ -53,11 +55,11 @@ cockpit_creds_free (gpointer data)
 
   g_free (creds->user);
   g_free (creds->application);
-  g_free (creds->fullname);
   cockpit_secclear (creds->password, -1);
   g_free (creds->password);
   g_free (creds->rhost);
   g_free (creds->gssapi_creds);
+  g_free (creds->csrf_token);
 
   if (creds->krb5_ctx)
     {
@@ -68,7 +70,42 @@ cockpit_creds_free (gpointer data)
       krb5_free_context (creds->krb5_ctx);
     }
 
+  if (creds->login_data)
+    json_object_unref (creds->login_data);
+
   g_free (creds);
+}
+
+static JsonObject *
+parse_login_data (const gchar *json_str)
+{
+  JsonObject *results = NULL;
+  JsonObject *login_data = NULL;
+  GError *error = NULL;
+
+  results = cockpit_json_parse_object (json_str, strlen(json_str), &error);
+  if (!results)
+    {
+      g_warning ("received bad json data: %s", error->message);
+      g_error_free (error);
+      goto out;
+    }
+
+  if (!cockpit_json_get_object (results, "login-data", NULL, &login_data))
+    {
+      g_warning ("received bad login-data: %s", json_str);
+      login_data = NULL;
+      goto out;
+    }
+
+  if (login_data)
+    login_data = json_object_ref (login_data);
+
+out:
+  if (results)
+    json_object_unref (results);
+
+  return login_data;
 }
 
 /**
@@ -101,6 +138,7 @@ cockpit_creds_new (const gchar *user,
   creds = g_new0 (CockpitCreds, 1);
   creds->user = g_strdup (user);
   creds->application = g_strdup (application);
+  creds->login_data = NULL;
 
   va_start (va, application);
   for (;;)
@@ -108,14 +146,16 @@ cockpit_creds_new (const gchar *user,
       type = va_arg (va, const char *);
       if (type == NULL)
         break;
-      else if (g_str_equal (type, COCKPIT_CRED_FULLNAME))
-        creds->fullname = g_strdup (va_arg (va, const char *));
       else if (g_str_equal (type, COCKPIT_CRED_PASSWORD))
         creds->password = g_strdup (va_arg (va, const char *));
       else if (g_str_equal (type, COCKPIT_CRED_RHOST))
         creds->rhost = g_strdup (va_arg (va, const char *));
       else if (g_str_equal (type, COCKPIT_CRED_GSSAPI))
         creds->gssapi_creds = g_strdup (va_arg (va, const char *));
+      else if (g_str_equal (type, COCKPIT_CRED_CSRF_TOKEN))
+        creds->csrf_token = g_strdup (va_arg (va, const char *));
+      else if (g_str_equal (type, COCKPIT_CRED_LOGIN_DATA))
+        creds->login_data = parse_login_data(va_arg (va, const char *));
       else
         g_assert_not_reached ();
     }
@@ -192,19 +232,35 @@ cockpit_creds_get_application (CockpitCreds *creds)
 }
 
 const gchar *
-cockpit_creds_get_fullname (CockpitCreds *creds)
-{
-  g_return_val_if_fail (creds != NULL, NULL);
-  return creds->fullname;
-}
-
-const gchar *
 cockpit_creds_get_password (CockpitCreds *creds)
 {
   g_return_val_if_fail (creds != NULL, NULL);
   if (g_atomic_int_get (&creds->poisoned))
       return NULL;
   return creds->password;
+}
+
+const gchar *
+cockpit_creds_get_csrf_token (CockpitCreds *creds)
+{
+  g_return_val_if_fail (creds != NULL, NULL);
+  return creds->csrf_token;
+}
+
+/**
+ * cockpit_creds_get_login_data
+ * @creds: the credentials
+ *
+ * Get any login data, or NULL
+ * if none present.
+ *
+ * Returns: A JsonObject (transfer none) or NULL
+ */
+JsonObject *
+cockpit_creds_get_login_data (CockpitCreds *creds)
+{
+  g_return_val_if_fail (creds != NULL, NULL);
+  return creds->login_data;
 }
 
 /**
@@ -256,6 +312,24 @@ hex_decode (const gchar *hex,
 
   *data_len = i;
   return out;
+}
+
+/**
+ * cockpit_creds_has_gssapi:
+ * @creds: the credentials
+ *
+ * Returns: true if this credentials instance has gssapi credentials
+ * stored. Otherwise false.
+ */
+gboolean
+cockpit_creds_has_gssapi (CockpitCreds *creds)
+{
+  g_return_val_if_fail (creds != NULL, FALSE);
+
+  if (!creds->gssapi_creds || !creds->krb5_ccache_name)
+    return FALSE;
+
+  return TRUE;
 }
 
 /**

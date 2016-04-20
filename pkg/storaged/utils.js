@@ -60,9 +60,10 @@ define([
     };
 
     utils.fmt_size_long = function fmt_size_long(bytes) {
-        var with_unit = cockpit.format_bytes(bytes, 1024);
-        /* Translators: Used in "42.5 KB (42399 bytes)" */
-        return with_unit + " (" + bytes + " " + C_("format-bytes", "bytes") + ")";
+        var with_binary_unit = cockpit.format_bytes(bytes, 1024);
+        var with_decimal_unit = cockpit.format_bytes(bytes, 1000);
+        /* Translators: Used in "..." */
+        return with_binary_unit + ", " + with_decimal_unit + ", " + bytes + " " + C_("format-bytes", "bytes");
     };
 
     utils.fmt_rate = function fmt_rate(bytes_per_sec) {
@@ -249,13 +250,18 @@ define([
             }
 
             function is_mpath_member() {
-                // A configured multipath member has
-                // IdType="mpath_member", but unconfigured ones look
-                // like normal block devices.  We can check their
-                // drive to find out whether it has been properly set
-                // up.
-                return (block.IdType == "mpath_member" ||
-                        client.drives[block.Drive] && !client.drives_block[block.Drive]);
+                if (!client.drives[block.Drive])
+                    return false;
+                if (!client.drives_block[block.Drive]) {
+                    // Broken multipath drive
+                    return true;
+                }
+                var members = client.drives_multipath_blocks[block.Drive];
+                for (var i = 0; i < members.length; i++) {
+                    if (members[i] == block)
+                        return true;
+                }
+                return false;
             }
 
             return (!block.HintIgnore &&
@@ -309,6 +315,21 @@ define([
         if (!multipathd_service)
             multipathd_service = service.proxy("multipathd");
         return multipathd_service;
+    };
+
+    utils.init_arming_zones = function init_arming_zones($top) {
+        $top.on('click', 'button.arm-button', function () {
+            var was_active = $(this).hasClass('active');
+            $(this).toggleClass('active', !was_active);
+            $(this).parents('.arming-zone').toggleClass('armed', !was_active);
+        });
+    };
+
+    utils.reset_arming_zone = function reset_arming_zone($btn) {
+        var $zone = $btn.parents('.arming-zone');
+        var $arm_btn = $zone.find('.arm-button');
+        $arm_btn.removeClass('active');
+        $zone.removeClass('armed');
     };
 
     return utils;

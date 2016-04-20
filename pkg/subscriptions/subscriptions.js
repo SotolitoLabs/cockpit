@@ -17,15 +17,12 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* global jQuery   */
-
-define([
+require([
     "jquery",
     "base1/cockpit",
     "translated!base1/po",
     "base1/mustache",
     "base1/patterns",
-    "base1/bootstrap-select"
 ], function($, cockpit, po, Mustache) {
     "use strict";
 
@@ -39,11 +36,12 @@ define([
     }
 
     var subscriptions = { };
+    var register_url = "default";
 
     function register_system() {
         var url = null;
         var ex, errors = [];
-        if ($('#subscription-register-url').val() === 'Custom URL')
+        if (register_url != "default")
           url = $('#subscription-register-url-custom').val().trim();
         var username = $('#subscription-register-username').val();
         if (username === '') {
@@ -503,7 +501,7 @@ define([
                         }
                         break;
                     case "server":
-                        ex.target = "#subscription-register-url-area";
+                        ex.target = "#subscription-register-url";
                         $("#subscriptions-register-dialog").dialog("failure", ex);
                         break;
                     default:
@@ -568,29 +566,31 @@ define([
 
     register_dialog_initialize();
 
-    subscriptions.register = function() {
-        $('#subscriptions-register-dialog').modal('show');
-    };
+    function register_url_changed() {
+        var custom_url = $('#subscription-register-url-custom');
+        if (register_url === "default") {
+            custom_url.hide();
+        } else {
+            custom_url.show();
+            custom_url.focus();
+            custom_url.select();
+        }
+    }
 
-    subscriptions.init = function(retrieve_current) {
+    function init(retrieve_current) {
         if (retrieve_current === undefined)
             retrieve_current = true;
 
-        var custom_url = $('#subscription-register-url-custom');
-        var url_selector = $('#subscription-register-url');
-        custom_url.hide();
-        url_selector.on('change', function() {
-            if (url_selector.val() === 'Default') {
-                custom_url.hide();
-            } else {
-                custom_url.show();
-                custom_url.focus();
-                custom_url.select();
-            }
+        $("#subscription-register-url").on("click", "li", function() {
+            register_url = $(this).attr("value");
+            $("#subscription-register-url button span").text($(this).text());
+            register_url_changed();
         });
-        url_selector.selectpicker('refresh');
-        subscriptions.manager = subscription_manager(retrieve_current);
-    };
 
-    return subscriptions;
+        register_url = "default";
+        register_url_changed();
+        subscriptions.manager = subscription_manager(retrieve_current);
+    }
+
+    init();
 });

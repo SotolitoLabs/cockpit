@@ -121,18 +121,12 @@ define([
             dialog.open({ Title: title,
                           Alerts: get_usage_alerts(path),
                           Fields: [
-                              { SizeInput: "size",
+                              { SizeSlider: "size",
                                 Title: _("Size"),
                                 Value: size,
                                 Max: size,
                                 visible: function () {
                                     return create_partition;
-                                },
-                                validate: function (size) {
-                                    if (isNaN(size))
-                                        return _("Size must be specified.");
-                                    if (size === 0)
-                                        return _("Size can not be zero.");
                                 }
                               },
                               { SelectOne: "erase",
@@ -403,8 +397,8 @@ define([
                               Action: {
                                   Title: _("Apply"),
                                   action: function (vals) {
-                                      return $.when(maybe_change_name(vals.name),
-                                                    maybe_update_config(vals.mounting == "custom",
+                                      return cockpit.all(maybe_change_name(vals.name),
+                                                         maybe_update_config(vals.mounting == "custom",
                                                                         vals.mount_point, vals.mount_options));
                                   }
                               }
@@ -503,10 +497,6 @@ define([
             mdraid_stop_scrub: function mdraid_stop_scrub(path) {
                 return client.mdraids[path].RequestSyncAction("idle", {});
             },
-            mdraid_format: function mdraid_format(path) {
-                if (client.mdraids_block[path])
-                    actions.format_disk(client.mdraids_block[path].path);
-            },
             mdraid_toggle_bitmap: function mdraid_toggle_bitmap(path) {
                 var old = utils.decode_filename(client.mdraids[path].BitmapLocation);
                 return client.mdraids[path].SetBitmapLocation(utils.encode_filename(old == 'none'? 'internal' : 'none'), {});
@@ -521,7 +511,7 @@ define([
                                     Options: (utils.get_free_blockdevs(client).
                                               filter(function (b) {
                                                   if (client.blocks_part[b.path])
-                                                      b = client.blocks[client.blocks_part[b.path].PartitionTable];
+                                                      b = client.blocks[client.blocks_part[b.path].Table];
                                                   return b && client.blocks[b.path].MDRaid != path;
                                               }).
                                               map(function (b) {
@@ -536,7 +526,7 @@ define([
                               Action: {
                                   Title: _("Add"),
                                   action: function (vals) {
-                                      return $.when.apply(null, vals.disks.map(function (p) {
+                                      return cockpit.all(vals.disks.map(function (p) {
                                           return mdraid.AddDevice(p, {});
                                       }));
                                   }
@@ -578,13 +568,29 @@ define([
                     return;
 
                 var block = client.lvols_block[path];
+                var vgroup = client.vgroups[lvol.VolumeGroup];
+                var pool = client.lvols[lvol.ThinPool];
+
+                /* Resizing is only safe when lvol has a filesystem
+                   and that filesystem is resized at the same time.
+
+                   So we always resize the filesystem for lvols that
+                   have one, and refuse to shrink otherwise.
+
+                   Note that shrinking a filesystem will not always
+                   succeed, but it is never dangerous.
+                */
 
                 dialog.open({ Title: _("Resize Logical Volume"),
                               Fields: [
-                                  { SizeInput: "size",
+                                  { SizeSlider: "size",
                                     Title: _("Size"),
                                     Value: lvol.Size,
-                                    Max: "XXX"
+                                    Max: (pool ?
+                                          pool.Size * 3 :
+                                          lvol.Size + vgroup.FreeSize),
+                                    AllowInfinite: !!pool,
+                                    Round: vgroup.ExtentSize
                                   },
                                   { CheckBox: "fsys",
                                     Title: _("Resize Filesystem"),
@@ -597,9 +603,19 @@ define([
                               Action: {
                                   Title: _("Resize"),
                                   action: function (vals) {
+
+                                      function error(msg) {
+                                          return $.Deferred().reject({ message: msg }).promise();
+                                      }
+
+                                      var fsys = (block && block.IdUsage == "filesystem");
+                                      if (!fsys && vals.size < lvol.Size)
+                                          return error(_("This logical volume can not be made smaller."));
+
                                       var options = { };
-                                      if (vals.fsys !== undefined)
-                                          options.resize_fsys = { t: 'b', v: vals.fsys };
+                                      if (fsys)
+                                          options.resize_fsys = { t: 'b', v: fsys };
+
                                       return lvol.Resize(vals.size, options);
                                   }
                               }
@@ -630,15 +646,19 @@ define([
                 if (!lvol)
                     return;
 
+                var vgroup = client.vgroups[lvol.VolumeGroup];
+
                 dialog.open({ Title: _("Create Snapshot"),
                               Fields: [
                                   { TextInput: "name",
                                     Title: _("Name"),
                                     validate: utils.validate_lvm2_name
                                   },
-                                  { SizeInput: "size",
+                                  { SizeSlider: "size",
                                     Title: _("Size"),
-                                    Max: "XXX",
+                                    Value: lvol.Size * 0.2,
+                                    Max: lvol.Size,
+                                    Round: vgroup.ExtentSize,
                                     visible: function () {
                                         return lvol.ThinPool == "/";
                                     }
@@ -672,9 +692,12 @@ define([
                                     Title: _("Name"),
                                     validate: utils.validate_lvm2_name
                                   },
-                                  { SizeInput: "size",
+                                  { SizeSlider: "size",
                                     Title: _("Size"),
-                                    Max: undefined
+                                    Value: pool.Size,
+                                    Max: pool.Size * 3,
+                                    AllowInfinite: true,
+                                    Round: vgroup.ExtentSize
                                   }
                               ],
                               Action: {
@@ -737,55 +760,70 @@ define([
                             });
             },
 
-            vgroup_create_plain: function vgroup_create_plain(path) {
+            vgroup_create_lvol: function vgroup_create_lvol(path) {
                 var vgroup = client.vgroups[path];
                 if (!vgroup)
                     return;
 
-                dialog.open({ Title: _("Create Plain Volume"),
+                dialog.open({ Title: _("Create Logical Volume"),
                               Fields: [
                                   { TextInput: "name",
                                     Title: _("Name"),
                                     validate: utils.validate_lvm2_name
                                   },
-                                  { SizeInput: "size",
-                                    Title: _("Size"),
-                                    Max: vgroup.FreeSize
-                                  }
-                              ],
-                              Action: {
-                                  Title: _("Create"),
-                                  action: function (vals) {
-                                      return vgroup.CreatePlainVolume(vals.name, vals.size, { });
-                                  }
-                              }
-                            });
-            },
-            vgroup_create_raid: function vgroup_create_raid(path) {
-                $('#error-popup-title').text(_("Sorry"));
-                $('#error-popup-message').text("Not yet.");
-                $('#error-popup').modal('show');
-            },
-            vgroup_create_thinpool: function vgroup_create_thinpool(path) {
-                var vgroup = client.vgroups[path];
-                if (!vgroup)
-                    return;
-
-                dialog.open({ Title: _("Create Pool for Thin Logical Volumes"),
-                              Fields: [
-                                  { TextInput: "name",
-                                    Title: _("Name"),
-                                    validate: utils.validate_lvm2_name
+                                  { SelectOne: "purpose",
+                                    Title: _("Purpose"),
+                                    Options: [
+                                        { value: "block", Title: _("Block device for filesystems"),
+                                          selected: true
+                                        },
+                                        { value: "pool", Title: _("Pool for thinly provisioned volumes") }
+                                        /* Not implemented
+                                           { value: "cache", Title: _("Cache") }
+                                        */
+                                    ]
                                   },
-                                  { SizeInput: "size",
+                                  /* Not Implemented
+                                  { SelectOne: "layout",
+                                    Title: _("Layout"),
+                                    Options: [
+                                        { value: "linear", Title: _("Linear"),
+                                          selected: true
+                                        },
+                                        { value: "striped", Title: _("Striped (RAID 0)"),
+                                          enabled: raid_is_possible
+                                        },
+                                        { value: "raid1", Title: _("Mirrored (RAID 1)"),
+                                          enabled: raid_is_possible
+                                        },
+                                        { value: "raid10", Title: _("Striped and mirrored (RAID 10)"),
+                                          enabled: raid_is_possible
+                                        },
+                                        { value: "raid4", Title: _("With dedicated parity (RAID 4)"),
+                                          enabled: raid_is_possible
+                                        },
+                                        { value: "raid5", Title: _("With distributed parity (RAID 5)"),
+                                          enabled: raid_is_possible
+                                        },
+                                        { value: "raid6", Title: _("With double distributed parity (RAID 6)"),
+                                          enabled: raid_is_possible
+                                        }
+                                    ],
+                                  },
+                                  */
+                                  { SizeSlider: "size",
                                     Title: _("Size"),
-                                    Max: vgroup.FreeSize
+                                    Max: vgroup.FreeSize,
+                                    Round: vgroup.ExtentSize
                                   }
                               ],
                               Action: {
                                   Title: _("Create"),
                                   action: function (vals) {
-                                      return vgroup.CreateThinPoolVolume(vals.name, vals.size, { });
+                                      if (vals.purpose == "block")
+                                          return vgroup.CreatePlainVolume(vals.name, vals.size, { });
+                                      else if (vals.purpose == "pool")
+                                          return vgroup.CreateThinPoolVolume(vals.name, vals.size, { });
                                   }
                               }
                             });
@@ -802,7 +840,7 @@ define([
                                     Options: (utils.get_free_blockdevs(client).
                                               filter(function (b) {
                                                   if (client.blocks_part[b.path])
-                                                      b = client.blocks[client.blocks_part[b.path].PartitionTable];
+                                                      b = client.blocks[client.blocks_part[b.path].Table];
                                                   var lvol = (b &&
                                                               client.blocks_lvm2[b.path] &&
                                                               client.lvols[client.blocks_lvm2[b.path].LogicalVolume]);
@@ -820,7 +858,7 @@ define([
                               Action: {
                                   Title: _("Add"),
                                   action: function (vals) {
-                                      return $.when.apply(null, vals.disks.map(function (p) {
+                                      return cockpit.all(vals.disks.map(function (p) {
                                           return vgroup.AddDevice(p, {});
                                       }));
                                   }
@@ -930,11 +968,15 @@ define([
         mustache.parse(action_btn_tmpl);
 
         function create_block_action_btn (target, is_crypto_locked, is_partition) {
-            var block = (target.iface == "org.storaged.Storaged.Block")? target : null;
+            function endsWith(str, suffix) {
+                return str.indexOf(suffix, str.length - suffix.length) !== -1;
+            }
+
+            var block = endsWith(target.iface, ".Block")? target : null;
             var block_fsys = block && client.blocks_fsys[block.path];
             var block_lvm2 = block && client.blocks_lvm2[block.path];
 
-            var lvol = (target.iface == "org.storaged.Storaged.LogicalVolume")? target : null;
+            var lvol = endsWith(target.iface, ".LogicalVolume")? target : null;
 
             var is_filesystem         = (block && block.IdUsage == 'filesystem');
             var is_filesystem_mounted = (block_fsys && block_fsys.MountPoints.length > 0);
@@ -1318,7 +1360,6 @@ define([
 
                 drive_model = {
                     dbus: drive,
-                    block_dbus: drive_block,
                     Size: drive.Size > 0 && utils.fmt_size_long(drive.Size),
                     Assessment: assessment,
                     Device: drive_block && utils.block_name(drive_block),
@@ -1335,6 +1376,7 @@ define([
                                      Content: (content_block &&
                                                mustache.render(content_tmpl,
                                                                { Title: _("Content"),
+                                                                 path: content_block.path,
                                                                  Entries: block_content_entries(content_block)
                                                                }))
                                    });
@@ -1406,13 +1448,21 @@ define([
                 };
             }
 
+            var degraded_message = null;
+            if (mdraid.Degraded > 0) {
+                degraded_message = cockpit.format(
+                                       cockpit.ngettext("$0 disk is missing", "$0 disks are missing", mdraid.Degraded),
+                                       mdraid.Degraded
+                                   );
+            }
+
             var mdraid_model = {
                 dbus: mdraid,
                 Name: utils.mdraid_name(mdraid),
                 Size: utils.fmt_size_long(mdraid.Size),
                 Level: level,
                 Bitmap: bitmap,
-                Degraded: mdraid.Degraded > 0 && cockpit.format(_("$0 disks are missing"), mdraid.Degraded),
+                Degraded: degraded_message,
                 State: mdraid.Running? _("Running") : _("Not running"),
                 SyncAction: sync_action
             };
@@ -1454,7 +1504,6 @@ define([
             var actions = [
                 { title: _("Start"),           action: 'mdraid_start' },
                 { title: _("Stop"),            action: 'mdraid_stop' },
-                { title: _("Format"),          action: 'mdraid_format' },
                 { title: _("Start Scrubbing"), action: 'mdraid_start_scrub' },
                 { title: _("Stop Scrubbing"),  action: 'mdraid_stop_scrub' },
                 { title: _("Delete"),          action: 'mdraid_delete' }
@@ -1479,6 +1528,7 @@ define([
                                      Content: (block &&
                                                mustache.render(content_tmpl,
                                                                { Title: _("Content"),
+                                                                 path: block.path,
                                                                  Entries: block_content_entries(block)
                                                                }))
                                    });
@@ -1545,25 +1595,10 @@ define([
             });
 
             if (vgroup.FreeSize > 0) {
-                var btn, actions, desc;
+                var btn, desc;
 
                 desc = cockpit.format(_("$0 Free Space for Logical Volumes"), utils.fmt_size(vgroup.FreeSize));
-                actions = [
-                    { title: _("Create Plain Logical Volume"),
-                      action: 'vgroup_create_plain'
-                    },
-                    { title: _("Create RAID Logical Volume"),
-                      action: 'vgroup_create_raid'
-                    },
-                    { title: _("Create Pool for Thin Logical Volumes"),
-                      action: 'vgroup_create_thinpool'
-                    }
-                ];
-                btn = mustache.render(action_btn_tmpl,
-                                      { arg: vgroup.path,
-                                        def: actions[0],  // Create Plain Logical Volume
-                                        actions: actions
-                                      });
+                btn = create_simple_btn (_("Create Logical Volume"), "vgroup_create_lvol", [ vgroup.path ]);
                 append_entry (level, null, desc, btn, null);
             }
 

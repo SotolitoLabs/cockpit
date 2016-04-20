@@ -46,11 +46,15 @@ struct _CockpitAuth
 {
   GObject parent_instance;
 
-  GByteArray *key;
+  GBytes *key;
   GHashTable *authenticated;
   guint64 nonce_seed;
   gboolean login_loopback;
   gulong timeout_tag;
+  guint startups;
+  guint max_startups;
+  guint max_startups_begin;
+  guint max_startups_rate;
 };
 
 struct _CockpitAuthClass
@@ -76,6 +80,8 @@ GType           cockpit_auth_get_type        (void) G_GNUC_CONST;
 
 CockpitAuth *   cockpit_auth_new             (gboolean login_loopback);
 
+gchar *         cockpit_auth_nonce           (CockpitAuth *self);
+
 void            cockpit_auth_login_async     (CockpitAuth *self,
                                               const gchar *path,
                                               GHashTable *headers,
@@ -95,8 +101,10 @@ CockpitWebService *  cockpit_auth_check_cookie    (CockpitAuth *self,
 
 gchar *         cockpit_auth_parse_application    (const gchar *path);
 
-GBytes *        cockpit_auth_parse_authorization  (GHashTable *headers,
-                                                   gchar **type);
+GBytes *        cockpit_auth_parse_authorization      (GHashTable *headers,
+                                                       gboolean base64_decode);
+
+gchar *        cockpit_auth_parse_authorization_type  (GHashTable *headers);
 
 G_END_DECLS
 

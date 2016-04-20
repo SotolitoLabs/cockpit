@@ -70,12 +70,19 @@
       drop a file with the extension <literal>.cert</literal> in the
       <filename>/etc/cockpit/ws-certs.d</filename> directory. If there are
       multiple files in this directory, then the highest priority one
-      is chosen after sorting. If there is no TLS certificate, a
-      self-signed certificate is automatically generated using the
-      <command>/etc/pki/tls/certs/make-dummy-cert</command> command
-      and stored in
-      <filename>/etc/cockpit/ws-certs.d/~self-signed.cert</filename>.
-    </para>
+      is chosen after sorting.</para>
+    <para>The <literal>.cert</literal> file should contain at least two
+      OpenSSL style PEM blocks. First one or more <literal>BEGIN CERTIFICATE</literal>
+      blocks for the server certificate and intermediate certificate authorities
+      and a last one containing a <literal>BEGIN PRIVATE KEY</literal> or similar.
+      The key may not be encrypted.</para>
+    <para>If there is no TLS certificate, a self-signed certificate is
+      automatically generated using <command>openssl</command> and stored in
+      the <filename>0-self-signed.cert</filename> file. To check which certificate
+      <command>cockpit-ws</command> will use run the following command.</para>
+<programlisting>
+$ sudo remotectl certificate
+</programlisting>
   </refsect1>
 
   <refsect1>
@@ -85,7 +92,7 @@
       <citerefentry>
         <refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum>
       </citerefentry>
-      then <command>cockpit-ws</command> will exit after 10 minutes
+      then <command>cockpit-ws</command> will exit after 90 seconds
       if nobody logs in, or after the last user is disconnected.
     </para>
   </refsect1>
@@ -141,6 +148,12 @@
       Please send bug reports to either the distribution bug tracker or the
       <ulink url="https://github.com/cockpit-project/cockpit/issues/new">upstream bug tracker</ulink>.
     </para>
+  </refsect1>
+
+  <refsect1>
+    <title>AUTHOR</title>
+    <para>Cockpit has been written by many
+      <ulink url="https://github.com/cockpit-project/cockpit/">contributors</ulink>.</para>
   </refsect1>
 
   <refsect1>

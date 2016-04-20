@@ -416,8 +416,6 @@ test_read_truncated (void)
   out = dup (2);
   g_assert (out >= 0);
 
-  cockpit_expect_warning ("*received truncated 1 byte frame");
-
   /* Pass in a read end of the pipe */
   transport = cockpit_pipe_transport_new_fds ("test", fds[0], out);
   g_signal_connect (transport, "closed", G_CALLBACK (on_closed_get_problem), &problem);
@@ -428,7 +426,7 @@ test_read_truncated (void)
 
   WAIT_UNTIL (problem != NULL);
 
-  g_assert_cmpstr (problem, ==, "internal-error");
+  g_assert_cmpstr (problem, ==, "disconnected");
   g_free (problem);
 
   g_object_unref (transport);
@@ -496,7 +494,7 @@ test_parse_frame_bad (void)
   GBytes *message;
   GBytes *payload;
 
-  cockpit_expect_warning ("*invalid channel prefix");
+  cockpit_expect_message ("*invalid channel prefix");
 
   message = g_bytes_new_static ("b\x00y\ntest", 8);
   payload = cockpit_transport_parse_frame (message, &channel);
@@ -506,7 +504,7 @@ test_parse_frame_bad (void)
 
   cockpit_assert_expected ();
 
-  cockpit_expect_warning ("*invalid message without channel prefix");
+  cockpit_expect_message ("*invalid message without channel prefix");
 
   channel = NULL;
   message = g_bytes_new_static ("test", 4);
@@ -516,6 +514,27 @@ test_parse_frame_bad (void)
   g_free (channel);
 
   cockpit_assert_expected ();
+}
+
+static void
+test_parse_frame_maybe (void)
+{
+  gchar *channel = NULL;
+  GBytes *message;
+  GBytes *payload;
+
+  message = g_bytes_new_static ("b\x00y\ntest", 8);
+  payload = cockpit_transport_maybe_frame (message, &channel);
+  g_assert (payload == NULL);
+  g_bytes_unref (message);
+  g_free (channel);
+
+  channel = NULL;
+  message = g_bytes_new_static ("test", 4);
+  payload = cockpit_transport_maybe_frame (message, &channel);
+  g_assert (payload == NULL);
+  g_bytes_unref (message);
+  g_free (channel);
 }
 
 static void
@@ -564,6 +583,25 @@ test_parse_command_no_channel (void)
   json_object_unref (options);
 }
 
+static void
+test_parse_command_nulls (void)
+{
+  const gchar *input = "{ \"command\": \"test\", \"opt\": \"one\" }";
+  GBytes *message;
+  JsonObject *options;
+  gboolean ret;
+
+  message = g_bytes_new_static (input, strlen (input));
+
+  ret = cockpit_transport_parse_command (message, NULL, NULL, &options);
+  g_bytes_unref (message);
+
+  g_assert (ret == TRUE);
+  g_assert_cmpstr (json_object_get_string_member (options, "opt"), ==, "one");
+
+  json_object_unref (options);
+}
+
 struct {
   const char *name;
   const char *json;
@@ -606,11 +644,13 @@ main (int argc,
 
   cockpit_test_init (&argc, &argv);
 
-  g_test_add_func ("/transport/parse-frame", test_parse_frame);
-  g_test_add_func ("/transport/parse-frame-bad", test_parse_frame_bad);
+  g_test_add_func ("/transport/parse-frame/ok", test_parse_frame);
+  g_test_add_func ("/transport/parse-frame/bad", test_parse_frame_bad);
+  g_test_add_func ("/transport/parse-frame/maybe", test_parse_frame_maybe);
 
   g_test_add_func ("/transport/parse-command/normal", test_parse_command);
   g_test_add_func ("/transport/parse-command/no-channel", test_parse_command_no_channel);
+  g_test_add_func ("/transport/parse-command/nulls", test_parse_command_nulls);
 
   for (i = 0; i < G_N_ELEMENTS (bad_command_payloads); i++)
     {

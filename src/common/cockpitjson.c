@@ -34,13 +34,15 @@ cockpit_json_get_int (JsonObject *object,
   node = json_object_get_member (object, name);
   if (!node)
     {
-      *value = defawlt;
+      if (value)
+        *value = defawlt;
       return TRUE;
     }
   else if (json_node_get_value_type (node) == G_TYPE_INT64 ||
            json_node_get_value_type (node) == G_TYPE_DOUBLE)
     {
-      *value = json_node_get_int (node);
+      if (value)
+        *value = json_node_get_int (node);
       return TRUE;
     }
   else
@@ -60,12 +62,14 @@ cockpit_json_get_bool (JsonObject *object,
   node = json_object_get_member (object, name);
   if (!node)
     {
-      *value = defawlt;
+      if (value)
+        *value = defawlt;
       return TRUE;
     }
   else if (json_node_get_value_type (node) == G_TYPE_BOOLEAN)
     {
-      *value = json_node_get_boolean (node);
+      if (value)
+        *value = json_node_get_boolean (node);
       return TRUE;
     }
   else
@@ -86,12 +90,14 @@ cockpit_json_get_string (JsonObject *options,
   node = json_object_get_member (options, name);
   if (!node)
     {
-      *value = defawlt;
+      if (value)
+        *value = defawlt;
       return TRUE;
     }
   else if (json_node_get_value_type (node) == G_TYPE_STRING)
     {
-      *value = json_node_get_string (node);
+      if (value)
+        *value = json_node_get_string (node);
       return TRUE;
     }
   else
@@ -111,12 +117,41 @@ cockpit_json_get_array (JsonObject *options,
   node = json_object_get_member (options, name);
   if (!node)
     {
-      *value = defawlt;
+      if (value)
+        *value = defawlt;
       return TRUE;
     }
   else if (json_node_get_node_type (node) == JSON_NODE_ARRAY)
     {
-      *value = json_node_get_array (node);
+      if (value)
+        *value = json_node_get_array (node);
+      return TRUE;
+    }
+  else
+    {
+      return FALSE;
+    }
+}
+
+gboolean
+cockpit_json_get_object (JsonObject *options,
+                         const gchar *member,
+                         JsonObject *defawlt,
+                         JsonObject **value)
+{
+  JsonNode *node;
+
+  node = json_object_get_member (options, member);
+  if (!node)
+    {
+      if (value)
+        *value = defawlt;
+      return TRUE;
+    }
+  else if (json_node_get_node_type (node) == JSON_NODE_OBJECT)
+    {
+      if (value)
+        *value = json_node_get_object (node);
       return TRUE;
     }
   else
@@ -185,7 +220,7 @@ cockpit_json_get_strv (JsonObject *options,
       val[length] = NULL;
     }
 
-  if (valid)
+  if (valid && value)
     *value = val;
   else
     g_free (val);
@@ -340,6 +375,50 @@ cockpit_json_equal (JsonNode *previous,
     default:
       return FALSE;
     }
+}
+
+/**
+ * cockpit_json_override:
+ * @target: a JSON object
+ * @override: a JSON object to override from
+ *
+ * Override the values in @target with the members in @override.
+ * Any members of @override are set on @target. If both contain
+ * objects for a given member, then these are overridden in turn.
+ *
+ * Any members that are set to null in the @override will be
+ * removed from the @target.
+ */
+void
+cockpit_json_patch (JsonObject *target,
+                    JsonObject *override)
+{
+  GList *l, *members;
+  JsonNode *node, *other;
+
+  members = json_object_get_members (override);
+  for (l = members; l != NULL; l = g_list_next (l))
+    {
+      node = json_object_get_member (override, l->data);
+      if (JSON_NODE_HOLDS_NULL (node))
+        {
+          json_object_remove_member (target, l->data);
+          continue;
+        }
+      else if (JSON_NODE_HOLDS_OBJECT (node))
+        {
+          other = json_object_get_member (target, l->data);
+          if (other && JSON_NODE_HOLDS_OBJECT (other))
+            {
+              cockpit_json_patch (json_node_get_object (other),
+                                  json_node_get_object (node));
+              continue;
+            }
+        }
+
+      json_object_set_member (target, l->data, json_node_copy (node));
+    }
+  g_list_free (members);
 }
 
 /**

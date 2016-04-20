@@ -21,13 +21,15 @@
 #include "config.h"
 
 #include "cockpithttpstream.h"
-#include "cockpithttpstream.c"
+
+#include "common/cockpitjson.h"
 #include "common/cockpittest.h"
 #include "common/cockpitwebresponse.h"
 #include "common/cockpitwebserver.h"
 
 #include "mock-transport.h"
-#include <json-glib/json-glib.h>
+
+#include <string.h>
 
 static void
 on_closed_set_flag (CockpitChannel *channel,
@@ -79,6 +81,8 @@ teardown_general (TestGeneral *tt,
 {
   g_object_unref (tt->web_server);
   g_object_unref (tt->transport);
+
+  cockpit_assert_expected ();
 }
 
 static gboolean
@@ -158,6 +162,116 @@ test_host_header (TestGeneral *tt,
   g_bytes_unref (data);
 }
 
+static gboolean
+handle_default (CockpitWebServer *server,
+                const gchar *path,
+                GHashTable *headers,
+                CockpitWebResponse *response,
+                gpointer user_data)
+{
+  const gchar *data = "Da Da Da";
+  GBytes *bytes;
+
+  bytes = g_bytes_new_static (data, strlen (data));
+  cockpit_web_response_content (response, NULL, bytes, NULL);
+  g_bytes_unref (bytes);
+
+  return TRUE;
+}
+
+static void
+test_http_stream2 (TestGeneral *tt,
+                   gconstpointer unused)
+{
+  CockpitChannel *channel;
+  GBytes *bytes;
+  JsonObject *options;
+  const gchar *control;
+  JsonObject *object;
+  gboolean closed;
+  GBytes *data;
+  guint count;
+
+  g_signal_connect (tt->web_server, "handle-resource::/", G_CALLBACK (handle_default), tt);
+
+  options = json_object_new ();
+  json_object_set_int_member (options, "port", tt->port);
+  json_object_set_string_member (options, "payload", "http-stream2");
+  json_object_set_string_member (options, "method", "GET");
+  json_object_set_string_member (options, "path", "/");
+
+  channel = g_object_new (COCKPIT_TYPE_HTTP_STREAM,
+                          "transport", tt->transport,
+                          "id", "444",
+                          "options", options,
+                          NULL);
+
+  json_object_unref (options);
+
+  /* Tell HTTP we have no more data to send */
+  control = "{\"command\": \"done\", \"channel\": \"444\"}";
+  bytes = g_bytes_new_static (control, strlen (control));
+  cockpit_transport_emit_recv (COCKPIT_TRANSPORT (tt->transport), NULL, bytes);
+  g_bytes_unref (bytes);
+
+  closed = FALSE;
+  g_signal_connect (channel, "closed", G_CALLBACK (on_closed_set_flag), &closed);
+  while (!closed)
+    g_main_context_iteration (NULL, TRUE);
+
+  object = mock_transport_pop_control (tt->transport);
+  cockpit_assert_json_eq (object, "{\"command\":\"ready\",\"channel\":\"444\"}");
+  object = mock_transport_pop_control (tt->transport);
+  cockpit_assert_json_eq (object, "{\"command\":\"response\",\"channel\":\"444\",\"status\":200,\"reason\":\"OK\",\"headers\":{}}");
+
+  data = mock_transport_combine_output (tt->transport, "444", &count);
+  cockpit_assert_bytes_eq (data, "Da Da Da", -1);
+  g_assert_cmpuint (count, ==, 1);
+  g_bytes_unref (data);
+}
+
+static void
+test_cannot_connect (TestGeneral *tt,
+                     gconstpointer unused)
+{
+  CockpitChannel *channel;
+  GBytes *bytes;
+  JsonObject *options;
+  const gchar *control;
+  JsonObject *object;
+  gboolean closed;
+
+  cockpit_expect_log ("cockpit-protocol", G_LOG_LEVEL_MESSAGE, "*couldn't connect*");
+
+  options = json_object_new ();
+  json_object_set_int_member (options, "port", 5555);
+  json_object_set_string_member (options, "payload", "http-stream2");
+  json_object_set_string_member (options, "method", "GET");
+  json_object_set_string_member (options, "path", "/");
+  json_object_set_string_member (options, "address", "0.0.0.0");
+
+  channel = g_object_new (COCKPIT_TYPE_HTTP_STREAM,
+                          "transport", tt->transport,
+                          "id", "444",
+                          "options", options,
+                          NULL);
+
+  json_object_unref (options);
+
+  /* Tell HTTP we have no more data to send */
+  control = "{\"command\": \"done\", \"channel\": \"444\"}";
+  bytes = g_bytes_new_static (control, strlen (control));
+  cockpit_transport_emit_recv (COCKPIT_TRANSPORT (tt->transport), NULL, bytes);
+  g_bytes_unref (bytes);
+
+  closed = FALSE;
+  g_signal_connect (channel, "closed", G_CALLBACK (on_closed_set_flag), &closed);
+  while (!closed)
+    g_main_context_iteration (NULL, TRUE);
+
+  object = mock_transport_pop_control (tt->transport);
+  cockpit_assert_json_eq (object, "{\"command\":\"close\",\"channel\":\"444\",\"problem\":\"not-found\"}");
+}
 
 /* -----------------------------------------------------------------------------
  * Test
@@ -297,44 +411,31 @@ test_parse_keep_alive (void)
 {
   const gchar *version;
   GHashTable *headers;
-  MockTransport *transport;
-  CockpitHttpStream *stream;
-
-  JsonObject *options;
-  options = json_object_new ();
-  transport = g_object_new (mock_transport_get_type (), NULL);
-  stream = g_object_new (COCKPIT_TYPE_HTTP_STREAM,
-                            "transport", transport,
-                            "id", "1",
-                            "options", options,
-                            NULL);
+  gboolean keep_alive;
 
   headers = g_hash_table_new (g_str_hash, g_str_equal);
 
   version = "HTTP/1.1";
   g_hash_table_insert (headers, "Connection", "keep-alive");
 
-  parse_keep_alive (stream, version, headers);
-  g_assert (stream->keep_alive == TRUE);
+  keep_alive = cockpit_http_stream_parse_keep_alive (version, headers);
+  g_assert (keep_alive == TRUE);
 
   version = "HTTP/1.0";
-  parse_keep_alive (stream, version, headers);
-  g_assert (stream->keep_alive == TRUE);
+  keep_alive = cockpit_http_stream_parse_keep_alive (version, headers);
+  g_assert (keep_alive == TRUE);
 
 
   g_hash_table_remove (headers, "Connection");
 
-  parse_keep_alive (stream, version, headers);
-  g_assert (stream->keep_alive == FALSE);
+  keep_alive = cockpit_http_stream_parse_keep_alive (version, headers);
+  g_assert (keep_alive == FALSE);
 
   version = "HTTP/1.1";
-  parse_keep_alive (stream, version, headers);
-  g_assert (stream->keep_alive == TRUE);
+  keep_alive = cockpit_http_stream_parse_keep_alive (version, headers);
+  g_assert (keep_alive == TRUE);
 
   g_hash_table_destroy (headers);
-  g_object_unref (transport);
-  g_object_unref (stream);
-  json_object_unref (options);
 }
 
 typedef struct {
@@ -399,17 +500,6 @@ teardown_tls (TestTls *test,
   g_object_unref (test->web_server);
   g_object_unref (test->transport);
   g_clear_object (&test->peer);
-}
-
-static void
-on_closed_get_problem (CockpitChannel *channel,
-                       const gchar *problem,
-                       gpointer user_data)
-{
-  gchar **result = user_data;
-  g_assert (problem != NULL);
-  g_assert (*result == NULL);
-  *result = g_strdup (problem);
 }
 
 static void
@@ -698,8 +788,14 @@ test_tls_authority_bad (TestTls *test,
   JsonObject *tls;
   GError *error = NULL;
   const gchar *control;
-  gchar *problem = NULL;
   GBytes *bytes;
+  JsonObject *resp;
+  gchar *expected_pem = NULL;
+  gchar *expected_json = NULL;
+  const gchar *expected_fmt;
+
+  g_object_get (test->certificate, "certificate-pem", &expected_pem, NULL);
+  g_assert_true (expected_pem != NULL);
 
   tls = cockpit_json_parse_object (json, -1, &error);
   g_assert_no_error (error);
@@ -719,6 +815,8 @@ test_tls_authority_bad (TestTls *test,
 
   cockpit_expect_log ("cockpit-protocol", G_LOG_LEVEL_MESSAGE,
                       "*Unacceptable TLS certificate:*untrusted-issuer*");
+  cockpit_expect_log ("cockpit-protocol", G_LOG_LEVEL_MESSAGE,
+                      "*Unacceptable TLS certificate");
 
   json_object_unref (options);
 
@@ -728,17 +826,22 @@ test_tls_authority_bad (TestTls *test,
   cockpit_transport_emit_recv (COCKPIT_TRANSPORT (test->transport), NULL, bytes);
   g_bytes_unref (bytes);
 
-  g_signal_connect (channel, "closed", G_CALLBACK (on_closed_get_problem), &problem);
-
-  while (problem == NULL)
+  while (mock_transport_count_sent (test->transport) < 2)
     g_main_context_iteration (NULL, TRUE);
 
-  g_assert_cmpstr (problem, ==, "unknown-hostkey");
-  g_free (problem);
+  resp = mock_transport_pop_control (test->transport);
+  cockpit_assert_json_eq (resp, "{\"command\":\"ready\",\"channel\":\"444\"}");
+
+  resp = mock_transport_pop_control (test->transport);
+  expected_fmt = "{\"command\":\"close\",\"channel\":\"444\",\"problem\":\"unknown-hostkey\", \"rejected-certificate\":\"%s\"}";
+  expected_json = g_strdup_printf (expected_fmt, expected_pem);
+  cockpit_assert_json_eq (resp, expected_json);
 
   g_object_add_weak_pointer (G_OBJECT (channel), (gpointer *)&channel);
   g_object_unref (channel);
   g_assert (channel == NULL);
+  g_free (expected_pem);
+  g_free (expected_json);
 }
 
 /* Declared in cockpitwebserver.c */
@@ -759,6 +862,11 @@ main (int argc,
               setup_general, test_host_header, teardown_general);
   g_test_add ("/http-stream/address-host-header", TestGeneral, ip,
               setup_general, test_host_header, teardown_general);
+
+  g_test_add ("/http-stream/http-stream2", TestGeneral, NULL,
+              setup_general, test_http_stream2, teardown_general);
+  g_test_add ("/http-stream/cannot-connect", TestGeneral, NULL,
+              setup_general, test_cannot_connect, teardown_general);
 
   g_test_add_func  ("/http-stream/parse_keepalive", test_parse_keep_alive);
   g_test_add_func  ("/http-stream/http_chunked", test_http_chunked);

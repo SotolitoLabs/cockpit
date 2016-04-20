@@ -46,6 +46,7 @@ struct _CockpitPipeTransport {
   CockpitTransport parent_instance;
   gchar *name;
   CockpitPipe *pipe;
+  gboolean closed;
   gulong read_sig;
   gulong close_sig;
 };
@@ -133,8 +134,8 @@ on_pipe_read (CockpitPipe *pipe,
       /* Received a partial message */
       if (input->len > 0)
         {
-          g_warning ("%s: received truncated %d byte frame", self->name, input->len);
-          cockpit_pipe_close (pipe, "internal-error");
+          g_debug ("%s: received truncated %d byte frame", self->name, input->len);
+          cockpit_pipe_close (pipe, "disconnected");
         }
     }
 
@@ -150,6 +151,8 @@ on_pipe_close (CockpitPipe *pipe,
   gboolean is_cockpit;
   GError *error = NULL;
   gint status;
+
+  self->closed = TRUE;
 
   /* This function is called by the base class when it is closed */
   if (cockpit_pipe_get_pid (pipe, NULL))
@@ -275,6 +278,12 @@ cockpit_pipe_transport_send (CockpitTransport *transport,
   gchar *prefix_str;
   gsize payload_len;
   gsize channel_len;
+
+  if (self->closed)
+    {
+      g_debug ("dropping message on closed transport");
+      return;
+    }
 
   channel_len = channel_id ? strlen (channel_id) : 0;
   payload_len = g_bytes_get_size (payload);

@@ -458,16 +458,17 @@ create_iostream_pair (GIOStream **io1,
   g_object_unref (socket2);
 }
 
-static void
+static gboolean
 on_error_not_reached (WebSocketConnection *ws,
                       GError *error,
                       gpointer user_data)
 {
   /* At this point we know this will fail, but is informative */
   g_assert_no_error (error);
+  return TRUE;
 }
 
-static void
+static gboolean
 on_error_copy (WebSocketConnection *ws,
                GError *error,
                gpointer user_data)
@@ -475,6 +476,7 @@ on_error_copy (WebSocketConnection *ws,
   GError **copy = user_data;
   g_assert (*copy == NULL);
   *copy = g_error_copy (error);
+  return TRUE;
 }
 
 static WebSocketConnection *
@@ -505,7 +507,6 @@ setup_pair (Test *test,
   test->server = web_socket_server_new_for_stream ("ws://localhost/unix", NULL, NULL, ios, NULL, NULL);
   test->client = client_new_for_stream_and_flavor (ioc, fixture->flavor);
 
-  g_signal_connect (test->client, "error", G_CALLBACK (on_error_not_reached), NULL);
   g_signal_connect (test->server, "error", G_CALLBACK (on_error_not_reached), NULL);
 
   g_object_unref (ioc);
@@ -557,6 +558,7 @@ test_handshake (Test *test,
 {
   gboolean open_event_client = FALSE;
   gboolean open_event_server = FALSE;
+  GHashTable *headers;
 
   g_signal_connect (test->client, "open", G_CALLBACK (on_open_set_flag), &open_event_client);
   g_signal_connect (test->server, "open", G_CALLBACK (on_open_set_flag), &open_event_server);
@@ -566,6 +568,17 @@ test_handshake (Test *test,
 
   WAIT_UNTIL (web_socket_connection_get_ready_state (test->server) != WEB_SOCKET_STATE_CONNECTING);
   g_assert_cmpint (web_socket_connection_get_ready_state (test->server), ==, WEB_SOCKET_STATE_OPEN);
+
+  headers = web_socket_client_get_headers (WEB_SOCKET_CLIENT (test->client));
+  g_assert (headers != NULL);
+#if 0
+  GHashTableIter iter;
+  gpointer key, value;
+  g_hash_table_iter_init (&iter, headers);
+  while (g_hash_table_iter_next (&iter, &key, &value))
+    g_printerr ("headers: %s %s\n", (gchar *)key, (gchar *)value);
+#endif
+  g_assert_cmpstr (g_hash_table_lookup (headers, "connection"), ==, "Upgrade");
 
   g_assert (open_event_client);
   g_assert (open_event_server);

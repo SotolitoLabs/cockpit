@@ -22,21 +22,9 @@
 
 #include <gio/gio.h>
 
+#include "cockpitconnect.h"
+
 G_BEGIN_DECLS
-
-typedef struct {
-  gint refs;
-
-  /* TLS flags */
-  gboolean tls_client;
-  GTlsCertificateFlags tls_client_flags;
-  GTlsCertificate *tls_cert;
-  GTlsDatabase *tls_database;
-} CockpitStreamOptions;
-
-CockpitStreamOptions *  cockpit_stream_options_ref    (CockpitStreamOptions *options);
-
-void                    cockpit_stream_options_unref  (gpointer data);
 
 #define COCKPIT_TYPE_STREAM         (cockpit_stream_get_type ())
 #define COCKPIT_STREAM(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), COCKPIT_TYPE_STREAM, CockpitStream))
@@ -58,6 +46,8 @@ struct _CockpitStreamClass {
 
   /* signals */
 
+  void        (* open)        (CockpitStream *stream);
+
   void        (* read)        (CockpitStream *pipe,
                                GByteArray *buffer,
                                gboolean eof);
@@ -72,8 +62,7 @@ CockpitStream *    cockpit_stream_new          (const gchar *name,
                                                 GIOStream *stream);
 
 CockpitStream *    cockpit_stream_connect      (const gchar *name,
-                                                GSocketConnectable *connectable,
-                                                CockpitStreamOptions *options);
+                                                CockpitConnectable *connectable);
 
 void               cockpit_stream_write        (CockpitStream *self,
                                                 GBytes *data);
@@ -84,6 +73,11 @@ void               cockpit_stream_close        (CockpitStream *self,
 const gchar *      cockpit_stream_get_name     (CockpitStream *self);
 
 GByteArray *       cockpit_stream_get_buffer   (CockpitStream *self);
+
+const gchar *      cockpit_stream_problem      (GError *error,
+                                                const gchar *name,
+                                                const gchar *summary,
+                                                GIOStream *stream);
 
 G_END_DECLS
 

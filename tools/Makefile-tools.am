@@ -1,33 +1,3 @@
-EXTRA_DIST += \
-	tools/bower \
-	tools/bower.json \
-	tools/cockpit.pam \
-	tools/cockpit.spec \
-	tools/html-minifier \
-	tools/htmlmin.conf \
-	tools/jsbundle \
-	tools/jsmodule \
-	tools/cssbundle \
-        tools/ngbundle \
-	tools/po2json \
-	tools/jshint \
-	tools/parsejson \
-	tools/patternfly.sed \
-	tools/simple-tap.js \
-	tools/tap-driver \
-	tools/tap-gtester \
-	tools/tap-phantom \
-	tools/qunit.css \
-	tools/qunit.js \
-	tools/qunit-config.js \
-	tools/gdbus-unbreak-codegen \
-	$(VALGRIND_SUPPRESSIONS)
-	$(NULL)
-
-DISTCLEANFILES += \
-	tools/node_modules \
-	tools/bower_components \
-	$(NULL)
 
 update-lib:: update-bower
 	$(srcdir)/tools/jsmodule -o $(srcdir)/tools/qunit.js \
@@ -35,9 +5,6 @@ update-lib:: update-bower
 	    $(BOWER)/qunit/qunit/qunit.js \
 	    $(BOWER)/qunit-tap/lib/qunit-tap.js \
 	    $(srcdir)/tools/qunit-config.js
-	cp $(BOWER)/qunit/qunit/qunit.css $(srcdir)/tools/qunit.css
-	sed -e 's/define\.amd/define\.amd_disabled/' -e 's/module\.exports/module\.exports_disabled/' \
-		$(BOWER)/sizzle/dist/sizzle.js > $(srcdir)/test/sizzle.js
 
 if WITH_COVERAGE
 coverage:

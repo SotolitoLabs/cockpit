@@ -35,6 +35,19 @@ define([
 
     var journal_renderer = {};
 
+    function make_printable(value) {
+        if (value === undefined)
+            return _("[no data]");
+        else if ($.type(value) == "string")
+            return value;
+        else if (value.length !== undefined)
+            return cockpit.format(_("[$0 bytes of binary data]"), value.length);
+        else
+            return _("[binary data]");
+    }
+
+    journal_renderer.make_printable = make_printable;
+
     journal_renderer.output_funcs_for_box = function output_funcs_for_box(box) {
         Mustache.parse(day_header_template);
         Mustache.parse(line_template);
@@ -354,7 +367,7 @@ define([
                 bootid: journal_entry["_BOOT_ID"],
                 ident: journal_entry["SYSLOG_IDENTIFIER"] || journal_entry["_COMM"],
                 prio: journal_entry["PRIORITY"],
-                message: journal_entry["MESSAGE"]
+                message: make_printable(journal_entry["MESSAGE"])
             };
         }
 

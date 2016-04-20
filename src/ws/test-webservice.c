@@ -115,8 +115,10 @@ read_all_into_string (int fd)
 }
 
 static void
-setup_mock_sshd (TestCase *test,
-                 gconstpointer data)
+start_mock_sshd (const gchar *user,
+                 const gchar *password,
+                 GPid *out_pid,
+                 gushort *out_port)
 {
   GError *error = NULL;
   GString *port;
@@ -126,13 +128,13 @@ setup_mock_sshd (TestCase *test,
 
   const gchar *argv[] = {
       BUILDDIR "/mock-sshd",
-      "--user", test->ssh_user ? test->ssh_user : g_get_user_name (),
-      "--password", test->ssh_password ? test->ssh_password : PASSWORD,
+      "--user", user,
+      "--password", password,
       NULL
   };
 
   g_spawn_async_with_pipes (BUILDDIR, (gchar **)argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL,
-                            &test->mock_sshd, NULL, &out_fd, NULL, &error);
+                            out_pid, NULL, &out_fd, NULL, &error);
   g_assert_no_error (error);
 
   /*
@@ -150,34 +152,50 @@ setup_mock_sshd (TestCase *test,
   if (!endptr || *endptr != '\0' || value == 0 || value > G_MAXUSHORT)
       g_critical ("invalid port printed by mock-sshd: %s", port->str);
 
-  test->ssh_port = (gushort)value;
+  *out_port = (gushort)value;
   g_string_free (port, TRUE);
+}
+
+static void
+setup_mock_sshd (TestCase *test,
+                 gconstpointer data)
+{
+  start_mock_sshd (test->ssh_user ? test->ssh_user : g_get_user_name (),
+                   test->ssh_password ? test->ssh_password : PASSWORD,
+                   &test->mock_sshd,
+                   &test->ssh_port);
 
   cockpit_ws_specific_ssh_port = test->ssh_port;
+
   cockpit_ws_known_hosts = SRCDIR "/src/ws/mock_known_hosts";
+}
+
+static void
+stop_mock_sshd (GPid mock_sshd) {
+  GPid pid;
+  int status;
+
+  pid = waitpid (mock_sshd, &status, WNOHANG);
+  g_assert_cmpint (pid, >=, 0);
+  if (pid == 0)
+    kill (mock_sshd, SIGTERM);
+  else if (status != 0)
+    {
+      if (WIFSIGNALED (status))
+        g_message ("mock-sshd terminated: %d", WTERMSIG (status));
+      else
+        g_message ("mock-sshd failed: %d", WEXITSTATUS (status));
+    }
+  g_spawn_close_pid (mock_sshd);
 }
 
 static void
 teardown_mock_sshd (TestCase *test,
                     gconstpointer data)
 {
-  GPid pid;
-  int status;
-
   if (test->mock_sshd)
     {
-      pid = waitpid (test->mock_sshd, &status, WNOHANG);
-      g_assert_cmpint (pid, >=, 0);
-      if (pid == 0)
-        kill (test->mock_sshd, SIGTERM);
-      else if (status != 0)
-        {
-          if (WIFSIGNALED (status))
-            g_critical ("mock-sshd terminated: %d", WTERMSIG (status));
-          else
-            g_critical ("mock-sshd failed: %d", WEXITSTATUS (status));
-        }
-      g_spawn_close_pid (test->mock_sshd);
+      stop_mock_sshd (test->mock_sshd);
     }
 }
 
@@ -197,7 +215,10 @@ setup_mock_webserver (TestCase *test,
   user = g_get_user_name ();
   test->auth = mock_auth_new (user, PASSWORD);
 
-  test->creds = cockpit_creds_new (user, "cockpit", COCKPIT_CRED_PASSWORD, PASSWORD, NULL);
+  test->creds = cockpit_creds_new (user, "cockpit",
+                                   COCKPIT_CRED_PASSWORD, PASSWORD,
+                                   COCKPIT_CRED_CSRF_TOKEN, "my-csrf-token",
+                                   NULL);
 }
 
 static void
@@ -280,7 +301,7 @@ teardown_for_socket (TestCase *test,
   alarm (0);
 }
 
-static void
+static gboolean
 on_error_not_reached (WebSocketConnection *ws,
                       GError *error,
                       gpointer user_data)
@@ -289,9 +310,10 @@ on_error_not_reached (WebSocketConnection *ws,
 
   /* At this point we know this will fail, but is informative */
   g_assert_no_error (error);
+  return TRUE;
 }
 
-static void
+static gboolean
 on_error_copy (WebSocketConnection *ws,
                GError *error,
                gpointer user_data)
@@ -301,6 +323,7 @@ on_error_copy (WebSocketConnection *ws,
   g_assert (result != NULL);
   g_assert (*result == NULL);
   *result = g_error_copy (error);
+  return TRUE;
 }
 
 static gboolean
@@ -567,14 +590,31 @@ test_handshake_and_echo (TestCase *test,
 {
   WebSocketConnection *ws;
   GBytes *received = NULL;
+  GBytes *control = NULL;
   CockpitWebService *service;
+  CockpitCreds *creds;
   GBytes *sent;
   gulong handler;
+  const gchar *token;
 
   /* Sends a "test" message in channel "4" */
   start_web_service_and_connect_client (test, data, &ws, &service);
 
   sent = g_bytes_new_static ("4\ntest", 6);
+  handler = g_signal_connect (ws, "message", G_CALLBACK (on_message_get_bytes), &control);
+
+  WAIT_UNTIL (control != NULL);
+
+  creds = cockpit_web_service_get_creds (service);
+  g_assert (creds != NULL);
+
+  token = cockpit_creds_get_csrf_token (creds);
+  g_assert_cmpstr (token, ==, "my-csrf-token");
+
+  expect_control_message (control, "init", NULL, "csrf-token", token, NULL);
+  g_bytes_unref (control);
+
+  g_signal_handler_disconnect (ws, handler);
   handler = g_signal_connect (ws, "message", G_CALLBACK (on_message_get_non_control), &received);
 
   WAIT_UNTIL (received != NULL);
@@ -824,6 +864,164 @@ test_specified_creds (TestCase *test,
 }
 
 static void
+test_specified_creds_overide_host (TestCase *test,
+                                   gconstpointer data)
+{
+  WebSocketConnection *ws;
+  GBytes *received = NULL;
+  GBytes *sent;
+  CockpitWebService *service;
+
+  start_web_service_and_create_client (test, data, &ws, &service);
+  WAIT_UNTIL (web_socket_connection_get_ready_state (ws) != WEB_SOCKET_STATE_CONNECTING);
+  g_assert (web_socket_connection_get_ready_state (ws) == WEB_SOCKET_STATE_OPEN);
+
+  /* Open a channel with a host that has a bad username
+     but use a good username in the json */
+  send_control_message (ws, "init", NULL, BUILD_INTS, "version", 1, NULL);
+  send_control_message (ws, "open", "4",
+                        "payload", "test-text",
+                        "user", "user", "password",
+                        "Another password",
+                        "host", "test@127.0.0.1",
+                        NULL);
+
+  g_signal_connect (ws, "message", G_CALLBACK (on_message_get_non_control), &received);
+
+  sent = g_bytes_new_static ("4\nwheee", 7);
+  web_socket_connection_send (ws, WEB_SOCKET_DATA_TEXT, NULL, sent);
+  WAIT_UNTIL (received != NULL);
+  g_assert (g_bytes_equal (received, sent));
+  g_bytes_unref (sent);
+  g_bytes_unref (received);
+  received = NULL;
+
+  close_client_and_stop_web_service (test, ws, service);
+}
+
+static void
+test_user_host_fail (TestCase *test,
+                     gconstpointer data)
+{
+  WebSocketConnection *ws;
+  GBytes *received = NULL;
+  CockpitWebService *service;
+  const gchar *expect_problem = "authentication-failed";
+
+  start_web_service_and_create_client (test, data, &ws, &service);
+  WAIT_UNTIL (web_socket_connection_get_ready_state (ws) != WEB_SOCKET_STATE_CONNECTING);
+  g_assert (web_socket_connection_get_ready_state (ws) == WEB_SOCKET_STATE_OPEN);
+
+  g_signal_connect (ws, "message", G_CALLBACK (on_message_get_bytes), &received);
+
+  /* Open a channel with a host that has a bad username */
+  send_control_message (ws, "init", NULL, BUILD_INTS, "version", 1, NULL);
+  send_control_message (ws, "open", "4",
+                        "payload", "test-text",
+                        "host", "baduser@127.0.0.1",
+                        NULL);
+
+  while (received == NULL)
+    g_main_context_iteration (NULL, TRUE);
+  expect_control_message (received, "init", NULL, NULL);
+  g_bytes_unref (received);
+  received = NULL;
+
+  /* We should now get a close command */
+  WAIT_UNTIL (received != NULL);
+
+  /* Should have gotten a failure message, about the credentials */
+  expect_control_message (received, "close", "4", "problem", expect_problem, NULL);
+  g_bytes_unref (received);
+
+  close_client_and_stop_web_service (test, ws, service);
+}
+
+static void
+test_user_host_reuse_password (TestCase *test,
+                               gconstpointer data)
+{
+  WebSocketConnection *ws;
+  GBytes *received = NULL;
+  GBytes *sent;
+  CockpitWebService *service;
+  const gchar *user = g_get_user_name ();
+  gchar *user_host = NULL;
+
+  start_web_service_and_create_client (test, data, &ws, &service);
+  WAIT_UNTIL (web_socket_connection_get_ready_state (ws) != WEB_SOCKET_STATE_CONNECTING);
+  g_assert (web_socket_connection_get_ready_state (ws) == WEB_SOCKET_STATE_OPEN);
+
+  /* Open a channel with the same user as creds but no password */
+  user_host = g_strdup_printf ("%s@127.0.0.1", user);
+  send_control_message (ws, "init", NULL, BUILD_INTS, "version", 1, NULL);
+  send_control_message (ws, "open", "4",
+                        "payload", "test-text",
+                        "host", user_host,
+                        NULL);
+
+  g_signal_connect (ws, "message", G_CALLBACK (on_message_get_non_control), &received);
+
+  sent = g_bytes_new_static ("4\nwheee", 7);
+  web_socket_connection_send (ws, WEB_SOCKET_DATA_TEXT, NULL, sent);
+  WAIT_UNTIL (received != NULL);
+  g_assert (g_bytes_equal (received, sent));
+  g_bytes_unref (sent);
+  g_bytes_unref (received);
+  received = NULL;
+
+  close_client_and_stop_web_service (test, ws, service);
+  g_free (user_host);
+}
+
+static void
+test_host_port (TestCase *test,
+                      gconstpointer data)
+{
+  WebSocketConnection *ws;
+  GBytes *received = NULL;
+  GBytes *sent = NULL;
+  CockpitWebService *service;
+  gchar *host = NULL;
+  GPid pid;
+  gushort port;
+
+  /* start a new mock sshd on a different port */
+  start_mock_sshd ("auser", "apassword", &pid, &port);
+
+  host = g_strdup_printf ("127.0.0.1:%d", port);
+
+  start_web_service_and_create_client (test, data, &ws, &service);
+  WAIT_UNTIL (web_socket_connection_get_ready_state (ws) != WEB_SOCKET_STATE_CONNECTING);
+  g_assert (web_socket_connection_get_ready_state (ws) == WEB_SOCKET_STATE_OPEN);
+
+  /* Open a channel with a host that has a port
+   * and a user that doesn't work on the main mock ssh
+   */
+  send_control_message (ws, "init", NULL, BUILD_INTS, "version", 1, NULL);
+  send_control_message (ws, "open", "4",
+                        "payload", "test-text",
+                        "host", host,
+                        "user", "auser",
+                        "password", "apassword",
+                        NULL);
+
+  g_signal_connect (ws, "message", G_CALLBACK (on_message_get_non_control), &received);
+
+  sent = g_bytes_new_static ("4\nwheee", 7);
+  web_socket_connection_send (ws, WEB_SOCKET_DATA_TEXT, NULL, sent);
+  WAIT_UNTIL (received != NULL);
+  g_assert (g_bytes_equal (received, sent));
+  g_bytes_unref (sent);
+  g_bytes_unref (received);
+  received = NULL;
+
+  close_client_and_stop_web_service (test, ws, service);
+  stop_mock_sshd (pid);
+  g_free (host);
+}
+
+static void
 test_specified_creds_fail (TestCase *test,
                            gconstpointer data)
 {
@@ -889,43 +1087,6 @@ test_socket_null_creds (TestCase *test,
   service = cockpit_web_service_new (NULL, session);
   g_assert (service == NULL);
   g_object_unref (session);
-}
-
-static void
-test_socket_unauthenticated (TestCase *test,
-                             gconstpointer data)
-{
-  WebSocketConnection *client;
-  GBytes *received = NULL;
-
-  client = g_object_new (WEB_SOCKET_TYPE_CLIENT,
-                         "url", "ws://127.0.0.1/unused",
-                         "origin", "http://127.0.0.1",
-                         "io-stream", test->io_a,
-                         NULL);
-
-  g_signal_connect (client, "error", G_CALLBACK (on_error_not_reached), NULL);
-
-  /* Matching the above origin */
-  cockpit_ws_default_host_header = "127.0.0.1";
-
-  cockpit_web_service_noauth (test->io_b, "/cockpit/socket", NULL, NULL);
-
-  g_signal_connect (client, "message", G_CALLBACK (on_message_get_bytes), &received);
-
-  /* Should close right after opening */
-  while (web_socket_connection_get_ready_state (client) != WEB_SOCKET_STATE_CLOSED)
-    g_main_context_iteration (NULL, TRUE);
-
-  /* And we should have received a message */
-  g_assert (received != NULL);
-  expect_control_message (received, "init", NULL, "problem", "no-session", NULL);
-  g_bytes_unref (received);
-  received = NULL;
-
-  g_object_unref (client);
-
-  while (g_main_context_iteration (NULL, FALSE));
 }
 
 static const gchar MOCK_RSA_KEY[] = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCYzo07OA0H6f7orVun9nIVjGYrkf8AuPDScqWGzlKpAqSipoQ9oY/mwONwIOu4uhKh7FTQCq5p+NaOJ6+Q4z++xBzSOLFseKX+zyLxgNG28jnF06WSmrMsSfvPdNuZKt9rZcQFKn9fRNa8oixa+RsqEEVEvTYhGtRf7w2wsV49xIoIza/bln1ABX1YLaCByZow+dK3ZlHn/UU0r4ewpAIZhve4vCvAsMe5+6KJH8ft/OKXXQY06h6jCythLV4h18gY/sYosOa+/4XgpmBiE7fDeFRKVjP3mvkxMpxce+ckOFae2+aJu51h513S9kxY2PmKaV/JU9HBYO+yO4j+j24v";
@@ -1059,7 +1220,7 @@ test_bad_origin (TestCase *test,
   GError *error = NULL;
 
   cockpit_expect_log ("WebSocket", G_LOG_LEVEL_MESSAGE, "*received request from bad Origin*");
-  cockpit_expect_log ("cockpit-ws", G_LOG_LEVEL_MESSAGE, "*invalid handshake*");
+  cockpit_expect_log ("WebSocket", G_LOG_LEVEL_MESSAGE, "*invalid handshake*");
   cockpit_expect_log ("WebSocket", G_LOG_LEVEL_MESSAGE, "*unexpected status: 403*");
 
   start_web_service_and_create_client (test, data, &ws, &service);
@@ -1077,6 +1238,69 @@ test_bad_origin (TestCase *test,
   g_clear_error (&error);
 }
 
+
+static void
+test_auth_results (TestCase *test,
+                   gconstpointer data)
+{
+  WebSocketConnection *ws;
+  GBytes *received = NULL;
+  CockpitWebService *service;
+  JsonObject *options;
+  JsonObject *auth_results;
+  GBytes *payload;
+  gchar *ochannel = NULL;
+  const gchar *channel;
+  const gchar *command;
+
+  /* Fail to spawn this program */
+  cockpit_ws_bridge_program = "/nonexistant";
+
+  start_web_service_and_connect_client (test, data, &ws, &service);
+  g_signal_connect (ws, "message", G_CALLBACK (on_message_get_bytes), &received);
+  g_signal_handlers_disconnect_by_func (ws, on_error_not_reached, NULL);
+
+  /* Should get an init message */
+  while (received == NULL)
+    g_main_context_iteration (NULL, TRUE);
+  expect_control_message (received, "init", NULL, NULL);
+  g_bytes_unref (received);
+  received = NULL;
+
+  /* Channel should close immediately */
+  WAIT_UNTIL (received != NULL);
+
+  /* Should have auth methods details */
+  payload = cockpit_transport_parse_frame (received, &ochannel);
+  g_bytes_unref (received);
+  received = NULL;
+
+  g_assert (payload != NULL);
+  g_free (ochannel);
+
+  g_assert (cockpit_transport_parse_command (payload, &command, &channel, &options));
+  g_bytes_unref (payload);
+
+  g_assert_cmpstr (command, ==, "close");
+  g_assert_cmpstr (json_object_get_string_member (options, "problem"), ==, "no-cockpit");
+
+  auth_results = json_object_get_object_member (options, "auth-method-results");
+  g_assert (auth_results != NULL);
+
+  if (json_object_has_member (auth_results, "public-key"))
+    g_assert_cmpstr ("denied", ==,
+                     json_object_get_string_member (auth_results, "public-key"));
+
+  g_assert_cmpstr ("succeeded", ==,
+                   json_object_get_string_member (auth_results, "password"));
+  g_assert_cmpstr ("no-server-support", ==,
+                   json_object_get_string_member (auth_results, "gssapi-mic"));
+
+  json_object_unref (options);
+  g_bytes_unref (received);
+
+  close_client_and_stop_web_service (test, ws, service);
+}
 
 static void
 test_fail_spawn (TestCase *test,
@@ -1479,560 +1703,97 @@ test_logout (TestCase *test,
   close_client_and_stop_web_service (test, ws, service);
 }
 
+static void
+test_parse_external (void)
+{
+  const gchar *content_disposition;
+  const gchar *content_type;
+  gchar **protocols;
+  JsonObject *object;
+  JsonObject *external;
+  JsonArray *array;
+  gboolean ret;
+
+  object = json_object_new ();
+
+  ret = cockpit_web_service_parse_external (object, NULL, NULL, NULL);
+  g_assert (ret == TRUE);
+
+  ret = cockpit_web_service_parse_external (object, &content_type, &content_disposition, &protocols);
+  g_assert (ret == TRUE);
+  g_assert (content_type == NULL);
+  g_assert (content_disposition == NULL);
+  g_assert (protocols == NULL);
+
+  external = json_object_new ();
+  json_object_set_object_member (object, "external", external);
+
+  ret = cockpit_web_service_parse_external (object, &content_type, &content_disposition, &protocols);
+  g_assert (ret == TRUE);
+  g_assert (content_type == NULL);
+  g_assert (content_disposition == NULL);
+  g_assert (protocols == NULL);
+
+  array = json_array_new ();
+  json_array_add_string_element (array, "one");
+  json_array_add_string_element (array, "two");
+  json_array_add_string_element (array, "three");
+  json_object_set_array_member (external, "protocols", array);
+
+  json_object_set_string_member (external, "content-type", "text/plain");
+  json_object_set_string_member (external, "content-disposition", "filename; test");
+
+  ret = cockpit_web_service_parse_external (object, &content_type, &content_disposition, &protocols);
+  g_assert (ret == TRUE);
+  g_assert_cmpstr (content_type, ==, "text/plain");
+  g_assert_cmpstr (content_disposition, ==, "filename; test");
+  g_assert (protocols != NULL);
+  g_assert_cmpstr (protocols[0], ==, "one");
+  g_assert_cmpstr (protocols[1], ==, "two");
+  g_assert_cmpstr (protocols[2], ==, "three");
+  g_assert_cmpstr (protocols[3], ==, NULL);
+  g_free (protocols);
+
+  json_object_unref (object);
+}
+
 typedef struct {
-  CockpitWebService *service;
-  GIOStream *io;
-  GMemoryOutputStream *output;
-  CockpitPipe *pipe;
-  GHashTable *headers;
-} TestResourceCase;
+  const gchar *name;
+  const gchar *input;
+  const gchar *message;
+} ParseExternalFailure;
 
-typedef struct {
-  const gchar *xdg_data_home;
-} TestResourceFixture;
-
-static void
-setup_resource (TestResourceCase *tc,
-                gconstpointer data)
-{
-  const TestResourceFixture *fixture = data;
-  CockpitTransport *transport;
-  GInputStream *input;
-  GOutputStream *output;
-  CockpitCreds *creds;
-  gchar **environ;
-  const gchar *user;
-  const gchar *home = NULL;
-
-  const gchar *argv[] = {
-    BUILDDIR "/cockpit-bridge",
-    NULL
-  };
-
-  environ = g_get_environ ();
-  environ = g_environ_setenv (environ, "XDG_DATA_DIRS", SRCDIR "/src/bridge/mock-resource/system", TRUE);
-
-  if (fixture)
-    home = fixture->xdg_data_home;
-  if (!home)
-    home = SRCDIR "/src/bridge/mock-resource/home";
-  environ = g_environ_setenv (environ, "XDG_DATA_HOME", home, TRUE);
-
-  /* Start up a cockpit-bridge here */
-  tc->pipe = cockpit_pipe_spawn (argv, (const gchar **)environ, NULL, COCKPIT_PIPE_FLAGS_NONE);
-
-  g_strfreev (environ);
-
-  user = g_get_user_name ();
-  creds = cockpit_creds_new (user, "cockpit", COCKPIT_CRED_PASSWORD, PASSWORD, NULL);
-
-  transport = cockpit_pipe_transport_new (tc->pipe);
-  tc->service = cockpit_web_service_new (creds, transport);
-  g_object_unref (transport);
-
-  cockpit_creds_unref (creds);
-
-  input = g_memory_input_stream_new_from_data ("", 0, NULL);
-  output = g_memory_output_stream_new (NULL, 0, g_realloc, g_free);
-  tc->io = mock_io_stream_new (input, output);
-  tc->output = G_MEMORY_OUTPUT_STREAM (output);
-  g_object_unref (input);
-
-  tc->headers = cockpit_web_server_new_table ();
-  g_hash_table_insert (tc->headers, g_strdup ("Accept-Encoding"), g_strdup ("gzip, identity"));
-}
-
-static void
-teardown_resource (TestResourceCase *tc,
-                   gconstpointer data)
-{
-  cockpit_assert_expected ();
-
-  g_hash_table_unref (tc->headers);
-
-  g_object_add_weak_pointer (G_OBJECT (tc->service), (gpointer *)&tc->service);
-  g_object_unref (tc->service);
-  g_assert (tc->service == NULL);
-
-  g_object_unref (tc->io);
-  g_object_unref (tc->output);
-  g_object_unref (tc->pipe);
-}
-
-static void
-test_resource_simple (TestResourceCase *tc,
-                      gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  response = cockpit_web_response_new (tc->io, "/@localhost/another/test.html", NULL, NULL);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.html");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 200 OK\r\n"
-                           "Content-Type: text/html\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n"
-                           "52\r\n"
-                           "<html>\n"
-                           "<head>\n"
-                           "<title>In home dir</title>\n"
-                           "</head>\n"
-                           "<body>In home dir</body>\n"
-                           "</html>\n"
-                           "\r\n"
-                           "0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_not_found (TestResourceCase *tc,
-                         gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  response = cockpit_web_response_new (tc->io, "/cockpit/another@localhost/not-exist", NULL, NULL);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "another@localhost", "/not-exist");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 404 Not Found\r\n"
-                           "Content-Type: text/html; charset=utf8\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n13\r\n"
-                           "<html><head><title>\r\n9\r\n"
-                           "Not Found\r\n15\r\n"
-                           "</title></head><body>\r\n9\r\n"
-                           "Not Found\r\nf\r\n"
-                           "</body></html>\n\r\n0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_no_path (TestResourceCase *tc,
-                       gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  /* Missing path after package */
-  response = cockpit_web_response_new (tc->io, "/cockpit/another@localhost", NULL, NULL);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "another@localhost", "");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 404 Not Found\r\n"
-                           "Content-Type: text/html; charset=utf8\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n13\r\n"
-                           "<html><head><title>\r\n9\r\n"
-                           "Not Found\r\n15\r\n"
-                           "</title></head><body>\r\n9\r\n"
-                           "Not Found\r\nf\r\n"
-                           "</body></html>\n\r\n0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-
-static void
-test_resource_failure (TestResourceCase *tc,
-                       gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-  GPid pid;
-
-  cockpit_expect_message ("*: failed to retrieve resource: terminated");
-
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-
-  /* Now kill the bridge */
-  g_assert (cockpit_pipe_get_pid (tc->pipe, &pid));
-  g_assert_cmpint (pid, >, 0);
-  g_assert_cmpint (kill (pid, SIGTERM), ==, 0);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.html");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 500 Internal Server Error\r\n"
-                           "Content-Type: text/html; charset=utf8\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n13\r\n"
-                           "<html><head><title>\r\n15\r\n"
-                           "Internal Server Error\r\n15\r\n"
-                           "</title></head><body>\r\n15\r\n"
-                           "Internal Server Error\r\nf\r\n"
-                           "</body></html>\n\r\n0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static const TestResourceFixture checksum_fixture = {
-  .xdg_data_home = "/nonexistant"
+static ParseExternalFailure external_failure_fixtures[] = {
+  { "bad-channel", "{ \"channel\": \"blah\" }", "don't specify \"channel\" on external channel" },
+  { "bad-command", "{ \"command\": \"test\" }", "don't specify \"command\" on external channel" },
+  { "bad-external", "{ \"external\": \"test\" }", "invalid \"external\" option" },
+  { "bad-disposition", "{ \"external\": { \"content-disposition\": 5 } }", "invalid*content-disposition*" },
+  { "invalid-disposition", "{ \"external\": { \"content-disposition\": \"xx\nx\" } }", "invalid*content-disposition*" },
+  { "bad-type", "{ \"external\": { \"content-type\": 5 } }", "invalid*content-type*" },
+  { "invalid-type", "{ \"external\": { \"content-type\": \"xx\nx\" } }", "invalid*content-type*" },
+  { "bad-protocols", "{ \"external\": { \"protocols\": \"xx\nx\" } }", "invalid*protocols*" },
 };
 
 static void
-test_resource_checksum (TestResourceCase *tc,
-                        gconstpointer data)
+test_parse_external_failure (gconstpointer data)
 {
-  CockpitWebResponse *response;
-  GInputStream *input;
-  GOutputStream *output;
-  GIOStream *io;
+  const ParseExternalFailure *fixture = data;
   GError *error = NULL;
-  GBytes *bytes;
+  JsonObject *object;
+  gboolean ret;
 
-  /* We require that no user packages are loaded, so we have a checksum */
-  g_assert (data == &checksum_fixture);
-
-  input = g_memory_input_stream_new_from_data ("", 0, NULL);
-  output = g_memory_output_stream_new (NULL, 0, g_realloc, g_free);
-  io = mock_io_stream_new (input, output);
-  g_object_unref (input);
-
-  /* Start the connection up, and poke it a bit */
-  response = cockpit_web_response_new (io, "/unused", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/checksum");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_object_unref (io);
-
-  /* Use this when the checksum changes, due to mock resource changes */
-#if 0
-  bytes = g_memory_output_stream_steal_as_bytes (G_MEMORY_OUTPUT_STREAM (output));
-  g_printerr ("%.*s\n", (gint)g_bytes_get_size (bytes), (gchar *)g_bytes_get_data (bytes, NULL));
-  g_bytes_unref (bytes);
-#endif
-
-  g_object_unref (output);
-  g_object_unref (response);
-
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response,
-                                "$71100b932eb766ef9043f855974ae8e3834173e2",
-                                "/test/sub/file.ext");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
+  object = cockpit_json_parse_object (fixture->input, -1, &error);
   g_assert_no_error (error);
 
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 200 OK\r\n"
-                           "ETag: \"$71100b932eb766ef9043f855974ae8e3834173e2\"\r\n"
-                           "Cache-Control: max-age=31556926, public\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n"
-                           "32\r\n"
-                           "These are the contents of file.ext\nOh marmalaaade\n"
-                           "\r\n"
-                           "0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
+  cockpit_expect_message (fixture->message);
+
+  ret = cockpit_web_service_parse_external (object, NULL, NULL, NULL);
+  g_assert (ret == FALSE);
+
+  json_object_unref (object);
+
+  cockpit_assert_expected ();
 }
-
-static void
-test_resource_redirect_checksum (TestResourceCase *tc,
-                                 gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GInputStream *input;
-  GOutputStream *output;
-  GIOStream *io;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  /* We require that no user packages are loaded, so we have a checksum */
-  g_assert (data == &checksum_fixture);
-
-  input = g_memory_input_stream_new_from_data ("", 0, NULL);
-  output = g_memory_output_stream_new (NULL, 0, g_realloc, g_free);
-  io = mock_io_stream_new (input, output);
-  g_object_unref (input);
-
-  /* Start the connection up, and poke it a bit */
-  response = cockpit_web_response_new (io, "/unused", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/not-found");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_object_unref (io);
-  g_object_unref (output);
-  g_object_unref (response);
-
-  /* Now do the real request ... we should be redirected */
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/test/sub/file.ext");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 307 Temporary Redirect\r\n"
-                           "Content-Type: text/html\r\n"
-                           "Location: /cockpit/$71100b932eb766ef9043f855974ae8e3834173e2/test/sub/file.ext\r\n"
-                           "Content-Length: 91\r\n"
-                           "\r\n"
-                           "<html><head><title>Temporary redirect</title></head><body>Access via checksum</body></html>",
-                           -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_not_modified (TestResourceCase *tc,
-                            gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  g_hash_table_insert (tc->headers, g_strdup ("If-None-Match"),
-                       g_strdup ("\"$3dccaa0e86f6cb47294825bc3fdf7435ff6b04c3\""));
-
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, tc->headers);
-  cockpit_web_service_resource (tc->service, tc->headers, response,
-                                "$3dccaa0e86f6cb47294825bc3fdf7435ff6b04c3",
-                                "/test/sub/file.ext");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 304 Not Modified\r\n"
-                           "ETag: \"$3dccaa0e86f6cb47294825bc3fdf7435ff6b04c3\"\r\n"
-                           "\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_no_checksum (TestResourceCase *tc,
-                           gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  /* Missing checksum */
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "xxx", "/test");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 404 Not Found\r\n"
-                           "Content-Type: text/html; charset=utf8\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n13\r\n"
-                           "<html><head><title>\r\n9\r\n"
-                           "Not Found\r\n15\r\n"
-                           "</title></head><body>\r\n9\r\n"
-                           "Not Found\r\nf\r\n"
-                           "</body></html>\n\r\n0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_bad_checksum (TestResourceCase *tc,
-                           gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  /* Missing checksum */
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "09323094823029348", "/path");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 404 Not Found\r\n"
-                           "Content-Type: text/html; charset=utf8\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n13\r\n"
-                           "<html><head><title>\r\n9\r\n"
-                           "Not Found\r\n15\r\n"
-                           "</title></head><body>\r\n9\r\n"
-                           "Not Found\r\nf\r\n"
-                           "</body></html>\n\r\n0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_language_suffix (TestResourceCase *tc,
-                               gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.de.html");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 200 OK\r\n"
-                           "Content-Type: text/html\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n"
-                           "62\r\n"
-                           "<html>\n"
-                           "<head>\n"
-                           "<title>Im Home-Verzeichnis</title>\n"
-                           "</head>\n"
-                           "<body>Im Home-Verzeichnis</body>\n"
-                           "</html>\n"
-                           "\r\n"
-                           "0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_language_fallback (TestResourceCase *tc,
-                                 gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-
-  /* Language cookie overrides */
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test.fi.html");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 200 OK\r\n"
-                           "Content-Type: text/html\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n"
-                           "52\r\n"
-                           "<html>\n"
-                           "<head>\n"
-                           "<title>In home dir</title>\n"
-                           "</head>\n"
-                           "<body>In home dir</body>\n"
-                           "</html>\n"
-                           "\r\n"
-                           "0\r\n\r\n", -1);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
-static void
-test_resource_gzip_encoding (TestResourceCase *tc,
-                             gconstpointer data)
-{
-  CockpitWebResponse *response;
-  GError *error = NULL;
-  GBytes *bytes;
-
-  response = cockpit_web_response_new (tc->io, "/unused", NULL, NULL);
-
-  cockpit_web_service_resource (tc->service, tc->headers, response, "@localhost", "/another/test-file.txt");
-
-  while (cockpit_web_response_get_state (response) != COCKPIT_WEB_RESPONSE_SENT)
-    g_main_context_iteration (NULL, TRUE);
-
-  g_output_stream_close (G_OUTPUT_STREAM (tc->output), NULL, &error);
-  g_assert_no_error (error);
-
-  bytes = g_memory_output_stream_steal_as_bytes (tc->output);
-  cockpit_assert_bytes_eq (bytes,
-                           "HTTP/1.1 200 OK\r\n"
-                           "Content-Encoding: gzip\r\n"
-                           "Content-Type: text/plain\r\n"
-                           "Transfer-Encoding: chunked\r\n"
-                           "\r\n"
-                           "34\r\n"
-                           "\x1F\x8B\x08\x08N1\x03U\x00\x03test-file.txt\x00sT(\xCEM\xCC\xC9Q(I-"
-                           ".QH\xCB\xCCI\xE5\x02\x00>PjG\x12\x00\x00\x00\x0D\x0A" "0\x0D\x0A\x0D\x0A",
-                           160);
-  g_bytes_unref (bytes);
-  g_object_unref (response);
-}
-
 
 static gboolean
 on_hack_raise_sigchld (gpointer user_data)
@@ -2045,6 +1806,9 @@ int
 main (int argc,
       char *argv[])
 {
+  gchar *name;
+  gint i;
+
   cockpit_test_init (&argc, &argv);
 
   /*
@@ -2091,9 +1855,6 @@ main (int argc,
   g_test_add ("/web-service/close-error", TestCase,
               NULL, setup_for_socket,
               test_close_error, teardown_for_socket);
-  g_test_add ("/web-service/unauthenticated", TestCase,
-              NULL, setup_for_socket,
-              test_socket_unauthenticated, teardown_for_socket);
   g_test_add ("/web-service/null-creds", TestCase, NULL,
               setup_for_socket, test_socket_null_creds, teardown_for_socket);
   g_test_add ("/web-service/unknown-hostkey", TestCase,
@@ -2125,6 +1886,9 @@ main (int argc,
               &fixture_allowed_origin_hixie76, setup_for_socket,
               test_handshake_and_auth, teardown_for_socket);
 
+  g_test_add ("/web-service/auth-results", TestCase,
+              NULL, setup_for_socket,
+              test_auth_results, teardown_for_socket);
   g_test_add ("/web-service/fail-spawn/rfc6455", TestCase,
               &fixture_rfc6455, setup_for_socket,
               test_fail_spawn, teardown_for_socket);
@@ -2143,6 +1907,18 @@ main (int argc,
   g_test_add ("/web-service/specified-creds-fail", TestCase,
               &fixture_rfc6455, setup_for_socket_spec,
               test_specified_creds_fail, teardown_for_socket);
+  g_test_add ("/web-service/specified-creds-overide-host", TestCase,
+              &fixture_rfc6455, setup_for_socket_spec,
+              test_specified_creds_overide_host, teardown_for_socket);
+  g_test_add ("/web-service/user-host-same", TestCase,
+              &fixture_rfc6455, setup_for_socket,
+              test_user_host_reuse_password, teardown_for_socket);
+  g_test_add ("/web-service/user-host-fail", TestCase,
+              &fixture_rfc6455, setup_for_socket_spec,
+              test_user_host_fail, teardown_for_socket);
+  g_test_add ("/web-service/host-port", TestCase,
+              &fixture_rfc6455, setup_for_socket_spec,
+              test_host_port, teardown_for_socket);
 
   g_test_add ("/web-service/timeout-session", TestCase, NULL,
               setup_for_socket, test_timeout_session, teardown_for_socket);
@@ -2153,31 +1929,13 @@ main (int argc,
   g_test_add ("/web-service/logout", TestCase, NULL,
               setup_for_socket, test_logout, teardown_for_socket);
 
-  g_test_add ("/web-service/resource/simple", TestResourceCase, NULL,
-              setup_resource, test_resource_simple, teardown_resource);
-  g_test_add ("/web-service/resource/not-found", TestResourceCase, NULL,
-              setup_resource, test_resource_not_found, teardown_resource);
-  g_test_add ("/web-service/resource/no-path", TestResourceCase, NULL,
-              setup_resource, test_resource_no_path, teardown_resource);
-  g_test_add ("/web-service/resource/failure", TestResourceCase, NULL,
-              setup_resource, test_resource_failure, teardown_resource);
-  g_test_add ("/web-service/resource/checksum", TestResourceCase, &checksum_fixture,
-              setup_resource, test_resource_checksum, teardown_resource);
-  g_test_add ("/web-service/resource/redirect-checksum", TestResourceCase, &checksum_fixture,
-              setup_resource, test_resource_redirect_checksum, teardown_resource);
-  g_test_add ("/web-service/resource/not-modified", TestResourceCase, &checksum_fixture,
-              setup_resource, test_resource_not_modified, teardown_resource);
-  g_test_add ("/web-service/resource/no-checksum", TestResourceCase, NULL,
-              setup_resource, test_resource_no_checksum, teardown_resource);
-  g_test_add ("/web-service/resource/bad-checksum", TestResourceCase, NULL,
-              setup_resource, test_resource_bad_checksum, teardown_resource);
-  g_test_add ("/web-service/resource/language-suffix", TestResourceCase, NULL,
-              setup_resource, test_resource_language_suffix, teardown_resource);
-  g_test_add ("/web-service/resource/language-fallback", TestResourceCase, NULL,
-              setup_resource, test_resource_language_fallback, teardown_resource);
-
-  g_test_add ("/web-service/resource/gzip-encoding", TestResourceCase, NULL,
-              setup_resource, test_resource_gzip_encoding, teardown_resource);
+  g_test_add_func ("/web-service/parse-external/success", test_parse_external);
+  for (i = 0; i < G_N_ELEMENTS (external_failure_fixtures); i++)
+    {
+      name = g_strdup_printf ("/web-service/parse-external/%s", external_failure_fixtures[i].name);
+      g_test_add_data_func (name, external_failure_fixtures + i, test_parse_external_failure);
+      g_free (name);
+    }
 
   return g_test_run ();
 }

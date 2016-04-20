@@ -19,6 +19,10 @@
 
 #include "config.h"
 
+#include "cockpitwebservice.h"
+#include "cockpitchannelresponse.h"
+#include "cockpitchannelsocket.h"
+
 #include "common/cockpitpipe.h"
 #include "common/cockpitconf.h"
 #include "common/cockpitpipetransport.h"
@@ -31,10 +35,8 @@
 #include <glib/gstdio.h>
 #include <string.h>
 
-#include "cockpitws.h"
-#include "cockpitwebservice.h"
-
 static GMainLoop *loop = NULL;
+static gboolean signalled = FALSE;
 static int exit_code = 0;
 static gint server_port = 0;
 static gchar **bridge_argv;
@@ -174,6 +176,22 @@ mock_http_headers (CockpitWebResponse *response,
 }
 
 static gboolean
+mock_http_host (CockpitWebResponse *response,
+                GHashTable *in_headers)
+{
+  GHashTable *headers;
+
+  headers = cockpit_web_server_new_table();
+  g_hash_table_insert (headers, g_strdup ("Host"), g_strdup (g_hash_table_lookup (in_headers, "Host")));
+  cockpit_web_response_headers_full (response, 201, "Yoo Hoo", -1, headers);
+  cockpit_web_response_complete (response);
+
+  g_hash_table_unref (headers);
+
+  return TRUE;
+}
+
+static gboolean
 mock_http_connection (CockpitWebResponse *response)
 {
   GIOStream *io;
@@ -208,6 +226,8 @@ on_handle_mock (CockpitWebServer *server,
     return mock_http_stream (response);
   if (g_str_equal (path, "/headers"))
     return mock_http_headers (response, headers);
+  if (g_str_equal (path, "/host"))
+    return mock_http_host (response, headers);
   if (g_str_equal (path, "/connection"))
     return mock_http_connection (response);
   else
@@ -221,6 +241,7 @@ on_handle_mock (CockpitWebServer *server,
  */
 
 static CockpitWebService *service;
+static CockpitPipe *bridge;
 
 static gboolean
 on_handle_stream_socket (CockpitWebServer *server,
@@ -228,23 +249,31 @@ on_handle_stream_socket (CockpitWebServer *server,
                          GIOStream *io_stream,
                          GHashTable *headers,
                          GByteArray *input,
-                         guint in_length,
                          gpointer user_data)
 {
   CockpitTransport *transport;
   const gchar *query = NULL;
   CockpitCreds *creds;
-  CockpitPipe *pipe;
+  int session_stdin = -1;
+  int session_stdout = -1;
+  GError *error = NULL;
+  GPid pid = 0;
+
   gchar *value;
   gchar **env;
+  gchar **argv;
 
   if (!g_str_has_prefix (path, "/cockpit/socket"))
     return FALSE;
 
   if (path[15] == '?')
-    query = path + 16;
+    {
+      query = path + 16;
+    }
   else if (path[15] != '\0')
-    return FALSE;
+    {
+      return FALSE;
+    }
 
   if (service)
     {
@@ -252,33 +281,179 @@ on_handle_stream_socket (CockpitWebServer *server,
     }
   else
     {
+      g_clear_object (&bridge);
+
       value = g_strdup_printf ("%d", server_port);
       env = g_environ_setenv (g_get_environ (), "COCKPIT_TEST_SERVER_PORT", value, TRUE);
 
-      creds = cockpit_creds_new (g_get_user_name (), "test", NULL);
-      pipe = cockpit_pipe_spawn ((const gchar **)bridge_argv, (const gchar **)env, NULL, FALSE);
-      transport = cockpit_pipe_transport_new (pipe);
+      argv = g_strdupv (bridge_argv);
+      if (query)
+        argv[g_strv_length (argv) - 1] = g_strdup (query);
+
+      g_spawn_async_with_pipes (NULL, argv, env,
+                                G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
+                                NULL, NULL, &pid, &session_stdin, &session_stdout, NULL, &error);
+
+      g_strfreev (env);
+      g_free (argv);
+      g_free (value);
+
+      if (error)
+        {
+          g_critical ("couldn't run bridge %s: %s", bridge_argv[0], error->message);
+          return FALSE;
+        }
+
+      bridge = g_object_new (COCKPIT_TYPE_PIPE,
+                             "name", "test-server-bridge",
+                             "in-fd", session_stdout,
+                             "out-fd", session_stdin,
+                             "pid", pid,
+                             NULL);
+
+      creds = cockpit_creds_new (g_get_user_name (), "test",
+                                 COCKPIT_CRED_CSRF_TOKEN, "myspecialtoken",
+                                 NULL);
+
+      transport = cockpit_pipe_transport_new (bridge);
       service = cockpit_web_service_new (creds, transport);
       cockpit_creds_unref (creds);
       g_object_unref (transport);
-      g_object_unref (pipe);
-
-      g_free (value);
-      g_strfreev (env);
 
       /* Clear the pointer automatically when service is done */
       g_object_add_weak_pointer (G_OBJECT (service), (gpointer *)&service);
     }
 
-  if (query)
-    cockpit_web_service_sideband (service, "/cockpit/socket", query, io_stream, headers, input);
-  else
-    cockpit_web_service_socket (service, "/cockpit/socket", io_stream, headers, input);
+  cockpit_web_service_socket (service, path, io_stream, headers, input);
 
   /* Keeps ref on itself until it closes */
   g_object_unref (service);
 
   return TRUE;
+}
+
+static void
+on_echo_socket_message (WebSocketConnection *self,
+                        WebSocketDataType type,
+                        GBytes *message,
+                        gpointer user_data)
+{
+  GByteArray *array = g_bytes_unref_to_array (g_bytes_ref (message));
+  GBytes *payload;
+  guint i;
+
+  /* Capitalize and relay back */
+  for (i = 0; i < array->len; i++)
+    array->data[i] = g_ascii_toupper (array->data[i]);
+
+  payload = g_byte_array_free_to_bytes (array);
+  web_socket_connection_send (self, type, NULL, payload);
+  g_bytes_unref (payload);
+}
+
+static void
+on_echo_socket_close (WebSocketConnection *ws,
+                      gpointer user_data)
+{
+  g_object_unref (ws);
+}
+
+static gboolean
+on_handle_stream_external (CockpitWebServer *server,
+                           const gchar *path,
+                           GIOStream *io_stream,
+                           GHashTable *headers,
+                           GByteArray *input,
+                           gpointer user_data)
+{
+  CockpitWebResponse *response;
+  gboolean handled = FALSE;
+  const gchar *upgrade;
+  CockpitCreds *creds;
+  const gchar *expected;
+  const gchar *query;
+  const gchar *segment;
+  JsonObject *open = NULL;
+  GBytes *bytes;
+  guchar *decoded;
+  gsize length;
+  gsize seglen;
+
+  if (g_str_has_prefix (path, "/cockpit/echosocket"))
+    {
+      const gchar *protocols[] = { "cockpit1", NULL };
+      const gchar *origins[2] = { NULL, NULL };
+      WebSocketConnection *ws = NULL;
+      gchar *url;
+
+      url = g_strdup_printf ("ws://localhost:%u%s", server_port, path);
+      origins[0] = g_strdup_printf ("http://localhost:%u", server_port);
+
+      ws = web_socket_server_new_for_stream (url, (const gchar **)origins,
+                                             protocols, io_stream, headers, input);
+
+      g_signal_connect (ws, "message", G_CALLBACK (on_echo_socket_message), NULL);
+      g_signal_connect (ws, "close", G_CALLBACK (on_echo_socket_close), NULL);
+      return TRUE;
+    }
+
+  if (!g_str_has_prefix (path, "/cockpit/channel/"))
+    return FALSE;
+
+  /* Remove /cockpit/channel/ part */
+  segment = path + 17;
+
+  if (service)
+    {
+      creds = cockpit_web_service_get_creds (service);
+      g_return_val_if_fail (creds != NULL, FALSE);
+
+      expected = cockpit_creds_get_csrf_token (creds);
+      g_return_val_if_fail (expected != NULL, FALSE);
+
+      /* The end of the token */
+      query = strchr (segment, '?');
+      if (!query)
+        query = segment + strlen (segment);
+
+      /* No such path is valid */
+      seglen = query - segment;
+      if (strlen(expected) == seglen && memcmp (expected, segment, seglen) == 0)
+        {
+          decoded = g_base64_decode (query, &length);
+          if (decoded)
+            {
+              bytes = g_bytes_new_take (decoded, length);
+              if (!cockpit_transport_parse_command (bytes, NULL, NULL, &open))
+                {
+                  open = NULL;
+                  g_message ("invalid external channel query");
+                }
+              g_bytes_unref (bytes);
+            }
+        }
+
+      if (open)
+        {
+          upgrade = g_hash_table_lookup (headers, "Upgrade");
+          if (upgrade && g_ascii_strcasecmp (upgrade, "websocket") == 0)
+            {
+              cockpit_channel_socket_open (service, open, path, io_stream, headers, input);
+              handled = TRUE;
+            }
+          else
+            {
+              response = cockpit_web_response_new (io_stream, path, NULL, headers);
+              cockpit_channel_response_open (service, headers, response, open);
+              g_object_unref (response);
+              handled = TRUE;
+            }
+
+          json_object_unref (open);
+        }
+    }
+
+  return handled;
 }
 
 static void
@@ -295,7 +470,7 @@ inject_address (CockpitWebResponse *response,
       line = g_strconcat ("\nvar ", name, " = '", value, "';\n", NULL);
 
       inject = g_bytes_new (line, strlen (line));
-      filter = cockpit_web_inject_new ("<script id='dbus-tests'>", inject);
+      filter = cockpit_web_inject_new ("<script id='dbus-tests'>", inject, 1);
       g_bytes_unref (inject);
 
       cockpit_web_response_add_filter (response, filter);
@@ -329,8 +504,8 @@ on_handle_resource (CockpitWebServer *server,
   inject_address (response, "bus_address", bus_address);
   inject_address (response, "direct_address", direct_address);
 
-  cockpit_web_response_file (response, rebuilt, FALSE,
-                             cockpit_web_server_get_document_roots (server));
+  cockpit_web_response_set_cache_type (response, COCKPIT_WEB_RESPONSE_NO_CACHE);
+  cockpit_web_response_file (response, rebuilt,  cockpit_web_server_get_document_roots (server));
 
   g_strfreev (parts);
   g_free (rebuilt);
@@ -361,9 +536,10 @@ server_ready (void)
                   error->message, g_quark_to_string (error->domain), error->code);
     }
 
-  g_signal_connect (server,
-                    "handle-stream",
+  g_signal_connect (server, "handle-stream",
                     G_CALLBACK (on_handle_stream_socket), NULL);
+  g_signal_connect (server, "handle-stream",
+                    G_CALLBACK (on_handle_stream_external), NULL);
   g_signal_connect (server,
                     "handle-resource::/pkg/",
                     G_CALLBACK (on_handle_resource), NULL);
@@ -420,7 +596,7 @@ on_name_lost (GDBusConnection *connection,
               const gchar *name,
               gpointer user_data)
 {
-  g_assert_not_reached ();
+
 }
 
 static gboolean
@@ -453,9 +629,37 @@ setup_path (const char *argv0)
   g_free (dir);
 }
 
+static void
+on_bridge_done (CockpitPipe *pipe,
+                const gchar *problem,
+                gpointer user_data)
+{
+  gint status;
+  status = cockpit_pipe_exit_status (pipe);
+  if (WIFEXITED (status))
+    exit_code = WEXITSTATUS (status);
+  else if (status != 0)
+    exit_code = 1;
+  g_main_loop_quit (loop);
+}
+
 static gboolean
 on_signal_done (gpointer data)
 {
+  gboolean first = !signalled;
+  signalled = TRUE;
+
+  if (first)
+    {
+      if (service)
+        cockpit_web_service_disconnect (service);
+      if (bridge)
+        {
+          g_signal_connect (bridge, "close", G_CALLBACK (on_bridge_done), NULL);
+          return TRUE;
+        }
+    }
+
   g_main_loop_quit (loop);
   return TRUE;
 }
@@ -477,11 +681,6 @@ main (int argc,
     { NULL }
   };
 
-  char *default_argv[] = {
-    "cockpit-bridge",
-    NULL
-  };
-
   signal (SIGPIPE, SIG_IGN);
   /* avoid gvfs (http://bugzilla.gnome.org/show_bug.cgi?id=526454) */
   g_setenv ("GIO_USE_VFS", "local", TRUE);
@@ -501,11 +700,6 @@ main (int argc,
   // System cockpit configuration file should not be loaded
   cockpit_config_file = NULL;
 
-  /* This isolates us from affecting other processes during tests */
-  bus = g_test_dbus_new (G_TEST_DBUS_NONE);
-  g_test_dbus_up (bus);
-  bus_address = g_test_dbus_get_bus_address (bus);
-
   context = g_option_context_new ("- test dbus json server");
   g_option_context_add_main_entries (context, entries, NULL);
   g_option_context_set_ignore_unknown_options (context, TRUE);
@@ -515,20 +709,33 @@ main (int argc,
       exit (2);
     }
 
+  /* This isolates us from affecting other processes during tests */
+  bus = g_test_dbus_new (G_TEST_DBUS_NONE);
+  g_test_dbus_up (bus);
+  bus_address = g_test_dbus_get_bus_address (bus);
+
+  guid = g_dbus_generate_guid ();
+  direct_dbus_server = g_dbus_server_new_sync ("unix:tmpdir=/tmp/dbus-tests",
+                                               G_DBUS_SERVER_FLAGS_NONE,
+                                               guid,
+                                               NULL,
+                                               NULL,
+                                               &error);
+  if (direct_dbus_server == NULL)
+    {
+      g_printerr ("test-server: %s\n", error->message);
+      exit (3);
+    }
+
   /* Skip the program name */
   argc--;
   argv++;
 
-  if (argc == 0)
-    {
-      argc = 1;
-      argv = default_argv;
-    }
-
   /* Null terminate the bridge command line */
-  bridge_argv = g_new0 (char *, argc + 1);
+  bridge_argv = g_new0 (char *, argc + 2);
   for (i = 0; i < argc; i++)
     bridge_argv[i] = argv[i];
+  bridge_argv[i] = "cockpit-bridge";
 
   loop = g_main_loop_new (NULL, FALSE);
 
@@ -550,30 +757,19 @@ main (int argc,
                          loop,
                          NULL);
 
-  guid = g_dbus_generate_guid ();
-  direct_dbus_server = g_dbus_server_new_sync ("unix:tmpdir=/tmp/dbus-tests",
-                                               G_DBUS_SERVER_FLAGS_NONE,
-                                               guid,
-                                               NULL,
-                                               NULL,
-                                               &error);
-  if (direct_dbus_server == NULL)
-    {
-      g_printerr ("test-server: %s\n", error->message);
-      exit (3);
-    }
-
   g_signal_connect_object (direct_dbus_server,
                            "new-connection",
                            G_CALLBACK (on_new_direct_connection),
                            NULL, 0);
   g_dbus_server_start (direct_dbus_server);
   direct_address = g_dbus_server_get_client_address (direct_dbus_server);
+
   g_main_loop_run (loop);
 
   g_source_remove (sig_term);
   g_source_remove (sig_int);
 
+  g_clear_object (&bridge);
   g_clear_object (&exported);
   g_clear_object (&exported_b);
   g_clear_object (&direct_dbus_server);

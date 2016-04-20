@@ -36,12 +36,6 @@
 #include <string.h>
 
 /**
- * Certain processes may want to allow symlinks to certain
- * directory, like branding
- */
-const gchar *cockpit_web_exception_escape_root = NULL;
-
-/**
  * Certain processes may want to have a non-default error page.
  */
 const gchar *cockpit_web_failure_resource = NULL;
@@ -68,6 +62,7 @@ struct _CockpitWebResponse {
   const gchar *path;
   gchar *full_path;
   gchar *query;
+  CockpitCacheType cache_type;
 
   /* The output queue */
   GPollableOutputStream *out;
@@ -98,6 +93,7 @@ static void
 cockpit_web_response_init (CockpitWebResponse *self)
 {
   self->queue = g_queue_new ();
+  self->cache_type = COCKPIT_WEB_RESPONSE_CACHE_UNSET;
 }
 
 static void
@@ -630,9 +626,25 @@ cockpit_web_response_get_state (CockpitWebResponse *self)
     return COCKPIT_WEB_RESPONSE_QUEUING;
 }
 
+gboolean
+cockpit_web_response_is_simple_token (const gchar *string)
+{
+  string += strcspn (string, " \t\r\n\v");
+  return string[0] == '\0';
+}
+
+gboolean
+cockpit_web_response_is_header_value (const gchar *string)
+{
+  string += strcspn (string, "\r\n\v");
+  return string[0] == '\0';
+}
+
 enum {
     HEADER_CONTENT_TYPE = 1 << 0,
     HEADER_CONTENT_ENCODING = 1 << 1,
+    HEADER_VARY = 1 << 2,
+    HEADER_CACHE_CONTROL = 1 << 3,
 };
 
 static GString *
@@ -655,12 +667,16 @@ append_header (GString *string,
 {
   if (value)
     {
-      g_return_val_if_fail (strchr (name, '\n') == NULL, 0);
-      g_return_val_if_fail (strchr (value, '\n') == NULL, 0);
+      g_return_val_if_fail (cockpit_web_response_is_simple_token (name), 0);
+      g_return_val_if_fail (cockpit_web_response_is_header_value (value), 0);
       g_string_append_printf (string, "%s: %s\r\n", name, value);
     }
   if (g_ascii_strcasecmp ("Content-Type", name) == 0)
     return HEADER_CONTENT_TYPE;
+  if (g_ascii_strcasecmp ("Cache-Control", name) == 0)
+    return HEADER_CACHE_CONTROL;
+  if (g_ascii_strcasecmp ("Vary", name) == 0)
+    return HEADER_VARY;
   if (g_ascii_strcasecmp ("Content-Encoding", name) == 0)
     return HEADER_CONTENT_ENCODING;
   else if (g_ascii_strcasecmp ("Content-Length", name) == 0)
@@ -716,41 +732,15 @@ finish_headers (CockpitWebResponse *self,
                 gint status,
                 guint seen)
 {
-  gint i;
-
-  static const struct {
-    const gchar *extension;
-    const gchar *content_type;
-  } content_types[] = {
-    { ".css", "text/css" },
-    { ".gif", "image/gif" },
-    { ".eot", "application/vnd.ms-fontobject" },
-    { ".html", "text/html" },
-    { ".ico", "image/vnd.microsoft.icon" },
-    { ".jpg", "image/jpg" },
-    { ".js", "application/javascript" },
-    { ".json", "application/json" },
-    { ".otf", "font/opentype" },
-    { ".png", "image/png" },
-    { ".svg", "image/svg+xml" },
-    { ".ttf", "application/octet-stream" }, /* unassigned */
-    { ".txt", "text/plain" },
-    { ".woff", "application/font-woff" },
-    { ".xml", "text/xml" },
-  };
+  const gchar *content_type;
 
   /* Automatically figure out content type */
   if ((seen & HEADER_CONTENT_TYPE) == 0 &&
       self->full_path != NULL && status >= 200 && status <= 299)
     {
-      for (i = 0; i < G_N_ELEMENTS (content_types); i++)
-        {
-          if (g_str_has_suffix (self->full_path, content_types[i].extension))
-            {
-              g_string_append_printf (string, "Content-Type: %s\r\n", content_types[i].content_type);
-              break;
-            }
-        }
+      content_type = cockpit_web_response_content_type (self->full_path);
+      if (content_type)
+        g_string_append_printf (string, "Content-Type: %s\r\n", content_type);
     }
 
   if (status != 304)
@@ -769,11 +759,40 @@ finish_headers (CockpitWebResponse *self,
         }
     }
 
+  if ((seen & HEADER_CACHE_CONTROL) == 0 && status >= 200 && status <= 299)
+    {
+      if (self->cache_type == COCKPIT_WEB_RESPONSE_CACHE_FOREVER)
+        g_string_append (string, "Cache-Control: max-age=31556926, public\r\n");
+      else if (self->cache_type == COCKPIT_WEB_RESPONSE_NO_CACHE)
+        g_string_append (string, "Cache-Control: no-cache, no-store\r\n");
+      else if (self->cache_type == COCKPIT_WEB_RESPONSE_CACHE_PRIVATE)
+        g_string_append (string, "Cache-Control: max-age=86400, private\r\n");
+    }
+
+  if ((seen & HEADER_VARY) == 0 && status >= 200 && status <= 299 &&
+      self->cache_type == COCKPIT_WEB_RESPONSE_CACHE_PRIVATE)
+    {
+      g_string_append (string, "Vary: Cookie\r\n");
+    }
+
   if (!self->keep_alive)
     g_string_append (string, "Connection: close\r\n");
   g_string_append (string, "\r\n");
 
   return g_string_free_to_bytes (string);
+}
+
+/**
+ * cockpit_web_response_set_cache_type:
+ * @self: the response
+ * @cache_type: Ensures the apropriate cache headers are returned for
+   the given cache type.
+ */
+void
+cockpit_web_response_set_cache_type (CockpitWebResponse *self,
+                                     CockpitCacheType cache_type)
+{
+  self->cache_type = cache_type;
 }
 
 /**
@@ -1122,14 +1141,12 @@ path_has_prefix (const gchar *path,
 void
 cockpit_web_response_file (CockpitWebResponse *response,
                            const gchar *escaped,
-                           gboolean cache_forever,
                            const gchar **roots)
 {
-  const gchar *cache_control;
+  const gchar *csp_header;
   GError *error = NULL;
-  gchar *unescaped;
-  char *path = NULL;
-  gchar *built = NULL;
+  gchar *unescaped = NULL;
+  gchar *path = NULL;
   GMappedFile *file = NULL;
   const gchar *root;
   GBytes *body;
@@ -1141,6 +1158,15 @@ cockpit_web_response_file (CockpitWebResponse *response,
 
   g_return_if_fail (escaped != NULL);
 
+  /* Someone is trying to escape the root directory, or access hidden files? */
+  unescaped = g_uri_unescape_string (escaped, NULL);
+  if (strstr (unescaped, "/.") || strstr (unescaped, "../") || strstr (unescaped, "//"))
+    {
+      g_debug ("%s: invalid path request", escaped);
+      cockpit_web_response_error (response, 404, NULL, "Not Found");
+      goto out;
+    }
+
 again:
   root = *(roots++);
   if (root == NULL)
@@ -1149,45 +1175,8 @@ again:
       goto out;
     }
 
-  unescaped = g_uri_unescape_string (escaped, NULL);
-  built = g_build_filename (root, unescaped, NULL);
-  g_free (unescaped);
-
-  path = realpath (built, NULL);
-  g_free (built);
-
-  if (path == NULL)
-    {
-      if (errno == ENOENT || errno == ENOTDIR || errno == ELOOP || errno == ENAMETOOLONG)
-        {
-          g_debug ("%s: file not found in root: %s", escaped, root);
-          goto again;
-        }
-      else if (errno == EACCES)
-        {
-          cockpit_web_response_error (response, 403, NULL, "Access Denied");
-          goto out;
-        }
-      else
-        {
-          g_warning ("%s: resolving path failed: %m", escaped);
-          cockpit_web_response_error (response, 500, NULL, "Internal Server Error");
-          goto out;
-        }
-    }
-
-  /* Double check that realpath() did the right thing */
-  g_return_if_fail (strstr (path, "../") == NULL);
-  g_return_if_fail (!g_str_has_suffix (path, "/.."));
-
-  /* Someone is trying to escape the root directory */
-  if (!path_has_prefix (path, root) &&
-      !path_has_prefix (path, cockpit_web_exception_escape_root))
-    {
-      g_debug ("%s: request tried to escape the root directory: %s: %s", escaped, root, path);
-      cockpit_web_response_error (response, 404, NULL, "Not Found");
-      goto out;
-    }
+  g_free (path);
+  path = g_build_filename (root, unescaped, NULL);
 
   if (g_file_test (path, G_FILE_TEST_IS_DIR))
     {
@@ -1195,31 +1184,49 @@ again:
       goto out;
     }
 
+  /* As a double check of above behavior */
+  g_assert (path_has_prefix (path, root));
+
+  g_clear_error (&error);
   file = g_mapped_file_new (path, FALSE, &error);
   if (file == NULL)
     {
-      if (g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_PERM) ||
-          g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_ACCES) ||
-          g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_ISDIR))
+      if (g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NOENT) ||
+          g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NAMETOOLONG))
+        {
+          g_debug ("%s: file not found in root: %s", escaped, root);
+          goto again;
+        }
+      else if (g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_PERM) ||
+               g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_ACCES) ||
+               g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_ISDIR))
         {
           cockpit_web_response_error (response, 403, NULL, "Access denied");
-          g_clear_error (&error);
           goto out;
         }
       else
         {
           g_warning ("%s: %s", path, error->message);
           cockpit_web_response_error (response, 500, NULL, "Internal server error");
-          g_clear_error (&error);
           goto out;
         }
     }
 
   body = g_mapped_file_get_bytes (file);
 
-  cache_control = cache_forever ? "max-age=31556926, public" : NULL;
+  /*
+   * The default Content-Security-Policy for .html files allows
+   * the site to have inline <script> and <style> tags. This code
+   * is not used when serving resources once logged in, only for
+   * static resources when we don't yet have a session.
+   */
+
+  csp_header = NULL;
+  if (g_str_has_suffix (unescaped, ".html"))
+    csp_header = "Content-Security-Policy";
+
   cockpit_web_response_headers (response, 200, "OK", g_bytes_get_size (body),
-                                "Cache-Control", cache_control,
+                                csp_header, "default-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:",
                                 NULL);
 
   if (cockpit_web_response_queue (response, body))
@@ -1228,7 +1235,9 @@ again:
   g_bytes_unref (body);
 
 out:
-  free (path);
+  g_free (unescaped);
+  g_clear_error (&error);
+  g_free (path);
   if (file)
     g_mapped_file_unref (file);
 }
@@ -1502,4 +1511,39 @@ out:
   g_free (name);
   g_free (base);
   return bytes;
+}
+
+const gchar *
+cockpit_web_response_content_type (const gchar *path)
+{
+  static const struct {
+    const gchar *extension;
+    const gchar *content_type;
+  } content_types[] = {
+    { ".css", "text/css" },
+    { ".gif", "image/gif" },
+    { ".eot", "application/vnd.ms-fontobject" },
+    { ".html", "text/html" },
+    { ".ico", "image/vnd.microsoft.icon" },
+    { ".jpg", "image/jpg" },
+    { ".js", "application/javascript" },
+    { ".json", "application/json" },
+    { ".otf", "font/opentype" },
+    { ".png", "image/png" },
+    { ".svg", "image/svg+xml" },
+    { ".ttf", "application/octet-stream" }, /* unassigned */
+    { ".txt", "text/plain" },
+    { ".woff", "application/font-woff" },
+    { ".xml", "text/xml" },
+  };
+
+  gint i;
+
+  for (i = 0; i < G_N_ELEMENTS (content_types); i++)
+    {
+      if (g_str_has_suffix (path, content_types[i].extension))
+          return content_types[i].content_type;
+    }
+
+  return NULL;
 }

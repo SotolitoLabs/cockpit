@@ -17,7 +17,7 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
+require([
     "jquery",
     "base1/cockpit",
     "storage/client",
@@ -50,6 +50,8 @@ define([
         $('body').on('click', '[data-goto-vgroup]', function () {
             cockpit.location.go([ 'vg', $(this).attr('data-goto-vgroup') ]);
         });
+
+        utils.init_arming_zones($('body'));
 
         function navigate() {
             var path = cockpit.location.path;
@@ -114,5 +116,5 @@ define([
         });
     }
 
-    return init;
+    $(init);
 });

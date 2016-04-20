@@ -151,6 +151,10 @@ html, body {
     margin-bottom: 10px;
 }
 
+#host-edit-color-popover .popover-content {
+    width: 220px;
+}
+
 #host-edit-color-popover .color-cell {
     display: inline-block;
     width: 25px;
@@ -169,26 +173,39 @@ html, body {
     min-width: 55px;
 }
 
-/* This warning is not displayed by default */
-.dashboard-machine-warning {
-    display: none;
-}
-
 /* Make the time range buttons equal width */
 
 #dashboard-range-buttons button {
     width: 70px;
 }
 
-/* Make the error and success icons in setup the right size and color */
-
-.cockpit-setup-task-table .cockpit-setup-task-error {
-    color: #af151a;
-    font-size: 18px;
+#sync-users {
+    max-height: 126px;
+    overflow-y: auto;
+    overflow-x: none;
+    display: block;
+    border: 1px solid #BABABA;
+    margin-bottom: 15px;
 }
 
-.cockpit-setup-task-table .cockpit-setup-task-done {
-    font-size: 18px;
+#sync-users table.table {
+    margin-bottom: 0;
+}
+
+#sync-users .table > tbody > tr:first-child > td {
+    border-top: none;
+}
+
+#sync-users .center-spinner {
+    padding: 15px;
+}
+
+#add-unknown-host pre {
+    margin: 0;
+}
+
+#edit-machine-port {
+    width: 100px;
 }
 
 /* navbar styles */
@@ -270,34 +287,6 @@ html, body {
 .oops-status {
     color: red;
     font-weight: bold;
-}
-/*
- * Styling of bar graphs. See controls.js for more details
- */
-.bar-row {
-    min-width: 100px;
-    margin-top: 2px;
-    margin-bottom: 0px;
-    height: 15px;
-}
-
-.bar-row div.progress-bar {
-    background-color: #0099d3;
-}
-
-.bar-row-danger div.progress-bar {
-    background-color: #af151a;
-}
-
-.bar-row div.progress-no-limit {
-    /* used when no limit */
-    background-color: transparent;
-}
-
-.bar-row div.progress,
-.bar-row div.progress div.progress-bar {
-    /* minimum width of each bar */
-    min-width: 5px;
 }
 
 .slider {
@@ -460,7 +449,7 @@ html, body {
     border-left: 7px solid #BABABA;
     border-top: none;
     border-bottom: none;
-    height: 33px;
+    height: 44px;
     padding: 0px;
     float: left;
 }
@@ -471,6 +460,7 @@ html, body {
 
 #machine-dropdown .dropdown-menu {
     width: 100%;
+    border-left: none;
 }
 
 #machine-dropdown .dropdown-menu a {
@@ -492,12 +482,12 @@ html, body {
     padding-left: 15px;
     padding-right: 15px;
     position: static;
-    min-width: 209px;
+    min-width: 179px;
 }
 
 #machine-link span {
     display: inline-block;
-    width: 130px;
+    width: 100px;
     text-overflow: ellipsis;
     overflow: hidden;
     white-space: nowrap;
@@ -548,9 +538,14 @@ html, body {
    margin-right: 0;
 }
 
+#content {
+    position: relative;
+}
+
 iframe.container-frame {
     display: none;
     border: none;
+    width: 100%;
 }
 
 /* Otherwise the datepicker is confused when in a modal */
@@ -593,7 +588,7 @@ iframe.container-frame {
 /* For when displayed normally */
 @media (min-width: 768px) {
     #sidebar {
-        width: 210px;
+        width: 180px;
     }
     .machine-avatar {
         display: inline;
@@ -601,4 +596,94 @@ iframe.container-frame {
     #machine-color: {
         height: 44px;
     }
+}
+
+/* Credentials dialog */
+
+#credentials-dialog .modal-body {
+    max-height: 500px;
+}
+
+#credentials-dialog .btn-onoff .btn {
+    padding-top: 1px;
+    padding-bottom: 1px;
+    height: 24px;
+    line-height: 24px;
+}
+
+table.credential-listing {
+    margin-top: 0px;
+    width: 100%;
+}
+
+.credential-listing thead td {
+    padding-left: 15px;
+    padding-bottom: 15px;
+}
+
+#credential-authorize td {
+    padding-bottom: 30px;
+}
+
+.credential-data {
+    word-wrap: break-word;
+    word-break: break-all;
+}
+
+.credential-listing dd,
+.credential-listing dt {
+    padding-top: 3px;
+    min-height: 26px;
+}
+
+.credential-listing dt {
+    min-width: 80px;
+    max-width: 100px;
+}
+
+.credential-listing input[type='password'] {
+    width: 300px;
+}
+
+
+.credential-listing textarea {
+    color: #222 !important;
+}
+
+.credential-listing dt label {
+    margin-bottom: 0px;
+}
+
+tbody .credential-unlock {
+    display: none;
+}
+
+tbody.unlock .credential-panel {
+    display: none !important;
+}
+
+tbody.unlock .credential-unlock {
+    display: block;
+}
+
+.banned {
+    color: #ff0000;
+    font-size: 75px;
+    line-height: 75px;
+    float: left;
+    padding-right: 15px;
+}
+
+.listing-body .alert {
+    border: none;
+    margin: 0px 0px 10px 0px;
+    padding: 0px;
+    background-color: transparent;
+}
+
+.listing-body .alert .fa {
+    position: relative;
+    left: 0px;
+    top: 3px;
+    padding-right: 5px;
 }

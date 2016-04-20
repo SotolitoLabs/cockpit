@@ -30,6 +30,7 @@ static const gchar *test_data =
   "   \"string\": \"value\","
   "   \"number\": 55,"
   "   \"array\": [ \"one\", \"two\", \"three\" ],"
+  "   \"object\": { \"test\": \"one\" },"
   "   \"bool\": true,"
   "   \"null\": null"
   "}";
@@ -71,6 +72,9 @@ test_get_string (TestCase *tc,
   g_assert (ret == TRUE);
   g_assert_cmpstr (value, ==, "value");
 
+  ret = cockpit_json_get_string (tc->root, "string", NULL, NULL);
+  g_assert (ret == TRUE);
+
   ret = cockpit_json_get_string (tc->root, "unknown", NULL, &value);
   g_assert (ret == TRUE);
   g_assert_cmpstr (value, ==, NULL);
@@ -80,6 +84,9 @@ test_get_string (TestCase *tc,
   g_assert_cmpstr (value, ==, "default");
 
   ret = cockpit_json_get_string (tc->root, "number", NULL, &value);
+  g_assert (ret == FALSE);
+
+  ret = cockpit_json_get_string (tc->root, "number", NULL, NULL);
   g_assert (ret == FALSE);
 }
 
@@ -94,11 +101,17 @@ test_get_int (TestCase *tc,
   g_assert (ret == TRUE);
   g_assert_cmpint (value, ==, 55);
 
+  ret = cockpit_json_get_int (tc->root, "number", 0, NULL);
+  g_assert (ret == TRUE);
+
   ret = cockpit_json_get_int (tc->root, "unknown", 66, &value);
   g_assert (ret == TRUE);
   g_assert_cmpint (value, ==, 66);
 
   ret = cockpit_json_get_int (tc->root, "string", 66, &value);
+  g_assert (ret == FALSE);
+
+  ret = cockpit_json_get_int (tc->root, "string", 66, NULL);
   g_assert (ret == FALSE);
 }
 
@@ -113,6 +126,9 @@ test_get_bool (TestCase *tc,
   g_assert (ret == TRUE);
   g_assert_cmpint (value, ==, TRUE);
 
+  ret = cockpit_json_get_bool (tc->root, "bool", FALSE, NULL);
+  g_assert (ret == TRUE);
+
   ret = cockpit_json_get_bool (tc->root, "unknown", TRUE, &value);
   g_assert (ret == TRUE);
   g_assert_cmpint (value, ==, TRUE);
@@ -122,6 +138,9 @@ test_get_bool (TestCase *tc,
   g_assert_cmpint (value, ==, FALSE);
 
   ret = cockpit_json_get_bool (tc->root, "string", FALSE, &value);
+  g_assert (ret == FALSE);
+
+  ret = cockpit_json_get_bool (tc->root, "string", FALSE, NULL);
   g_assert (ret == FALSE);
 }
 
@@ -182,6 +201,74 @@ test_get_strv (TestCase *tc,
 
   ret = cockpit_json_get_strv (tc->root, "number", NULL, &value);
   g_assert (ret == FALSE);
+}
+
+static void
+test_get_array (TestCase *tc,
+                gconstpointer data)
+{
+  JsonArray *defawlt = json_array_new ();
+  gboolean ret;
+  JsonArray *value;
+
+  ret = cockpit_json_get_array (tc->root, "array", NULL, &value);
+  g_assert (ret == TRUE);
+  g_assert (value != NULL);
+  g_assert_cmpstr (json_array_get_string_element (value, 0), ==, "one");
+  g_assert_cmpstr (json_array_get_string_element (value, 1), ==, "two");
+  g_assert_cmpstr (json_array_get_string_element (value, 2), ==, "three");
+
+  ret = cockpit_json_get_array (tc->root, "array", NULL, NULL);
+  g_assert (ret == TRUE);
+
+  ret = cockpit_json_get_array (tc->root, "unknown", NULL, &value);
+  g_assert (ret == TRUE);
+  g_assert (value == NULL);
+
+  ret = cockpit_json_get_array (tc->root, "unknown", defawlt, &value);
+  g_assert (ret == TRUE);
+  g_assert (value == defawlt);
+
+  ret = cockpit_json_get_array (tc->root, "number", NULL, &value);
+  g_assert (ret == FALSE);
+
+  ret = cockpit_json_get_array (tc->root, "number", NULL, NULL);
+  g_assert (ret == FALSE);
+
+  json_array_unref (defawlt);
+}
+
+static void
+test_get_object (TestCase *tc,
+                gconstpointer data)
+{
+  JsonObject *defawlt = json_object_new ();
+  gboolean ret;
+  JsonObject *value;
+
+  ret = cockpit_json_get_object (tc->root, "object", NULL, &value);
+  g_assert (ret == TRUE);
+  g_assert (value != NULL);
+  g_assert_cmpstr (json_object_get_string_member (value, "test"), ==, "one");
+
+  ret = cockpit_json_get_object (tc->root, "object", NULL, NULL);
+  g_assert (ret == TRUE);
+
+  ret = cockpit_json_get_object (tc->root, "unknown", NULL, &value);
+  g_assert (ret == TRUE);
+  g_assert (value == NULL);
+
+  ret = cockpit_json_get_object (tc->root, "unknown", defawlt, &value);
+  g_assert (ret == TRUE);
+  g_assert (value == defawlt);
+
+  ret = cockpit_json_get_object (tc->root, "number", NULL, &value);
+  g_assert (ret == FALSE);
+
+  ret = cockpit_json_get_object (tc->root, "array", NULL, NULL);
+  g_assert (ret == FALSE);
+
+  json_object_unref (defawlt);
 }
 
 static void
@@ -381,6 +468,128 @@ test_string_encode (gconstpointer data)
   json_node_free (node);
 }
 
+static const gchar *patch_data =
+ "{"
+  "   \"string\": \"value\","
+  "   \"number\": 55,"
+  "   \"array\": [ \"one\", \"two\", \"three\" ],"
+  "   \"bool\": true,"
+  "   \"null\": null,"
+  "   \"object\": {"
+  "       \"one\": 1,"
+  "       \"two\": 2,"
+  "       \"nested\": {"
+  "           \"three\": 3"
+  "       }"
+  "   }"
+  "}";
+
+typedef struct {
+  const gchar *name;
+  const gchar *patch;
+  const gchar *result;
+} PatchFixture;
+
+static PatchFixture patch_fixtures[] = {
+  {
+    "simple-value",
+    "{\"string\": 5}",
+    "{"
+     "   \"string\": 5,"
+     "   \"number\": 55,"
+     "   \"array\": [ \"one\", \"two\", \"three\" ],"
+     "   \"bool\": true,"
+     "   \"null\": null,"
+     "   \"object\": {"
+     "       \"one\": 1,"
+     "       \"two\": 2,"
+     "       \"nested\": {"
+     "           \"three\": 3"
+     "       }"
+     "   }"
+     "}",
+  },
+  {
+    "multi-value",
+    "{"
+    "  \"array\": [ 5 ],"
+    "  \"number\": { \"test\": true }"
+    "}",
+    "{"
+     "   \"string\": \"value\","
+     "   \"number\": { \"test\": true },"
+     "   \"array\": [ 5 ],"
+     "   \"bool\": true,"
+     "   \"null\": null,"
+     "   \"object\": {"
+     "       \"one\": 1,"
+     "       \"two\": 2,"
+     "       \"nested\": {"
+     "           \"three\": 3"
+     "       }"
+     "   }"
+     "}",
+  },
+  {
+    "add-and-remove",
+    "{"
+    "  \"array\": null,"
+    "  \"number\": null,"
+    "  \"object\": null,"
+    "  \"added\": 42"
+    "}",
+    "{"
+     "   \"string\": \"value\","
+     "   \"bool\": true,"
+     "   \"null\": null,"
+     "   \"added\": 42"
+     "}",
+  },
+  {
+    "nested-objects",
+    "{"
+    "  \"object\": {"
+    "    \"one\": \"uno\","
+    "    \"nested\": null,"
+    "    \"three\": \"tres\""
+    "  }"
+    "}",
+    "{"
+     "   \"string\": \"value\","
+     "   \"number\": 55,"
+     "   \"array\": [ \"one\", \"two\", \"three\" ],"
+     "   \"bool\": true,"
+     "   \"null\": null,"
+     "   \"object\": {"
+     "       \"one\": \"uno\","
+     "       \"two\": 2,"
+     "       \"three\": \"tres\""
+     "   }"
+     "}",
+  }
+};
+
+static void
+test_patch (gconstpointer data)
+{
+  const PatchFixture *fixture = data;
+  GError *error = NULL;
+  JsonObject *object;
+  JsonObject *with;
+
+  object = cockpit_json_parse_object (patch_data, -1, &error);
+  g_assert_no_error (error);
+
+  with = cockpit_json_parse_object (fixture->patch, -1, &error);
+  g_assert_no_error (error);
+
+  cockpit_json_patch (object, with);
+
+  cockpit_assert_json_eq (object, fixture->result);
+  json_object_unref (object);
+  json_object_unref (with);
+}
+
 int
 main (int argc,
       char *argv[])
@@ -406,6 +615,10 @@ main (int argc,
               setup, test_get_null, teardown);
   g_test_add ("/json/get-strv", TestCase, NULL,
               setup, test_get_strv, teardown);
+  g_test_add ("/json/get-array", TestCase, NULL,
+              setup, test_get_array, teardown);
+  g_test_add ("/json/get-object", TestCase, NULL,
+              setup, test_get_object, teardown);
 
   g_test_add_func ("/json/parser-trims", test_parser_trims);
   g_test_add_func ("/json/parser-empty", test_parser_empty);
@@ -423,6 +636,13 @@ main (int argc,
       name = g_strdup_printf ("/json/string/%s%d", escaped, i);
       g_test_add_data_func (name, string_fixtures + i, test_string_encode);
       g_free (escaped);
+      g_free (name);
+    }
+
+  for (i = 0; i < G_N_ELEMENTS (patch_fixtures); i++)
+    {
+      name = g_strdup_printf ("/json/patch/%s", patch_fixtures[i].name);
+      g_test_add_data_func (name, patch_fixtures + i, test_patch);
       g_free (name);
     }
 

@@ -23,16 +23,19 @@
 #include <glib.h>
 #include <glib-object.h>
 
+#include <json-glib/json-glib.h>
+
 #include <gssapi/gssapi.h>
 
 G_BEGIN_DECLS
 
 typedef struct _CockpitCreds       CockpitCreds;
 
-#define COCKPIT_CRED_FULLNAME "full-name"
-#define COCKPIT_CRED_PASSWORD "password"
-#define COCKPIT_CRED_RHOST    "rhost"
-#define COCKPIT_CRED_GSSAPI   "gssapi"
+#define COCKPIT_CRED_PASSWORD     "password"
+#define COCKPIT_CRED_RHOST        "rhost"
+#define COCKPIT_CRED_GSSAPI       "gssapi"
+#define COCKPIT_CRED_CSRF_TOKEN   "csrf-token"
+#define COCKPIT_CRED_LOGIN_DATA   "login-data"
 
 #define         COCKPIT_TYPE_CREDS           (cockpit_creds_get_type ())
 
@@ -50,16 +53,18 @@ void            cockpit_creds_poison         (CockpitCreds *creds);
 
 const gchar *   cockpit_creds_get_user       (CockpitCreds *creds);
 
-const gchar *   cockpit_creds_get_fullname   (CockpitCreds *creds);
-
 const gchar *   cockpit_creds_get_password   (CockpitCreds *creds);
 
 const gchar *   cockpit_creds_get_rhost      (CockpitCreds *creds);
+
+const gchar *   cockpit_creds_get_csrf_token (CockpitCreds *creds);
 
 gboolean        cockpit_creds_equal          (gconstpointer v1,
                                               gconstpointer v2);
 
 guint           cockpit_creds_hash           (gconstpointer v);
+
+gboolean        cockpit_creds_has_gssapi     (CockpitCreds *creds);
 
 const gchar *   cockpit_creds_get_application            (CockpitCreds *creds);
 
@@ -67,6 +72,8 @@ gss_cred_id_t   cockpit_creds_push_thread_default_gssapi (CockpitCreds *creds);
 
 gboolean        cockpit_creds_pop_thread_default_gssapi  (CockpitCreds *creds,
                                                           gss_cred_id_t gss_cred);
+
+JsonObject *    cockpit_creds_get_login_data             (CockpitCreds *creds);
 
 G_END_DECLS
 
