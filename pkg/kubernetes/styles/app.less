@@ -55,6 +55,7 @@ path.line.highlight {
   margin-left: 110px;
   margin-right: 0px;
   min-height: 100%;
+  padding-bottom: 20px;
 }
 
 #content > .row {
@@ -170,21 +171,11 @@ input.adjust-replica {
     display: none !important;
 }
 
-.adjust-entity {
-    float: right;
-    margin: 10px 5px 0px 10px;
-}
-
-.delete-entity {
-    float: right;
-    margin: 10px 10px 0px 0px;
-}
-
 input.adjust-replica {
     width: 200px;
 }
 
-pre.logs {
+.console-ct pre {
     background-color: #fcfcfc;
     border: 1px solid #cccccc;
 }
@@ -193,4 +184,20 @@ pre.dialog {
     height: 200px;
     width: 500px;
     border: 1px solid #cccccc;
+}
+
+.action-menu {
+    display: block;
+    float: right;
+}
+
+/* Input combo replacement */
+
+.input-combo .input-group-btn {
+    position: static;
+}
+
+.input-combo .dropdown-menu {
+    left: 0;
+    right: 0;
 }

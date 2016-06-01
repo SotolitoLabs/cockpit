@@ -112,7 +112,7 @@ define([
         var data = sel.data("dialog-wait");
         sel.data("dialog-wait", null);
 
-        sel.find(".dialog-wait").remove();
+        sel.find(".dialog-wait-ct").remove();
         sel.find(".btn").off(".dialog-wait");
         sel.off(".dialog-wait");
 
@@ -136,7 +136,7 @@ define([
         if (handle)
             display_errors(sel, []);
 
-        var wait = $("<div class='dialog-wait pull-left'>");
+        var wait = $("<div class='dialog-wait-ct pull-left'>");
         $("<div class='spinner spinner-sm'>").appendTo(wait);
         var message = $("<span>").appendTo(wait);
 
@@ -225,7 +225,7 @@ define([
      */
 
     function onoff_refresh(sel) {
-        sel = sel.find(".btn-onoff").andSelf().filter(".btn-onoff");
+        sel = sel.find(".btn-onoff-ct").andSelf().filter(".btn-onoff-ct");
         sel.each(function(x, el) {
             var self = $(el)
                 .attr("data-toggle", "buttons")

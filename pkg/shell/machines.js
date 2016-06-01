@@ -23,12 +23,17 @@ define([
      * This is the sessionStorage key at which the data is placed.
      */
     var key = "v2-machines.json";
+    var session_prefix = "v1-session-machine";
+
+    function generate_session_key(host) {
+        return session_prefix + "/" + host;
+    }
 
     function Machines() {
         var self = this;
 
         var flat = null;
-        var ready = false;
+        self.ready = false;
 
         /* parsed machine data */
         var machines = { };
@@ -54,7 +59,7 @@ define([
 
         window.setTimeout(function() {
             var value = window.sessionStorage.getItem(key);
-            if (!ready && value)
+            if (!self.ready && value)
                 refresh(JSON.parse(value));
         });
 
@@ -75,9 +80,9 @@ define([
         }
 
         function refresh(shared, push) {
-            var emit_ready = !ready;
+            var emit_ready = !self.ready;
 
-            ready = true;
+            self.ready = true;
             last = shared;
             flat = null;
 
@@ -137,6 +142,7 @@ define([
                 if (!(host in hosts)) {
                     machine = machines[host];
                     delete machines[host];
+                    delete overlay[host];
                     events.push(["removed", [machine, host]]);
                 }
             }
@@ -149,79 +155,16 @@ define([
                 $(self).triggerHandler("ready");
         }
 
-
-        self.add_key = function(host_key) {
-            var known_hosts = cockpit.file(known_hosts_path, { superuser: "try" });
-            return known_hosts
-                .modify(function(data) {
-                    return data + "\n" + host_key;
-                })
-                .always(function() {
-                    known_hosts.close();
-                });
-        };
-
-        self.add = function add(connection_string, color) {
-            var values = self.split_connection_string(connection_string);
-            return self.change(values['address'],
-                               $.extend({
-                                    visible: true,
-                                    color: color || self.unused_color(),
-                                }, values)
-            );
-        };
-
-        self.unused_color = function unused_color() {
-            var i, len = module.colors.length;
-            for (i = 0; i < len; i++) {
-                if (!color_in_use(module.colors[i]))
-                    return module.colors[i];
-            }
-            return "gray";
-        };
-
-        function color_in_use(color) {
-            var key, machine, norm = $.color.parse(color).toString();
-            for (key in machines) {
-                machine = machines[key];
-                if (machine.color && $.color.parse(machine.color).toString() == norm)
-                    return true;
-            }
-            return false;
+        function update_session_machine(machine, host, values) {
+            /* We don't save the whole machine object */
+            var skey = generate_session_key(host);
+            var data = $.extend({}, machine, values);
+            window.sessionStorage.setItem(skey, JSON.stringify(data));
+            self.overlay(host, values);
+            return cockpit.when([]);
         }
 
-        function merge(item, values) {
-            for (var prop in values) {
-                if (values[prop] === null)
-                    delete item[prop];
-                else
-                    item[prop] = values[prop];
-            }
-        }
-
-        self.change = function change(host, values) {
-            var hostnamed, call;
-            var machine = self.lookup(host);
-
-            if (values.label) {
-
-                var conn_to = host;
-                if (machine)
-                    conn_to = machine.connection_string;
-
-                if (!machine || machine.label !== values.label) {
-                    hostnamed = cockpit.dbus("org.freedesktop.hostname1", { host: conn_to });
-                    call = hostnamed.call("/org/freedesktop/hostname1", "org.freedesktop.hostname1",
-                                          "SetPrettyHostname", [ values.label, true ])
-                        .always(function() {
-                            hostnamed.close();
-                        })
-                        .fail(function(ex) {
-                            console.warn("couldn't set pretty host name: " + ex);
-                        });
-                }
-            }
-
+        function update_saved_machine(host, values) {
             function mutate(data) {
                 if (!data)
                     data = { };
@@ -246,6 +189,92 @@ define([
                     local.close();
                 });
 
+            return mod;
+        }
+
+        self.add_key = function(host_key) {
+            var known_hosts = cockpit.file(known_hosts_path, { superuser: "try" });
+            return known_hosts
+                .modify(function(data) {
+                    return data + "\n" + host_key;
+                })
+                .always(function() {
+                    known_hosts.close();
+                });
+        };
+
+        self.add = function add(connection_string, color) {
+            var values = self.split_connection_string(connection_string);
+            var host = values['address'];
+
+            values = $.extend({
+                        visible: true,
+                        color: color || self.unused_color(),
+                    }, values);
+
+            var machine = self.lookup(host);
+            if (machine)
+                machine.on_disk = true;
+
+            return self.change(values['address'], values);
+        };
+
+        self.unused_color = function unused_color() {
+            var i, len = module.colors.length;
+            for (i = 0; i < len; i++) {
+                if (!color_in_use(module.colors[i]))
+                    return module.colors[i];
+            }
+            return "gray";
+        };
+
+        function color_in_use(color) {
+            var key, machine, norm = module.colors.parse(color);
+            for (key in machines) {
+                machine = machines[key];
+                if (machine.color && module.colors.parse(machine.color) == norm)
+                    return true;
+            }
+            return false;
+        }
+
+        function merge(item, values) {
+            for (var prop in values) {
+                if (values[prop] === null)
+                    delete item[prop];
+                else
+                    item[prop] = values[prop];
+            }
+        }
+
+        self.change = function change(host, values) {
+            var mod, hostnamed, call;
+            var machine = self.lookup(host);
+
+            if (values.label) {
+
+                var conn_to = host;
+                if (machine)
+                    conn_to = machine.connection_string;
+
+                if (!machine || machine.label !== values.label) {
+                    hostnamed = cockpit.dbus("org.freedesktop.hostname1", { host: conn_to });
+                    call = hostnamed.call("/org/freedesktop/hostname1", "org.freedesktop.hostname1",
+                                          "SetPrettyHostname", [ values.label, true ])
+                        .always(function() {
+                            hostnamed.close();
+                        })
+                        .fail(function(ex) {
+                            console.warn("couldn't set pretty host name: " + ex);
+                        });
+                }
+            }
+
+            if (machine && !machine.on_disk)
+                mod = update_session_machine(machine, host, values);
+            else
+                mod = update_saved_machine(host, values);
+
             if (call)
                 return cockpit.all(call, mod);
 
@@ -253,7 +282,25 @@ define([
         };
 
         self.data = function data(content, tag) {
-            refresh({ content: content, tag: tag, overlay: last.overlay }, true);
+            var host, changes = {};
+
+            for (host in content) {
+                changes[host] = $.extend({ }, last.overlay[host] || { });
+                merge(changes[host], { on_disk: true });
+            }
+
+            /* It's a full reload, so data not
+             * present is no longer from disk
+             */
+            for (host in machines) {
+                if (content && !content[host]) {
+                    changes[host] = $.extend({ }, last.overlay[host] || { });
+                    merge(changes[host], { on_disk: null });
+                }
+            }
+
+            refresh({ content: content, tag: tag,
+                      overlay: $.extend({ }, last.overlay, changes) }, true);
         };
 
         self.overlay = function overlay(host, values) {
@@ -341,8 +388,11 @@ define([
         };
     }
 
-    function Loader(machines) {
+    function Loader(machines, session_only) {
         var self = this;
+
+        /* Have we loaded from cockpit session */
+        var session_loaded = false;
 
         /* File we are watching */
         var file;
@@ -353,12 +403,38 @@ define([
         /* hostnamed proxies to each machine, if hostnamed available */
         var proxies = { };
 
-        file = cockpit.file(path, { syntax: JSON });
-        file.watch(function(data, tag, ex) {
-            if (ex)
-                console.warn("couldn't load machines data: " + ex);
-            machines.data(data, tag);
-        });
+        function process_session_key(key, value) {
+            var host, values, machine;
+            var parts = key.split("/");
+            if (parts[0] == session_prefix &&
+                parts.length === 2) {
+                    host = parts[1];
+                    if (value) {
+                        values = JSON.parse(value);
+                        machine = machines.lookup(host);
+                        if (!machine || !machine.on_disk)
+                            machines.overlay(host, values);
+                        else if (!machine.visible)
+                            machines.change(host, { visible: true });
+                        self.connect(host);
+                    }
+            }
+        }
+
+        function load_from_session_storage() {
+            var i;
+            session_loaded = true;
+            for (i = 0; i < window.sessionStorage.length; i++) {
+                var k = window.sessionStorage.key(i);
+                process_session_key(k, window.sessionStorage.getItem(k));
+            }
+        }
+
+        function process_session_machines(ev) {
+            if (ev.storageArea === window.sessionStorage)
+                process_session_key(ev.key || "", ev.newValue);
+        }
+        window.addEventListener("storage", process_session_machines);
 
         function state(host, value, problem) {
             var values = { state: value, problem: problem };
@@ -429,8 +505,17 @@ define([
             if (channel)
                 return;
 
-            channel = cockpit.channel({ host: machine.connection_string,
-                                        payload: "echo" });
+            var options = {
+                host: machine.connection_string,
+                payload: "echo"
+            };
+
+            if (!machine.on_disk && machine.host_key) {
+                options['temp-session'] = false;
+                options['host-key'] = machine.host_key;
+            }
+
+            channel = cockpit.channel(options);
             channels[host] = channel;
 
             var local = host === "localhost";
@@ -440,6 +525,14 @@ define([
             var open = local;
             var problem = null;
 
+            var url;
+            if (!machine.manifests) {
+                if (machine.checksum)
+                    url = "../../" + machine.checksum + "/manifests.json";
+                else
+                    url = "../../@" + encodeURI(machine.connection_string) + "/manifests.json";
+            }
+
             function whirl() {
                 if (!request && open)
                     state(host, "connected", null);
@@ -447,14 +540,8 @@ define([
                     state(host, "connecting", null);
             }
 
-            var url;
-
             /* Here we load the machine manifests, and expect them before going to "connected" */
-            if (!machine.manifests) {
-                if (machine.checksum)
-                    url = "../../" + machine.checksum + "/manifests.json";
-                else
-                    url = "../../@" + encodeURI(machine.connection_string) + "/manifests.json";
+            function request_manifest() {
                 request = $.ajax({ url: url, dataType: "json", cache: true})
                     .done(function(manifests) {
                         var overlay = { manifests: manifests };
@@ -472,6 +559,20 @@ define([
                     });
             }
 
+            function request_hostname() {
+                if (!machine.static_hostname) {
+                    var proxy = cockpit.dbus("org.freedesktop.hostname1",
+                                             { host: machine.connection_string }).proxy();
+                    proxies[host] = proxy;
+                    proxy.wait(function() {
+                        $(proxy).on("changed", function() {
+                            updated(null, null, host);
+                        });
+                        updated(null, null, host);
+                    });
+                }
+            }
+
             /* Send a message to the server and get back a message once connected */
             if (!local) {
                 channel.send("x");
@@ -479,6 +580,9 @@ define([
                 $(channel)
                     .on("message", function() {
                         open = true;
+                        if (url)
+                            request_manifest();
+                        request_hostname();
                         whirl();
                     })
                 .on("close", function(ev, options) {
@@ -493,17 +597,10 @@ define([
                     }
                     self.disconnect(host);
                 });
+            } else if (url) {
+                request_manifest();
+                request_hostname();
             }
-
-            var proxy = cockpit.dbus("org.freedesktop.hostname1",
-                                     { host: machine.connection_string }).proxy();
-            proxies[host] = proxy;
-            proxy.wait(function() {
-                $(proxy).on("changed", function() {
-                    updated(null, null, host);
-                });
-                updated(null, null, host);
-            });
 
             /* In case already ready, for example when local */
             whirl();
@@ -544,17 +641,32 @@ define([
                 file.close();
             file = null;
 
+            window.removeEventListener("storage", process_session_machines);
             var hosts = Object.keys(channels);
             hosts.forEach(self.disconnect);
         };
+
+        if (!session_only) {
+            file = cockpit.file(path, { syntax: JSON });
+            file.watch(function(data, tag, ex) {
+                if (ex)
+                    console.warn("couldn't load machines data: " + ex);
+                machines.data(data, tag);
+                if (!session_loaded)
+                    load_from_session_storage();
+            });
+        } else {
+            load_from_session_storage();
+            machines.data({});
+        }
     }
 
     module.instance = function instance(loader) {
         return new Machines();
     };
 
-    module.loader = function loader(machines) {
-        return new Loader(machines);
+    module.loader = function loader(machines, session_only) {
+        return new Loader(machines, session_only);
     };
 
     module.colors = [
@@ -583,6 +695,13 @@ define([
         "#024830",
         "#024848"
     ];
+
+    module.colors.parse = function parse_color(input) {
+        var div = document.createElement('div');
+        div.style.color = input;
+        var style = window.getComputedStyle(div, null);
+        return style.getPropertyValue("color") || div.style.color;
+    };
 
     module.known_hosts_path = known_hosts_path;
 

@@ -23,6 +23,7 @@ composer.json
 CONTRIBUTING*
 Gruntfile.js
 History*
+index.js
 package.js
 package.json
 npm-shrinkwrap.json
@@ -35,11 +36,9 @@ build/
 test/
 tests-src/
 
-/angular/*.js
 /angular-animate/
-/angular-bootstrap/
+/angular-bootstrap/*.css
 /angular-patternfly/
-/angular-route/
 
 /bootstrap-combobox/css/
 /bootstrap-combobox/js/tests/
@@ -51,10 +50,7 @@ tests-src/
 /bootstrap-datepicker/less/
 /bootstrap-datepicker/tests/
 
-/bootstrap-select/dist/css/
-/bootstrap-select/dist/js/i18n/
-/bootstrap-select/js/
-/bootstrap-select/less/
+/bootstrap-select/
 
 /bootstrap/dist/css/
 /bootstrap/dist/fonts/
@@ -67,6 +63,8 @@ tests-src/
 /bootstrap/nuget/
 
 /d3/xxx
+
+/eonasdan-bootstrap-datetimepicker/
 
 /font-awesome/
 
@@ -85,8 +83,12 @@ tests-src/
 /momentjs/src/
 /momentjs/templates/
 
+/moment/
+/moment-timezone/
+
 /mustache/wrappers/
 
+/patternfly/PFICONS.md
 /patternfly/components/bootstrap/dist/
 /patternfly/components/bootstrap/fonts/
 /patternfly/components/bootstrap/grunt/

@@ -5,11 +5,11 @@ shared_VIEWS = \
 	pkg/kubernetes/views/auth-form.html \
 	pkg/kubernetes/views/auth-rejected-cert.html \
 	pkg/kubernetes/views/filter-bar.html \
-	pkg/kubernetes/views/filter-listing.html \
 	pkg/kubernetes/views/filter-project.html \
 	pkg/kubernetes/views/image-body.html \
 	pkg/kubernetes/views/image-config.html \
 	pkg/kubernetes/views/image-delete.html \
+	pkg/kubernetes/views/image-layers.html \
 	pkg/kubernetes/views/image-meta.html \
 	pkg/kubernetes/views/image-listing.html \
 	pkg/kubernetes/views/image-page.html \
@@ -24,6 +24,19 @@ shared_VIEWS = \
 	pkg/kubernetes/views/add-group-dialog.html \
 	pkg/kubernetes/views/add-user-dialog.html \
 	pkg/kubernetes/views/add-member-role-dialog.html \
+	pkg/kubernetes/views/user-page.html \
+	pkg/kubernetes/views/user-panel.html \
+	pkg/kubernetes/views/user-delete.html \
+	pkg/kubernetes/views/user-modify.html \
+	pkg/kubernetes/views/user-body.html \
+	pkg/kubernetes/views/user-group-remove.html \
+	pkg/kubernetes/views/project-delete.html \
+	pkg/kubernetes/views/group-panel.html \
+	pkg/kubernetes/views/group-page.html \
+	pkg/kubernetes/views/group-delete.html \
+	pkg/kubernetes/views/user-group-add.html \
+	pkg/kubernetes/views/user-remove-membership.html \
+	pkg/kubernetes/views/user-add-membership.html \
 	pkg/kubernetes/views/add-role-dialog.html \
 	pkg/kubernetes/views/remove-role-dialog.html \
 	pkg/kubernetes/views/projects-page.html \
@@ -46,10 +59,12 @@ shared_MODULES = \
 	pkg/kubernetes/scripts/policy.js \
 	pkg/kubernetes/scripts/projects.js \
 	pkg/kubernetes/scripts/app.js \
+	pkg/kubernetes/scripts/tags.js \
 	pkg/kubernetes/scripts/utils.js \
 	$(NULL)
 
 shared_LESS = \
+	pkg/kubernetes/styles/angular-csp.less \
 	pkg/kubernetes/styles/color-variables.less \
 	pkg/kubernetes/styles/variables-bootstrap.less \
 	pkg/kubernetes/styles/variables-patternfly.less \
@@ -58,7 +73,22 @@ shared_LESS = \
 	pkg/kubernetes/styles/images.less \
 	pkg/kubernetes/styles/layers.less \
 	pkg/kubernetes/styles/projects.less \
+	pkg/kubernetes/styles/tags.less \
 	$(NULL)
+
+shared_ANGULAR = \
+	pkg/kubernetes/angular.js \
+	pkg/kubernetes/angular-route.js \
+	pkg/kubernetes/ui-bootstrap.js \
+	pkg/kubernetes/ui-bootstrap-tpls.js \
+	$(NULL)
+
+pkg/kubernetes/angular.min.js: $(shared_ANGULAR)
+	$(MIN_JS_RULE)
+pkg/kubernetes/d3.min.js: pkg/kubernetes/d3.js
+	$(MIN_JS_RULE)
+pkg/kubernetes/moment.min.js: pkg/kubernetes/moment.js
+	$(MIN_JS_RULE)
 
 # Registry files
 
@@ -74,7 +104,6 @@ registry_LESS = \
 	pkg/kubernetes/styles/registry.less \
 	pkg/kubernetes/styles/dropdown.less \
 	pkg/kubernetes/styles/filter.less \
-	pkg/kubernetes/styles/sidebar.less \
 	$(NULL)
 
 registry_MIN = \
@@ -83,6 +112,9 @@ registry_MIN = \
 	$(NULL)
 
 registry_BUNDLE = \
+	pkg/kubernetes/angular.min.js \
+	pkg/kubernetes/d3.min.js \
+	pkg/kubernetes/moment.min.js \
 	$(registry_MIN) \
 	pkg/kubernetes/registry-templates.js \
 	$(NULL)
@@ -96,51 +128,70 @@ pkg/kubernetes/registry.min.js: $(registry_BUNDLE)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/jsbundle $@ $^
 
 # Less is compiled correctly
-pkg/kubernetes/registry.min.css: $(registry_LESS)
+pkg/kubernetes/registry.min.css: $(registry_LESS) $(shared_LESS)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/lessc --verbose $< $@
 
 # Kubernetes files
 
 kubernetes_VIEWS = \
+	pkg/kubernetes/views/containers-listing.html \
 	pkg/kubernetes/views/containers-page.html \
 	pkg/kubernetes/views/container-body.html \
 	pkg/kubernetes/views/container-panel.html \
+	pkg/kubernetes/views/container-page.html \
+	pkg/kubernetes/views/container-page-inline.html \
 	pkg/kubernetes/views/dashboard-page.html \
 	pkg/kubernetes/views/default-panel.html \
 	pkg/kubernetes/views/deploy.html \
+	pkg/kubernetes/views/deploymentconfig-body.html \
+	pkg/kubernetes/views/deploymentconfig-page.html \
 	pkg/kubernetes/views/deploymentconfig-panel.html \
 	pkg/kubernetes/views/details-page.html \
 	pkg/kubernetes/views/file-button.html \
 	pkg/kubernetes/views/item-delete.html \
 	pkg/kubernetes/views/images-page.html \
-	pkg/kubernetes/views/imagerepository-panel.html \
 	pkg/kubernetes/views/pod-body.html \
+	pkg/kubernetes/views/pod-container.html \
+	pkg/kubernetes/views/pod-page.html \
 	pkg/kubernetes/views/pod-panel.html \
 	pkg/kubernetes/views/pv-body.html \
 	pkg/kubernetes/views/pv-claim.html \
 	pkg/kubernetes/views/pv-delete.html \
-	pkg/kubernetes/views/pv-listing.html \
 	pkg/kubernetes/views/pv-modify.html \
 	pkg/kubernetes/views/pv-page.html \
 	pkg/kubernetes/views/pv-panel.html \
 	pkg/kubernetes/views/pvc-body.html \
+	pkg/kubernetes/views/pvc-delete.html \
 	pkg/kubernetes/views/node-add.html \
+	pkg/kubernetes/views/node-alerts.html \
 	pkg/kubernetes/views/node-body.html \
 	pkg/kubernetes/views/node-capacity.html \
+	pkg/kubernetes/views/node-delete.html \
 	pkg/kubernetes/views/node-page.html \
 	pkg/kubernetes/views/node-panel.html \
+	pkg/kubernetes/views/node-stats.html \
 	pkg/kubernetes/views/nodes-page.html \
+	pkg/kubernetes/views/replicationcontroller-body.html \
+	pkg/kubernetes/views/replicationcontroller-page.html \
 	pkg/kubernetes/views/replicationcontroller-panel.html \
+	pkg/kubernetes/views/replicationcontroller-pods.html \
 	pkg/kubernetes/views/replicationcontroller-modify.html \
+	pkg/kubernetes/views/route-body.html \
+	pkg/kubernetes/views/route-page.html \
 	pkg/kubernetes/views/route-panel.html \
 	pkg/kubernetes/views/route-modify.html \
+	pkg/kubernetes/views/service-body.html \
+	pkg/kubernetes/views/service-endpoint.html \
 	pkg/kubernetes/views/service-modify.html \
+	pkg/kubernetes/views/service-page.html \
 	pkg/kubernetes/views/service-panel.html \
 	pkg/kubernetes/views/topology-page.html \
 	pkg/kubernetes/views/volume-body.html \
+	pkg/kubernetes/views/volumes-page.html \
 	$(NULL)
 
 kubernetes_MODULES = \
+	pkg/kubernetes/scripts/charts.js \
 	pkg/kubernetes/scripts/containers.js \
 	pkg/kubernetes/scripts/container-terminal.js \
 	pkg/kubernetes/scripts/dashboard.js \
@@ -157,7 +208,9 @@ kubernetes_MODULES = \
 kubernetes_TESTS = \
 	pkg/kubernetes/tests/test-kube-client.html \
 	pkg/kubernetes/tests/test-images.html \
+	pkg/kubernetes/tests/test-nodes.html \
 	pkg/kubernetes/tests/test-projects.html \
+	pkg/kubernetes/tests/test-tags.html \
 	pkg/kubernetes/tests/test-volumes.html \
 	pkg/kubernetes/tests/test-utils.html \
 	pkg/kubernetes/tests/test-connection.html \
@@ -169,7 +222,9 @@ kubernetes_LESS = \
 	pkg/kubernetes/styles/containers.less \
 	pkg/kubernetes/styles/container-terminal.less \
 	pkg/kubernetes/styles/details.less \
+	pkg/kubernetes/styles/nodes.less \
 	pkg/kubernetes/styles/revealable.less \
+	pkg/kubernetes/styles/sidebar.less \
 	pkg/kubernetes/styles/topology.less \
 	pkg/kubernetes/styles/topology-graph.less \
 	pkg/kubernetes/styles/volumes.less \
@@ -181,6 +236,9 @@ kubernetes_MIN = \
 	$(NULL)
 
 kubernetes_BUNDLE = \
+	pkg/kubernetes/angular.min.js \
+	pkg/kubernetes/d3.min.js \
+	pkg/kubernetes/moment.min.js \
 	$(kubernetes_MIN) \
 	pkg/kubernetes/kubernetes-templates.js \
 	$(NULL)
@@ -194,7 +252,7 @@ pkg/kubernetes/kubernetes.min.js: $(kubernetes_BUNDLE)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/jsbundle $@ $^
 
 # Less compiled correctly
-pkg/kubernetes/kubernetes.min.css: $(kubernetes_LESS)
+pkg/kubernetes/kubernetes.min.css: $(kubernetes_LESS) $(shared_LESS)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/lessc --verbose $< $@
 
 kubernetes_DATA = \
@@ -214,13 +272,16 @@ nodist_kubernetes_DATA = \
 
 kubernetesdebugdir = $(debugdir)$(kubernetesdir)
 kubernetesdebug_DATA = \
+	pkg/kubernetes/d3.js \
 	pkg/kubernetes/kubernetes.js \
 	pkg/kubernetes/kubernetes.css \
 	pkg/kubernetes/index.html \
+	pkg/kubernetes/moment.js \
 	pkg/kubernetes/registry.js \
 	pkg/kubernetes/registry.css \
 	pkg/kubernetes/registry.html \
 	pkg/kubernetes/less.js \
+	$(shared_ANGULAR) \
 	$(NULL)
 
 install-data-hook::
@@ -236,8 +297,11 @@ uninstall-hook::
 TESTS += $(kubernetes_TESTS)
 
 CLEANFILES += \
+	pkg/kubernetes/angular.min.js \
+	pkg/kubernetes/d3.min.js \
 	pkg/kubernetes/kubernetes.min.css\
 	pkg/kubernetes/index.min.html \
+	pkg/kubernetes/moment.min.js \
 	pkg/kubernetes/kubernetes.min.js \
 	pkg/kubernetes/kubernetes-templates.js \
 	pkg/kubernetes/registry.min.css \
@@ -250,10 +314,13 @@ CLEANFILES += \
 	$(NULL)
 
 EXTRA_DIST += \
+	pkg/kubernetes/angular.min.js \
+	pkg/kubernetes/d3.min.js \
 	pkg/kubernetes/kubernetes.min.css \
 	pkg/kubernetes/index.min.html \
 	pkg/kubernetes/kubernetes.min.js \
 	pkg/kubernetes/kubernetes-templates.js \
+	pkg/kubernetes/moment.min.js \
 	pkg/kubernetes/registry.min.css \
 	pkg/kubernetes/registry.min.html \
 	pkg/kubernetes/registry.min.js \
@@ -263,6 +330,7 @@ EXTRA_DIST += \
 	pkg/kubernetes/tests/fixture-large.js \
 	$(kubernetes_BUNDLE) \
 	$(registry_BUNDLE) \
+	$(shared_ANGULAR) \
 	$(shared_VIEWS) \
 	$(shared_MODULES) \
 	$(registry_VIEWS) \

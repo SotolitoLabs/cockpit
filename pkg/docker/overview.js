@@ -64,8 +64,8 @@ define([
 
         function highlight_container_row(event, id) {
             id = client.container_from_cgroup(id) || id;
-            $('#containers-containers tr').removeClass('highlight');
-            $('#' + id).addClass('highlight');
+            $('#containers-containers tr').removeClass('highlight-ct');
+            $('#' + id).addClass('highlight-ct');
         }
 
         var cpu_data = {
@@ -164,7 +164,7 @@ define([
 
             var added = false;
             if (!tr.length) {
-                var button = $('<button class="btn btn-default btn-control fa fa-play">').
+                var button = $('<button class="btn btn-default btn-control-ct fa fa-play">').
                     attr("title", _("Run image")).
                     on("click", function() {
                         run_image(client, id);

@@ -1,71 +1,55 @@
 LINGUAS = ca de da pl pt_BR tr uk
 
 basedir = $(pkgdatadir)/base1
-base_GEN = \
-	$(addprefix po/po.,$(addsuffix .js,$(LINGUAS))) \
-	$(NULL)
 nodist_base_DATA = \
-	pkg/base1/angular.min.js.gz \
 	pkg/base1/cockpit.min.css.gz \
-	pkg/base1/d3.min.js.gz \
-	pkg/base1/po.js.gz \
 	pkg/base1/require.min.js.gz \
 	pkg/base1/term.min.js.gz \
-	pkg/base1/moment.min.js.gz \
 	pkg/base1/mustache.min.js.gz \
 	pkg/base1/jquery.min.js.gz \
 	pkg/base1/cockpit.min.js.gz \
 	pkg/base1/bundle.min.js.gz \
-	pkg/base1/react.min.js.gz \
-	$(base_GEN:.js=.min.js.gz) \
 	$(NULL)
 base_DATA = \
 	pkg/base1/manifest.json \
 	$(NULL)
 
+REACT_COMPONENTS = \
+	pkg/base1/cockpit-components-listing.js \
+	pkg/base1/cockpit-components-select.js \
+	pkg/base1/cockpit-components-terminal.js \
+	$(NULL)
+
 basedebugdir = $(debugdir)$(basedir)
 basedebug_DATA = \
-	pkg/base1/angular.js \
-	pkg/base1/angular-csp.css \
-	pkg/base1/angular-patternfly.css \
-	pkg/base1/bootstrap-datepicker.js \
-	pkg/base1/bootstrap-combobox.js \
 	pkg/base1/bundle.js \
 	pkg/base1/cockpit.css \
-	pkg/base1/d3.js \
 	pkg/base1/patternfly.css \
 	pkg/base1/patternfly-additions.css \
-	pkg/base1/po.js \
 	pkg/base1/require.js \
 	pkg/base1/patterns.js \
 	pkg/base1/term.css \
 	pkg/base1/term.js \
-	pkg/base1/moment.js \
 	pkg/base1/mustache.js \
 	pkg/base1/jquery.js \
+	pkg/base1/react.js \
 	pkg/base1/cockpit.js \
-	$(base_GEN) \
+	$(REACT_COMPONENTS) \
 	$(NULL)
 
 base_BUNDLE = \
 	pkg/base1/require.min.js \
 	pkg/base1/cockpit.min.js \
 	pkg/base1/jquery.min.js \
-	pkg/base1/bootstrap-datepicker.min.js \
-	pkg/base1/bootstrap-combobox.min.js \
 	pkg/base1/mustache.min.js \
 	pkg/base1/patterns.min.js \
+	pkg/base1/react.min.js \
+	$(REACT_COMPONENTS:.js=.min.js) \
 	$(NULL)
 
-pkg/base1/angular.min.js: pkg/base1/angular.js
-	$(MIN_JS_RULE)
 pkg/base1/bundle.min.js: $(base_BUNDLE)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/jsbundle $@ $^
-pkg/base1/d3.min.js: pkg/base1/d3.js
-	$(MIN_JS_RULE)
 pkg/base1/jquery.min.js: pkg/base1/jquery.js
-	$(MIN_JS_RULE)
-pkg/base1/moment.min.js: pkg/base1/moment.js
 	$(MIN_JS_RULE)
 pkg/base1/mustache.min.js: pkg/base1/mustache.js
 	$(MIN_JS_RULE)
@@ -118,42 +102,30 @@ base_TESTS = \
 TESTS += $(base_TESTS)
 
 CLEANFILES += \
-	pkg/base1/angular.min.js \
-	pkg/base1/bootstrap-datepicker.min.js \
-	pkg/base1/bootstrap-combobox.min.js \
 	pkg/base1/bundle.min.js \
 	pkg/base1/cockpit.min.js \
 	pkg/base1/cockpit.min.css \
-	pkg/base1/d3.min.js \
 	pkg/base1/jquery.min.js \
 	pkg/base1/patterns.min.js \
-	pkg/base1/moment.min.js \
 	pkg/base1/mustache.min.js \
 	pkg/base1/react.min.js \
 	pkg/base1/require.min.js \
 	pkg/base1/term.min.js \
-	$(base_GEN) \
-	$(base_GEN:.js=.min.js) \
+	$(REACT_COMPONENTS) \
 	$(nodist_base_DATA) \
 	$(NULL)
 
 EXTRA_DIST += \
-	pkg/base1/angular.min.js \
-	pkg/base1/bootstrap-datepicker.min.js \
-	pkg/base1/bootstrap-combobox.min.js \
 	pkg/base1/bundle.min.js \
 	pkg/base1/cockpit.min.css \
-	pkg/base1/d3.min.js \
 	pkg/base1/jquery.min.js \
 	pkg/base1/require.min.js \
 	pkg/base1/mustache.min.js \
-	pkg/base1/moment.min.js \
 	pkg/base1/react.min.js \
 	pkg/base1/term.min.js \
 	pkg/base1/test-dbus-common.js \
+	$(REACT_COMPONENTS) \
 	$(base_BUNDLE) \
-	$(base_GEN) \
-	$(base_GEN:.js=.min.js) \
 	$(NULL)
 
 update-lib:: update-bower
@@ -161,30 +133,12 @@ update-lib:: update-bower
 		$(BOWER)/patternfly/dist/css/patternfly.css > $(srcdir)/pkg/base1/patternfly.css
 	sed -f $(srcdir)/tools/patternfly.sed \
 		$(BOWER)/patternfly/dist/css/patternfly-additions.css > $(srcdir)/pkg/base1/patternfly-additions.css
-	sed -f $(srcdir)/tools/patternfly.sed \
-		$(BOWER)/angular-patternfly/dist/styles/angular-patternfly.css > $(srcdir)/pkg/base1/angular-patternfly.css
 	$(JSMODULE) -o $(srcdir)/pkg/base1/jquery.js \
 	    $(BOWER)/jquery/dist/jquery.js \
 	    $(BOWER)/bootstrap/dist/js/bootstrap.js \
 	    $(BOWER)/patternfly/dist/js/patternfly.js \
-	    $(BOWER)/jquery-flot/jquery.flot.js \
-	    $(BOWER)/jquery-flot/jquery.flot.selection.js \
-	    $(BOWER)/jquery-flot/jquery.flot.time.js \
-	    $(BOWER)/jquery-amend/jquery-amend.js \
 	    $(NULL)
-	$(JSMODULE) -m -d jquery -o $(srcdir)/pkg/base1/bootstrap-datepicker.js \
-	    $(BOWER)/bootstrap-datepicker/dist/js/bootstrap-datepicker.js
-	$(JSMODULE) -m -d jquery -o $(srcdir)/pkg/base1/bootstrap-combobox.js \
-	    $(BOWER)/bootstrap-combobox/js/bootstrap-combobox.js
 	$(JSMODULE) -o $(srcdir)/pkg/base1/require.js \
-	    $(BOWER)/requirejs/require.js \
 	    $(srcdir)/pkg/base1/require-config.js \
+	    $(BOWER)/requirejs/require.js \
 	    $(srcdir)/pkg/base1/require-loaders.js
-	$(JSMODULE) -o $(srcdir)/pkg/base1/angular.js \
-	    $(BOWER)/angular/angular.js \
-	    $(BOWER)/angular-route/angular-route.js \
-	    $(BOWER)/angular-animate/angular-animate.js \
-	    $(BOWER)/angular-bootstrap/ui-bootstrap.js \
-	    $(BOWER)/angular-bootstrap/ui-bootstrap-tpls.js \
-	    $(BOWER)/angular-patternfly/dist/angular-patternfly.js \
-	    $(srcdir)/pkg/base1/angular-config.js

@@ -16,7 +16,7 @@ disks or network adapters.
 It's possible to test and work on Cockpit web assets by just using
 Vagrant. In the top level directory of the repository, you can run:
 
-    $ sudo vagrant up
+    $ vagrant up
 
 Cockpit will listen on port 9090 of the vagrant VM started, and also
 port 9090 of localhost if cockpit is not running locally. Access Cockpit
@@ -31,8 +31,8 @@ You can edit files in the `pkg/` subdirectory of the Cockpit sources
 and the changes should take effect after syncing them to the Vagrant
 VM. Use one of the folowing commands to sync:
 
-    $ sudo vagrant rsync
-    $ sudo vagrant rsync-auto
+    $ vagrant rsync
+    $ vagrant rsync-auto
 
 The Vagrant VM is in debug mode, which means that resources will load
 into your web browser more slowly than in a production install of
@@ -40,8 +40,8 @@ Cockpit.
 
 You may need to rebuild the Vagrant VM periodically, by running:
 
-    $ sudo vagrant destroy
-    $ sudo vagrant up
+    $ vagrant destroy
+    $ vagrant up
 
 ## Development Dependencies
 
@@ -287,94 +287,6 @@ And you can run cockpit-ws and cockpit-bridge under valgrind like this:
 
 Note that cockpit-session and cockpit-bridge will run from the installed
 prefix, rather than your build tree.
-
-## Setting up a domain server
-
-Some features of Cockpit require a domain to test. Cockpit should work
-with either Active Directory or IPA.
-
-If you do not have a domain available that you can use, or don't have
-sufficient privileges on the domain to test Cockpit's features, you can
-use the IPA server that comes with from Cockpit's integration tests.
-The domain is called 'cockpit.lan'. On a physical machine, with the
-cockpit sources checked out, here's how you get it running:
-
-    $ cd /path/to/src/cockpit
-    $ cd ./test
-    $ ./vm-prep
-    $ ./vm-download ipa
-    $ ./vm-run ipa
-
-The IP address of the IPA server will be printed. The root password
-is `foobar`. The IPA admin password is `foobarfoo`.
-
-Your client machines (with your web browser) and your server machines
-(with cockpit running) need to be able to resolve DNS queries against
-the IPA server. You can do the following to make that happen:
-
-    $ sudo -s
-    # echo -e 'domain cockpit.lan\nnameserver 10.111.111.100\n' > \
-            /etc/resolv.conf
-
-To test your DNS, the following should succeed without any error messages
-on both your client machines, and your server with cockpit:
-
-    $ host cockpit.lan
-
-Now verify that you can authenticate against the IPA server. See password
-above.
-
-    $ kinit admin@COCKPIT.LAN
-    Password for admin@COCKPIT.LAN:
-
-**BUG:** IPA often fails to start up correctly on system boot. You may
-have to log into the IPA server and run `systemctl start ipa`.
-[ipa bug](https://bugzilla.redhat.com/show_bug.cgi?id=1071356)
-
-## Setting up Single Sign on
-
-Cockpit can perform single sign on authentication via Kerberos. To test and
-work on this feature, you must have a domain on your network. See section
-above if you do not.
-
-Use the following guide to configure things, with more troubleshooting advice
-below:
-
-http://files.cockpit-project.org/guide/sso.html
-
-**BUG:** The host name of the computer Cockpit is running on should end with
-the domain name. If it does not, then rename the computer Cockpit is running on:
-[realmd bug](https://bugzilla.redhat.com/show_bug.cgi?id=1144343)
-
-    $ sudo hostnamectl set-hostname my-server.domain.com
-
-**BUG:** If your domain is an IPA domain, then you need to explictly add a service
-before Cockpit can be used with Single Sign on. The following must be done on
-the computer running Cockpit.
-[realmd bug](https://bugzilla.redhat.com/show_bug.cgi?id=1144292)
-
-    $ sudo -s
-    # kinit admin@COCKPIT.LAN
-    # curl -s --negotiate -u : https://f0.cockpit.lan/ipa/json \
-            --header 'Referer: https://f0.cockpit.lan/ipa' \
-            --header "Content-Type: application/json" \
-            --header "Accept: application/json" \
-            --data '{"params": [["HTTP/my-server.cockpit.lan@COCKPIT.LAN"], {"raw": false, "all": false, "version": "2.101", "force": true, "no_members": false}], "method": "service_add", "id": 0}'
-    # ipa-getkeytab -q -s f0.cockpit.lan -p HTTP/my-server.cockpit.lan \
-            -k /etc/krb5.keytab
-
-Now when you go to your cockpit instance you should be able to log in without
-authenticating. Make sure to use the full hostname that you set above, the one
-that includes the domain name.
-
-If you want to use Cockpit to connect to a second server. Make sure that second
-server is joined to a domain, and that you can ssh into it using GSSAPI authentication
-with the domain user:
-
-    $ ssh -o PreferredAuthentications=gssapi-with-mic admin@my-server2.domain.com
-
-If you thought that was nasty and tiresome, it's because it is at present :S
-
 
 ## Cockpit Web Service Privileged Container
 

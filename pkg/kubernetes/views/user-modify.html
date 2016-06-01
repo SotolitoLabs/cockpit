@@ -1,0 +1,33 @@
+<modal-dialog>
+    <div class="modal-header">
+        <h4 class="modal-title" translatable="yes">Change User</h4>
+    </div>
+    <div class="modal-body">
+        <table class="form-table-ct">
+            <tr>
+                <td class="top">
+                    <label class="control-label" for="user_name" translatable="yes">
+                        Name
+                    </label>
+                </td>
+                <td>
+                    <span id="user_name">{{ fields.user.metadata.name }}</span>
+                </td>
+            </tr>
+            <tr>
+                <td class="top">
+                    <label class="control-label" for="identities" translatable="yes">
+                        Identity
+                    </label>
+                </td>
+                <td>
+                    <input id="identities" ng-model="fields.identities" class="form-control" type="text">
+                </td>
+            </tr>
+        </table>
+    </div>
+    <div class="modal-footer">
+        <button class="btn btn-default btn-cancel" translatable="yes">Cancel</button>
+        <button class="btn btn-primary" translatable="yes" ng-click="complete(performModify(fields.user))">Modify</button>
+    </div>
+</modal-dialog>

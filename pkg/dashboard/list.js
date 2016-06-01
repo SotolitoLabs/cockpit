@@ -17,14 +17,14 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
+require([
     "jquery",
     "base1/cockpit",
     "base1/mustache",
     "shell/controls",
     "shell/shell",
     "shell/machines",
-    "./image-editor",
+    "dashboard/image-editor",
     "shell/machine-dialogs",
     "base1/patterns",
     "shell/plot",
@@ -137,27 +137,9 @@ var avatar_editor;
 
 $(function () {
     avatar_editor = image_editor($('#host-edit-avatar'), 256, 256);
-
-    $('#host-edit-color').parent().
-        on('show.bs.dropdown', function () {
-            var $div = $('#host-edit-color');
-            var $pop = $('#host-edit-color-popover');
-            var div_pos = $div.position();
-            var div_width = $div.width();
-            var div_height = $div.height();
-            var pop_width = $pop.width();
-            var pop_height = $pop.height();
-
-            $pop.css('left', div_pos.left + (div_width - pop_width) / 2);
-            $pop.css('top', div_pos.top - pop_height + 10);
-            $pop.show();
-        }).
-        on('hide.bs.dropdown', function () {
-            $('#host-edit-color-popover').hide();
-        });
 });
 
-function host_edit_dialog(machine_manager, host) {
+function host_edit_dialog(machine_manager, machine_dialogs, host) {
     var machine = machine_manager.lookup(host);
     if (!machine)
         return;
@@ -170,17 +152,21 @@ function host_edit_dialog(machine_manager, host) {
     $('#host-edit-user-row').toggle(machines.allow_connection_string);
 
     if (machines.allow_connection_string) {
-        $('#host-edit-user').attr('placeholder', cockpit.user.user);
+        cockpit.user().done(function (user) {
+            $('#host-edit-user').attr('placeholder', user.name);
+        });
         $('#host-edit-user').prop('disabled', !can_change_user);
         $('#host-edit-user').val(machine.user);
         $("#host-edit-dialog a[data-content]").popover();
     }
 
-    mdialogs.render_color_picker("#host-edit-colorpicker", machine.address);
+    machine_dialogs.render_color_picker("#host-edit-colorpicker", machine.address);
     $('#host-edit-sync-users').off('click');
     $("#host-edit-sync-users").on('click', function () {
         $("#host-edit-dialog").modal('hide');
-        mdialogs.render_dialog("sync-users", "dashboard_setup_server_dialog", machine.address);
+        machine_dialogs.render_dialog("sync-users",
+                                      "dashboard_setup_server_dialog",
+                                      machine.address);
     });
 
     $('#host-edit-apply').off('click');
@@ -188,7 +174,7 @@ function host_edit_dialog(machine_manager, host) {
         dlg.dialog('failure', null);
         var values = {
             avatar: avatar_editor.changed ? avatar_editor.get_data(128, 128, "image/png") : null,
-            color: $.color.parse($('#host-edit-color').css('background-color')).toString(),
+            color: machines.colors.parse($('#host-edit-colorpicker #host-edit-color').css('background-color')),
             label: $('#host-edit-name').val(),
         };
 
@@ -224,7 +210,7 @@ function update_servers_privileged() {
         permission, ".servers-privileged",
         cockpit.format(
             _("The user <b>$0</b> is not permitted to manage servers"),
-            cockpit.user.name)
+            permission.user ? permission.user.name : '')
     );
 }
 
@@ -250,12 +236,13 @@ PageDashboard.prototype = {
         var self = this;
 
         self.machines = machines.instance();
-        mdialogs.setup_machines(self.machines);
+
+        self.mdialogs = mdialogs.new_manager(self.machines);
 
         var current_monitor = 0;
 
         $('#dashboard-add').click(function () {
-            mdialogs.render_dialog("add-machine", "dashboard_setup_server_dialog");
+            self.mdialogs.render_dialog("add-machine", "dashboard_setup_server_dialog");
         });
         $('#dashboard-enable-edit').click(function () {
             self.toggle_edit(!self.edit_enabled);
@@ -300,7 +287,7 @@ PageDashboard.prototype = {
                 var item = $(this).parent(".list-group-item");
                 var host = item.attr("data-address");
                 self.toggle_edit(false);
-                host_edit_dialog(self.machines, host);
+                host_edit_dialog(self.machines, self.mdialogs, host);
                 return false;
             })
             .on("mouseenter", "a.list-group-item", function() {
@@ -354,7 +341,7 @@ PageDashboard.prototype = {
         }
 
         function highlight(item, val) {
-            item.toggleClass("highlight", val);
+            item.toggleClass("highlight-ct", val);
             var ser = series[item.attr("data-address")];
             if (ser) {
                 ser.forEach(function (s) {
@@ -403,6 +390,9 @@ PageDashboard.prototype = {
                 });
 
                 target.html(text);
+                $("[data-color]", target).each(function() {
+                    $(this).css("border-left-color", $(this).attr("data-color"));
+                });
                 $(".delete-localhost").tooltip({
                       title : _("You are currently connected directly to this server. You cannot delete it.")
                 });
@@ -582,6 +572,5 @@ function init() {
     navigate();
 }
 
-return init;
-
+init();
 });

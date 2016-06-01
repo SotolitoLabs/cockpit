@@ -38,7 +38,7 @@
   <!-- CURTAIN -->
 
   <script id="curtain-tmpl" type="x-template/mustache">
-    <div class="curtains blank-slate-pf">
+    <div class="curtains-ct blank-slate-pf">
       <div class="blank-slate-pf-icon">
         {{#connecting}}
         <div class="spinner spinner-lg"></div>
@@ -63,7 +63,7 @@
       <h1 translatable="yes">Docker is not installed or activated on the system</h1>
       {{/notfound}}
       {{#other}}
-      <h1 translatable="yes">Can't connect to Docker</h1>
+      <h1 translatable="yes">Can&rsquo;t connect to Docker</h1>
       <p>{{.}}</p>
       {{/other}}
       <div class="blank-slate-pf-main-action">
@@ -88,7 +88,7 @@
 
   <!-- OVERVIEW -->
 
-  <div id="containers" class="container-fluid page" hidden>
+  <div id="containers" class="container-fluid page-ct" hidden>
     <div class="col-md-12 col-lg-8">
       <div class="row">
         <div class="col-sm-6">
@@ -197,7 +197,7 @@
         <span id="container-details-names"></span>
       </div>
       <div class="panel-body">
-        <table class="cockpit-info-table col-sm-5">
+        <table class="info-table-ct col-sm-5">
           <tr>
             <td>Id:</td>
             <td colspan="2" id="container-details-id"></td>
@@ -285,7 +285,7 @@
         Image: <span id="image-details-tags"></span>
       </div>
       <div class="panel-body">
-        <table class="cockpit-info-table">
+        <table class="info-table-ct">
 	  <tr>
             <td>Id:</td>
             <td id="image-details-id"></td>
@@ -407,7 +407,7 @@
           <h4 class="modal-title">Run Image</h4>
         </div>
         <div class="modal-body">
-          <table class="cockpit-form-table">
+          <table class="form-table-ct">
             <tr>
               <td><label class="control-label"
                          translatable="yes">Image</label></td>
@@ -582,7 +582,7 @@
           <h4 class="modal-title">Change resources limits</h4>
         </div>
         <div class="modal-body">
-          <table class="cockpit-form-table">
+          <table class="form-table-ct">
             <tr>
               <td><label class="control-label" translatable="yes">Container Name</label></td>
               <td colspan="3">
@@ -646,7 +646,7 @@
           <h4 class="modal-title">Commit Image</h4>
         </div>
         <div class="modal-body">
-          <table class="cockpit-form-table">
+          <table class="form-table-ct">
             <tr>
               <td><label class="control-label" translatable="yes">Container Name</label></td>
               <td colspan="3">

@@ -703,7 +703,8 @@
                         }
 
                         var headers = response.headers || { };
-                        if (headers[CONTENT_TYPE] == JSON_TYPE) {
+                        var content_type = headers[CONTENT_TYPE] || headers[CONTENT_TYPE.toLowerCase()] || "";
+                        if (content_type.lastIndexOf(JSON_TYPE, 0) === 0) {
                             try {
                                 response.data = JSON.parse(response.data);
                             } catch (ex) {
@@ -1046,25 +1047,33 @@
                     return promise;
 
                 var settings = {
-                    registry: {},
+                    registry: {
+                        host: "registry",
+                        host_explicit: false
+                    },
                     flavor: "kubernetes",
                     isAdmin: false,
+                    currentUser: null,
                     canChangeConnection: false,
                 };
 
                 var env_p = CockpitEnvironment()
                     .then(function(result) {
                         var value = result["REGISTRY_HOST"];
-                        if (value)
+                        if (value) {
                             settings.registry.host = value;
+                            settings.registry.host_explicit = true;
+                        }
 
                     }, function(ex) {});
 
                 var discover_p = cockpitKubeDiscover(force)
                     .then(function(options) {
-                        var req = new CockpitKubeRequest("GET", "/oapi", "", options)
-                            .then(function() {
+                        var req = new CockpitKubeRequest("GET", "/oapi/v1/users/~", "", options)
+                            .then(function(response) {
                                 settings.flavor = "openshift";
+                                if (response)
+                                    settings.currentUser = response.data;
                             }, function () {
                                 settings.flavor = "kubernetes";
                             });
@@ -1114,7 +1123,7 @@
                 if (info.type == "kubectl")
                     return kubectlSocket(url, protocols);
                 else
-                    return socket(url, protocols);
+                    return socket(url, { protocols: protocols });
             };
         }
     ])

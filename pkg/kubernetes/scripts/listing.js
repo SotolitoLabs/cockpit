@@ -44,13 +44,17 @@
                 var self = this;
                 var data = { };
 
+                self.selected = { };
+                self.enableActions = false;
+
                 /* Check that either .btn or li were not clicked */
                 function checkBrowserEvent(ev) {
                     return !(ev && inClassOrTag(ev.target, "btn", "li"));
                 }
 
-                self.forceInline = false;
-                self.only = false;
+                self.hasSelected = function hasSelected(id) {
+                    return !angular.equals({}, self.selected);
+                };
 
                 self.expanded = function expanded(id) {
                     if (angular.isUndefined(id)) {
@@ -64,6 +68,11 @@
 
                 self.toggle = function toggle(id, ev) {
                     var value;
+                    if (self.enableActions) {
+                        ev.stopPropagation();
+                        return;
+                    }
+
                     if (id) {
                         value = !(id in data);
                         if (value)
@@ -74,28 +83,28 @@
                 };
 
                 self.expand = function expand(id, ev) {
+                    data[id] = true;
+                    if (ev)
+                        ev.stopPropagation();
+                };
+
+                self.activate = function expand(id, ev) {
                     var emitted;
-                    if (checkBrowserEvent(ev)) {
+                    if (checkBrowserEvent(ev))
                         emitted = scope.$emit("activate", id);
-                        if (!emitted.defaultPrevented) {
-                            data[id] = true;
-                        }
-                    }
                 };
 
                 self.collapse = function collapse(id, ev) {
-                    if (checkBrowserEvent(ev)) {
-                        if (id) {
-                            delete data[id];
-                        } else {
-                            Object.keys(data).forEach(function(old) {
-                                delete data[old];
-                            });
-                            self.only = false;
-                        }
+                    if (id) {
+                        delete data[id];
+                    } else {
+                        Object.keys(data).forEach(function(old) {
+                            delete data[old];
+                        });
                     }
+                    if (ev)
+                        ev.stopPropagation();
                 };
-
             };
         }
     ])

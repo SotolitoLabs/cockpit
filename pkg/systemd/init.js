@@ -3,7 +3,7 @@ define([
     "base1/cockpit",
     "base1/mustache",
     "system/server",
-    "translated!base1/po"
+    "shell/po"
 ], function($, cockpit, mustache, server, po) {
     cockpit.locale(po);
     cockpit.translate();
@@ -780,5 +780,5 @@ define([
         unit_instantiate($('#service-template input').val());
     });
 
-    return init;
+    $(init);
 });

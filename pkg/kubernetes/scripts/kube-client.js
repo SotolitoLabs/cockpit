@@ -395,7 +395,7 @@
                 if (!schema.global && namespace)
                     path += "/namespaces/" + namespace;
                 path += "/" + schema.type;
-                if (!(what in watches)) {
+                if (!(path in watches)) {
                     watches[path] = new KubeWatch(path, handleFrames);
                     watches[path].params = { what: what, global: schema.global, namespace: namespace };
                 }
@@ -582,6 +582,7 @@
                     if ((!only && watch.params.namespace) ||
                         (only && !watch.params.global && !(watch.params.namespace in only))) {
                         watches[path].cancel();
+                        delete watches[path];
                         reconnect.push(watch);
                     }
                 }
@@ -931,7 +932,10 @@
             registerFilter({
                 name: "label",
                 digests: function(arg) {
-                    var i, ret = [], meta = arg.metadata;
+                    var ret = [];
+                    if (!arg)
+                        return ret;
+                    var i, meta = arg.metadata;
                     var labels = meta ? meta.labels : arg;
                     for (i in labels || [])
                         ret.push(i + "=" + labels[i]);
@@ -943,6 +947,8 @@
             registerFilter({
                 name: "namespace",
                 digest: function(arg) {
+                    if (!arg)
+                        return null;
                     if (typeof arg === "string")
                         return arg;
                     var meta = arg.metadata;
@@ -954,6 +960,8 @@
             registerFilter({
                 name: "name",
                 digest: function(arg) {
+                    if (!arg)
+                        return null;
                     if (typeof arg === "string")
                         return arg;
                     var meta = arg.metadata;
@@ -965,6 +973,8 @@
             registerFilter({
                 name: "kind",
                 digest: function(arg) {
+                    if (!arg)
+                        return null;
                     if (typeof arg === "string")
                         return arg;
                     return arg.kind;
@@ -975,9 +985,10 @@
             registerFilter({
                 name: "host",
                 digest: function(arg) {
+                    if (!arg)
+                        return null;
                     if (typeof arg === "string")
                         return arg;
-
                     var spec = arg.spec;
                     return spec ? spec.nodeName : null;
                 }
@@ -987,10 +998,26 @@
             registerFilter({
                 name: "uid",
                 digest: function(arg) {
+                    if (!arg)
+                        return null;
                     if (typeof arg === "string")
                         return arg;
                     var meta = arg.metadata;
                     return meta ? meta.uid : null;
+                }
+            });
+
+            /* The statusPhase filter */
+            registerFilter({
+                name: "statusPhase",
+                digest: function(arg) {
+                    var status;
+                    if (typeof arg == "string") {
+                        return arg;
+                    } else {
+                        status = arg.status || { };
+                        return status.phase ? status.phase : null;
+                    }
                 }
             });
 

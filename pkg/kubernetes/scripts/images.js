@@ -41,6 +41,7 @@
         'kubernetes.date',
         'kubernetes.listing',
         'registry.layers',
+        'registry.tags',
     ])
 
     .config([
@@ -70,9 +71,12 @@
         'imageData',
         'imageActions',
         'ListingState',
+        'projectData',
         'filterService',
-        function($scope, $location, data, actions, ListingState) {
+        function($scope, $location, data, actions, ListingState, projectData) {
             $scope.imagestreams = data.allStreams;
+            $scope.sharedImages = projectData.sharedImages;
+
             angular.extend($scope, data);
 
             $scope.listing = new ListingState($scope);
@@ -81,10 +85,8 @@
             data.watchImages();
 
             $scope.$on("activate", function(ev, id) {
-                if (!$scope.listing.expandable) {
-                    ev.preventDefault();
-                    $location.path('/images/' + id);
-                }
+                ev.preventDefault();
+                $location.path('/images/' + id);
             });
 
             /* All the actions available on the $scope */
@@ -111,7 +113,8 @@
         'imageData',
         'imageActions',
         'ListingState',
-        function($scope, $location, $routeParams, select, loader, data, actions, ListingState) {
+        'projectData',
+        function($scope, $location, $routeParams, select, loader, data, actions, ListingState, projectData) {
             var target = $routeParams["target"] || "";
             var pos = target.indexOf(":");
 
@@ -143,7 +146,7 @@
 
 
                 if ($scope.tag)
-                    $scope.image = select().kind("Image").taggedBy($scope.tag).one();
+                    $scope.image = select().kind("Image").taggedFirst($scope.tag).one();
                 if ($scope.image) {
                     $scope.names = data.imageTagNames($scope.image);
                     $scope.config = data.imageConfig($scope.image);
@@ -169,6 +172,7 @@
             /* All the data actions available on the $scope */
             angular.extend($scope, data);
             angular.extend($scope, actions);
+            $scope.sharedImages = projectData.sharedImages;
 
             /* But special case a few */
             $scope.deleteImageStream = function(stream) {
@@ -181,6 +185,11 @@
 
                 return promise;
             };
+
+            $scope.$on("activate", function(ev, id) {
+                ev.preventDefault();
+                $location.path('/images/' + id);
+            });
 
             $scope.deleteTag = function(stream, tag) {
                 var promise = actions.deleteTag(stream, tag);
@@ -342,13 +351,29 @@
             loader.listen(handle_imagestreams);
 
             /*
-             * Filters selection to those with names that are
+             * Filters selection to those with names that is
              * in the given TagEvent.
              */
             select.register("taggedBy", function(tag) {
                 var i, len, results = { };
+                // catch condition when tag.items is null due to imagestream import error
+                if (!tag.items)
+                    return select(null);
                 for (i = 0, len = tag.items.length; i < len; i++)
                     this.name(tag.items[i].image).extend(results);
+                return select(results);
+            });
+
+            /*
+             * Filters selection to those with names that is in the first
+             * item in the given TagEvent.
+             */
+            select.register("taggedFirst", function(tag) {
+                var len, results = { };
+                if (!tag.items)
+                    return select(null);
+                if (tag.items.length)
+                    this.name(tag.items[0].image).extend(results);
                 return select(results);
             });
 
@@ -473,8 +498,8 @@
                 allStreams: function allStreams() {
                     return select().kind("ImageStream");
                 },
-                imagesByTag: function imagesByTag(tag) {
-                    return select().kind("Image").taggedBy(tag);
+                imageByTag: function imageByTag(tag) {
+                    return select().kind("Image").taggedFirst(tag);
                 },
                 imageLayers: imageLayers,
                 imageConfig: function imageConfig(image) {
@@ -484,7 +509,10 @@
                     return select().kind("ImageStream").listTagNames(image.metadata.name);
                 },
                 imageLabels: function imageLabels(image) {
-                    return select(image).dockerImageConfig().dockerConfigLabels().one();
+                    var labels = select(image).dockerImageConfig().dockerConfigLabels().one();
+                    if (labels && angular.equals({ }, labels))
+                        labels = null;
+                    return labels;
                 },
                 configCommand: configCommand,
             };
@@ -575,33 +603,49 @@
         "$scope",
         "$modalInstance",
         "dialogData",
+        "imageTagData",
         "kubeMethods",
         "filterService",
-        function($scope, $instance, dialogData, methods, filter) {
+        function($scope, $instance, dialogData, tagData, methods, filter) {
             var stream = dialogData.stream || { };
             var meta = stream.metadata || { };
             var spec = stream.spec || { };
 
+            var populate = "none";
+            if (spec.dockerImageRepository)
+                populate = "pull";
+            if (spec.tags)
+                populate = "tags";
+
             var fields = {
                 name: meta.name || "",
                 project: meta.namespace || filter.namespace() || "",
-                populate: spec.dockerImageRepository ? "pull" : "none",
+                populate: populate,
                 pull: spec.dockerImageRepository || "",
+                tags: tagData.parseSpec(spec),
+                insecure: hasInsecureTag(spec),
             };
 
             $scope.fields = fields;
             $scope.labels = {
                 populate: {
                     none: "Don't pull images automatically",
-                    pull: "Pull all tags from another image repository",
+                    pull: "Sync all tags from a remote image repository",
+                    tags: "Pull specific tags from another image repository",
                 }
             };
+
+            /* During creation we have a different label */
+            if (!dialogData.stream)
+                $scope.labels.populate.none = "Create empty image stream";
 
             function performModify() {
                 var data = { spec: { dockerImageRepository: null, tags: null } };
 
                 if (fields.populate != "none")
                     data.spec.dockerImageRepository = fields.pull.trim();
+                if (fields.populate == "tags")
+                    tagData.buildSpec(fields.tags, data.spec, fields.insecure);
 
                 return methods.patch(stream, data);
             }
@@ -615,11 +659,10 @@
                     }
                 };
 
-                if (fields.populate != "none") {
-                    data.spec = {
-                        dockerImageRepository: fields.pull.trim(),
-                    };
-                }
+                if (fields.populate != "none")
+                    data.spec = { dockerImageRepository: fields.pull.trim(), };
+                if (fields.populate == "tags")
+                    data.spec = tagData.buildSpec(fields.tags, data.spec, fields.insecure);
 
                 return methods.check(data, {
                     "metadata.name": "#imagestream-modify-name",
@@ -629,8 +672,24 @@
                 });
             }
 
+            function hasInsecureTag(spec) {
+                // loop through tags, check importPolicy.insecure boolean
+                // if one tag is insecure the intent is the imagestream is insecure
+                var insecure;
+                if (spec) {
+                    for (var tag in spec.tags) {
+                        if (spec.tags[tag].importPolicy.insecure) {
+                            insecure = spec.tags[tag].importPolicy.insecure;
+                            break;
+                        }
+                    }
+                }
+                return insecure;
+            }
+
             $scope.performCreate = performCreate;
             $scope.performModify = performModify;
+            $scope.hasInsecureTag = hasInsecureTag;
 
             $scope.projects = filter.namespaces;
             angular.extend($scope, dialogData);

@@ -1,15 +1,36 @@
-<filter-bar class="content-filter">
-</filter-bar>
+<div class="content-filter">
+    <filter-project></filter-project>
+    <div class="btn-group bootstrap-select type-filter" dropdown>
+        <button class="btn btn-default dropdown-toggle" type="button" dropdown-toggle>
+            <span class="pull-left">
+                <span ng-if="showAll" translatable="yes">All Types</span>
+                <span ng-if="name"><span class="namespace-meta" translatable="yes">Type:</span> {{ name }}</span>
+            </span>
+            <span class="caret"></span>
+        </button>
+        <ul class="dropdown-menu">
+            <li ng-class="{ checked: !type }">
+                <a ng-click="navigate()" value="">All Types</a>
+            </li>
+            <li ng-repeat="(k, v) in names"
+                ng-class="{ checked: type == k }"
+                ng-if="!v.flavor || v.flavor == settings.flavor">
+                <a ng-click="navigate(k)">{{ v.name }}</a>
+            </li>
+        </ul>
+    </div>
+</div>
 
 <div>
-    <table listing-table class="listing details-listing">
-        <thead ng-if="!listing.only">
+    <table listing-table class="listing-ct details-listing">
+        <thead id="services" ng-if="showAll || services">
             <tr>
-                <td colspan="4">
+                <td colspan="5">
                     <h3 translatable="yes">Services</h3>
                 </td>
             </tr>
             <tr>
+                <th></th>
                 <th translatable="yes">Name</th>
                 <th translatable="yes" ng-if="settings.flavor == 'openshift'">Project</th>
                 <th translatable="yes" ng-if="settings.flavor != 'openshift'">Namespace</th>
@@ -17,10 +38,13 @@
                 <th translatable="yes">State</th>
             </tr>
         </thead>
-        <tbody ng-repeat="item in services | orderObjectBy:['metadata.namespace', 'metadata.name'] as filtered_result track by itemIdentifier(item)"
-            ng-init="id = itemIdentifier(item)" class="active"
+        <tbody ng-repeat="item in services | orderObjectBy:['metadata.namespace', 'metadata.name'] as filtered_result track by itemIdentifier(item)" ng-init="id = itemIdentifier(item)"
             data-id="{{id}}" ng-class="{open: listing.expanded(id)}">
-            <tr ng-click="listing.toggle(id)" ng-if="!listing.only" class="listing-item">
+            <tr ng-click="listing.activate(id)" class="listing-ct-item">
+                <td ng-click="listing.toggle(id, $event)"
+                    class="listing-ct-toggle">
+                    <i class="fa fa-fw"></i>
+                </td>
                 <th>{{item.metadata.name}}</th>
                 <td>{{item.metadata.namespace}}</td>
                 <td><kubernetes-service-cluster></td>
@@ -29,19 +53,20 @@
                     <span ng-if="serviceEndpoint(item).subsets.length === 0" translatable="yes">Not Ready</span>
                 </td>
             </tr>
-            <tr class="listing-panel" ng-if="listing.expanded(id)">
-                <td listing-panel kind="Service" colspan="4">
+            <tr class="listing-ct-panel" ng-if="listing.expanded(id)">
+                <td listing-panel kind="Service" colspan="5">
                 </td>
             </tr>
         </tbody>
 
-        <thead id="routes" ng-if="!listing.only && settings.flavor == 'openshift'">
+        <thead id="routes" ng-if="(showAll || routes) && settings.flavor == 'openshift'">
             <tr>
-                <td colspan="4">
+                <td colspan="5">
                     <h3 translatable="yes">Routes</h3>
                 </td>
             </tr>
             <tr>
+                <th></th>
                 <th translatable="yes">Name</th>
                 <th translatable="yes" ng-if="settings.flavor == 'openshift'">Project</th>
                 <th translatable="yes" ng-if="settings.flavor != 'openshift'">Namespace</th>
@@ -50,26 +75,31 @@
             </tr>
         </thead>
         <tbody ng-repeat="item in routes | orderObjectBy:['metadata.namespace', 'metadata.name']  as filtered_result track by itemIdentifier(item)"
-            class="active" ng-class="{open: listing.expanded(id)}"
-            ng-init="id = itemIdentifier(item)" data-id="{{id}}">
-            <tr ng-click="listing.toggle(id)" ng-if="!listing.only" class="listing-item">
+            ng-init="id = itemIdentifier(item)" data-id="{{id}}"
+            ng-class="{open: listing.expanded(id)}">
+            <tr ng-click="listing.activate(id)" class="listing-ct-item">
+                <td ng-click="listing.toggle(id, $event)"
+                    class="listing-ct-toggle">
+                    <i class="fa fa-fw"></i>
+                </td>
                 <th>{{item.metadata.name}}</th>
                 <td>{{item.metadata.namespace}}</td>
                 <td>{{item.spec.host}}</td>
                 <td></td>
             </tr>
-            <tr class="listing-panel" ng-if="listing.expanded(id)">
-                <td listing-panel kind="Route" colspan="4"></td>
+            <tr class="listing-ct-panel" ng-if="listing.expanded(id)">
+                <td listing-panel kind="Route" colspan="5"></td>
             </tr>
         </tbody>
 
-        <thead id="deployment-configs" ng-if="!listing.only && settings.flavor == 'openshift'">
+        <thead id="deployment-configs" ng-if="(showAll || deploymentconfigs) && settings.flavor == 'openshift'">
             <tr>
-                <td colspan="4">
+                <td colspan="5">
                     <h3 translatable="yes">Deployment Configs</h3>
                 </td>
             </tr>
             <tr>
+                <th></th>
                 <th translatable="yes">Name</th>
                 <th translatable="yes" ng-if="settings.flavor == 'openshift'">Project</th>
                 <th translatable="yes" ng-if="settings.flavor != 'openshift'">Namespace</th>
@@ -78,27 +108,32 @@
             </tr>
         </thead>
         <tbody ng-repeat="item in deploymentconfigs | orderObjectBy:['metadata.namespace', 'metadata.name'] as filtered_result track by itemIdentifier(item)"
-            class="active" ng-class="{open: listing.expanded(id)}"
-            ng-init="id = itemIdentifier(item)" data-id="{{id}}">
-            <tr ng-click="listing.toggle(id)" ng-if="!listing.only" class="listing-item">
+            ng-init="id = itemIdentifier(item)" data-id="{{id}}"
+            ng-class="{open: listing.expanded(id)}">
+            <tr ng-click="listing.activate(id)" class="listing-ct-item">
+                <td ng-click="listing.toggle(id, $event)"
+                    class="listing-ct-toggle">
+                    <i class="fa fa-fw"></i>
+                </td>
                 <th>{{item.metadata.name}}</th>
                 <td>{{item.metadata.namespace}}</td>
                 <td></td>
                 <td ng-if="item.status.latestVersion">{{ item.status.latestVersion }}</td>
                 <td ng-if="!item.status.latestVersion" translatable="yes">Not deployed</td>
             </tr>
-            <tr class="listing-panel" ng-if="listing.expanded(id)">
-                <td listing-panel kind="DeploymentConfig" colspan="4"></td>
+            <tr class="listing-ct-panel" ng-if="listing.expanded(id)">
+                <td listing-panel kind="DeploymentConfig" colspan="5"></td>
             </tr>
         </tbody>
 
-        <thead ng-if="!listing.only">
+        <thead id="replication-controllers" ng-if="showAll || replicationcontrollers">
             <tr>
-                <td colspan="4">
+                <td colspan="5">
                     <h3 translatable="yes">Replication Controllers</h3>
                 </td>
             </tr>
             <tr>
+                <th></th>
                 <th translatable="yes">Name</th>
                 <th translatable="yes" ng-if="settings.flavor == 'openshift'">Project</th>
                 <th translatable="yes" ng-if="settings.flavor != 'openshift'">Namespace</th>
@@ -107,27 +142,32 @@
             </tr>
         </thead>
         <tbody ng-repeat="item in replicationcontrollers | orderObjectBy:['metadata.namespace', 'metadata.name'] as filtered_result track by itemIdentifier(item)"
-            ng-init="id = itemIdentifier(item)" class="active"
-            data-id="{{id}}" ng-class="{open: listing.expanded(id)}">
-            <tr ng-click="listing.toggle(id)" ng-if="!listing.only" class="listing-item">
+            ng-init="id = itemIdentifier(item)" data-id="{{id}}"
+            ng-class="{open: listing.expanded(id)}">
+            <tr ng-click="listing.activate(id)" class="listing-ct-item">
+                <td ng-click="listing.toggle(id, $event)"
+                    class="listing-ct-toggle">
+                    <i class="fa fa-fw"></i>
+                </td>
                 <th>{{item.metadata.name}}</th>
                 <td>{{item.metadata.namespace}}</td>
                 <td></td>
                 <td ng-if="item.spec.replicas == item.status.replicas">{{ item.spec.replicas }}</td>
                 <td ng-if="item.spec.replicas != item.status.replicas">{{ item.status.replicas }} of {{ item.spec.replicas }}</td>
             </tr>
-            <tr class="listing-panel" ng-if="listing.expanded(id)">
-                <td listing-panel kind="ReplicationController" colspan="4"></td>
+            <tr class="listing-ct-panel" ng-if="listing.expanded(id)">
+                <td listing-panel kind="ReplicationController" colspan="5"></td>
             </tr>
         </tbody>
 
-        <thead ng-if="!listing.only">
+        <thead id="pods" ng-if="showAll || pods">
             <tr>
-                <td colspan="4">
+                <td colspan="5">
                     <h3 translatable="yes">Pods</h3>
                 </td>
             </tr>
             <tr>
+                <th></th>
                 <th translatable="yes">Name</th>
                 <th translatable="yes" ng-if="settings.flavor == 'openshift'">Project</th>
                 <th translatable="yes" ng-if="settings.flavor != 'openshift'">Namespace</th>
@@ -136,16 +176,20 @@
             </tr>
         </thead>
         <tbody ng-repeat="item in pods | orderObjectBy:['metadata.namespace', 'metadata.name'] as filtered_result track by itemIdentifier(item)"
-            ng-init="id = itemIdentifier(item)" class="active"
-            data-id="{{id}}" ng-class="{open: listing.expanded(id)}">
-            <tr ng-click="listing.toggle(id)" ng-if="!listing.only" class="listing-item">
+            ng-init="id = itemIdentifier(item)" data-id="{{id}}"
+            ng-class="{open: listing.expanded(id)}">
+            <tr ng-click="listing.activate(id)" class="listing-ct-item">
+                <td ng-click="listing.toggle(id, $event)"
+                    class="listing-ct-toggle">
+                    <i class="fa fa-fw"></i>
+                </td>
                 <th>{{item.metadata.name}}</th>
                 <td>{{item.metadata.namespace}}</td>
                 <td>{{item.status.podIP}}</td>
                 <td>{{ podStatus(item) }}</td>
             </tr>
-            <tr class="listing-panel" ng-if="listing.expanded(id)">
-                <td listing-panel kind="Pod" colspan="4"></td>
+            <tr class="listing-ct-panel" ng-if="listing.expanded(id)">
+                <td listing-panel kind="Pod" colspan="5"></td>
             </tr>
         </tbody>
     </table>

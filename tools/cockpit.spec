@@ -71,7 +71,10 @@ BuildRequires: pcp-libs-devel
 BuildRequires: gdb
 
 %if %{defined gitcommit}
+# on fedora 24, nodejs provides npm
+%if 0%{?fedora} > 0 && 0%{?fedora} < 24
 BuildRequires: npm
+%endif
 BuildRequires: nodejs
 # For kerberos tests
 BuildRequires: krb5-server
@@ -342,6 +345,7 @@ test -f %{_bindir}/firewall-cmd && firewall-cmd --reload --quiet || true
 
 %postun ws
 %systemd_postun_with_restart cockpit.socket
+%systemd_postun_with_restart cockpit.service
 
 %package shell
 Summary: Cockpit Shell user interface package
@@ -374,6 +378,7 @@ Summary: Cockpit user interface for storage, using Storaged
 Requires: %{name}-shell = %{version}-%{release}
 Requires: storaged >= 2.1.1
 Requires: storaged-lvm2 >= 2.1.1
+Requires: storaged-iscsi >= 2.1.1
 Requires: device-mapper-multipath
 BuildArch: noarch
 

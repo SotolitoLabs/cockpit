@@ -25,6 +25,7 @@
     angular.module('kubernetes.volumes', [
         'ngRoute',
         'kubeClient',
+        'kubernetes.date',
         'kubernetes.listing',
         'ui.cockpit',
     ])
@@ -34,7 +35,7 @@
         function($routeProvider) {
             $routeProvider
                 .when('/volumes', {
-                    templateUrl: 'views/pv-listing.html',
+                    templateUrl: 'views/volumes-page.html',
                     controller: 'VolumeCtrl'
                 })
 
@@ -62,16 +63,25 @@
                  $routeParams, $location, actions, $timeout) {
             var target = $routeParams["target"] || "";
             $scope.target = target;
+            $scope.pvFailure = null;
 
             var c = loader.listen(function() {
                 var timer;
+                $scope.pending = select().kind("PersistentVolumeClaim")
+                                         .statusPhase("Pending");
                 $scope.pvs = select().kind("PersistentVolume");
                 if (target)
                     $scope.item = select().kind("PersistentVolume").name(target).one();
             });
 
-            loader.watch("PersistentVolume");
+            loader.watch("PersistentVolume")
+                .catch(function (ex) {
+                    $scope.pvFailure = ex.message;
+                });
+
             loader.watch("PersistentVolumeClaim");
+            loader.watch("Endpoints");
+            loader.watch("Pod");
 
             $scope.$on("$destroy", function() {
                 c.cancel();
@@ -89,17 +99,15 @@
                 /* If the promise is successful, redirect to another page */
                 promise.then(function() {
                     if ($scope.target)
-                        $location.path($scope.viewUrl('volumes'));
+                        $location.path('/volumes/');
                 });
 
                 return promise;
             };
 
             $scope.$on("activate", function(ev, id) {
-                if (!$scope.listing.expandable) {
-                    ev.preventDefault();
-                    $location.path('/volumes/' + id);
-                }
+                ev.preventDefault();
+                $location.path('/volumes/' + id);
             });
         }
     ])
@@ -328,17 +336,36 @@
                 return true;
             }
 
-            function deletePV(item) {
+            function deleteItem(item, resolve, template, ev) {
+                if (ev)
+                    ev.stopPropagation();
+
                 return $modal.open({
                     animation: false,
-                    controller: 'PVDeleteCtrl',
-                    templateUrl: 'views/pv-delete.html',
-                    resolve: {
-                        dialogData: function() {
-                            return { item: item };
-                        }
-                    },
+                    controller: 'VolumeDeleteCtrl',
+                    templateUrl: template,
+                    resolve: resolve,
                 }).result;
+            }
+
+            function deletePVC(item, ev) {
+                var resolve = {
+                    dialogData: function() {
+                        return { item: item,
+                                 pvc: item,
+                                 pods: volumeData.podsForClaim(item) };
+                    }
+                };
+                return deleteItem(item, resolve, 'views/pvc-delete.html', ev);
+            }
+
+            function deletePV(item, ev) {
+                var resolve = {
+                    dialogData: function() {
+                        return { item: item };
+                    }
+                };
+                return deleteItem(item, resolve, 'views/pv-delete.html', ev);
             }
 
             function createPV(item) {
@@ -348,7 +375,7 @@
                     templateUrl: 'views/pv-modify.html',
                     resolve: {
                         dialogData: function() {
-                            return { };
+                            return { pvc : item };
                         }
                     },
                 }).result;
@@ -371,6 +398,7 @@
                 modifyPV: modifyPV,
                 createPV: createPV,
                 deletePV: deletePV,
+                deletePVC: deletePVC,
                 canEdit: canEdit,
             };
         }
@@ -389,9 +417,17 @@
                     item = {};
 
                 var spec = item.spec || {};
+                var requests, storage;
+
+                if (item.kind == "PersistentVolumeClaim") {
+                    requests = spec.resources ? spec.resources.requests : {};
+                    storage = requests ? requests.storage : "";
+                } else {
+                    storage = spec.capacity ? spec.capacity.storage : "";
+                }
 
                 var fields = {
-                    "capacity" : spec.capacity ? spec.capacity.storage : "",
+                    "capacity" : storage ? storage : "",
                     "policy" : spec.persistentVolumeReclaimPolicy || "Retain",
                     "accessModes": volumeData.accessModes,
                     "reclaimPolicies": volumeData.reclaimPolicies,
@@ -470,6 +506,73 @@
                             spec: spec
                         };
                     }
+                }
+
+                return ret;
+            }
+
+            return {
+                build: build,
+                validate: validate,
+            };
+        }
+    ])
+
+    .factory("glusterfs"+VOLUME_FACTORY_SUFFIX, [
+        "volumeData",
+        "KubeTranslate",
+        "kubeSelect",
+        function (volumeData, translate, select) {
+            var _ = translate.gettext;
+
+            function build(item) {
+                if (!item)
+                    item = {};
+
+                var spec = item.spec || {};
+                var glusterfs = spec.glusterfs || {};
+
+                return {
+                    endpoint: glusterfs.endpoints,
+                    endpointOptions: select().kind("Endpoints"),
+                    glusterfsPath: glusterfs.path,
+                    readOnly: glusterfs.readOnly,
+                    reclaimPolicies: {
+                        "Retain" : volumeData.reclaimPolicies["Retain"]
+                    },
+                };
+            }
+
+            function validate (item, fields) {
+                var data, ex, endpoint, path;
+                var ret = {
+                    errors: [],
+                    data: null,
+                };
+
+                endpoint = fields.endpoint ? fields.endpoint.trim() : fields.endpoint;
+                if (!select().kind("Endpoints").name(endpoint).one()) {
+                    ex = new Error(_("Please select a valid endpoint"));
+                    ex.target = "#modify-endpoint";
+                    ret.errors.push(ex);
+                    ex = null;
+                }
+
+                // The API calls glusterfs volume name, path.
+                path = fields.glusterfsPath ? fields.glusterfsPath.trim() : fields.glusterfsPath;
+                if (!path) {
+                    ex = new Error(_("Please provide a GlusterFS volume name"));
+                    ex.target = "#modify-glusterfs-path";
+                    ret.errors.push(ex);
+                    ex = null;
+                }
+
+                if (ret.errors.length < 1) {
+                    ret.data = {
+                        endpoints: endpoint,
+                        path: path,
+                        readOnly: !!fields.readOnly
+                    };
                 }
 
                 return ret;
@@ -603,13 +706,24 @@
         }
     ])
 
-    .controller("PVDeleteCtrl", [
+    .controller("VolumeDeleteCtrl", [
         "$scope",
         "$modalInstance",
         "dialogData",
+        "volumeData",
         "kubeMethods",
-        function($scope, $instance, dialogData, methods) {
+        "kubeLoader",
+        function($scope, $instance, dialogData, volumeData, methods, loader) {
             angular.extend($scope, dialogData);
+
+            var c = loader.listen(function() {
+                if ($scope.pvc)
+                    $scope.pods = volumeData.podsForClaim($scope.pvc);
+            });
+
+            $scope.$on("$destroy", function() {
+                c.cancel();
+            });
 
             $scope.performDelete = function performDelete() {
                 return methods.delete($scope.item);
@@ -748,15 +862,19 @@
                     name: _("ISCSI"),
                     type: "iscsi",
                 },
+                {
+                    name: _("GlusterFS"),
+                    type: "glusterfs",
+                },
             ];
 
             function selectType(type) {
                 $scope.current_type = type;
                 valName = $scope.current_type+VOLUME_FACTORY_SUFFIX;
-                $scope.fields = defaultVolumeFields.build($scope.item);
+                $scope.fields = defaultVolumeFields.build($scope.item || $scope.pvc);
                 if ($injector.has(valName)) {
                     volumeFields = $injector.get(valName, "PVModifyCtrl");
-                    angular.extend($scope.fields, volumeFields.build($scope.item));
+                    angular.extend($scope.fields, volumeFields.build($scope.item || $scope.pvc));
                 } else {
                     $scope.$applyAsync(function () {
                         $scope.$dismiss();
@@ -802,9 +920,43 @@
                 return defer.promise;
             }
 
+            function updatePVC() {
+                /*
+                 * HACK: https://github.com/kubernetes/kubernetes/issues/21498
+                 *
+                 * Until the API gets a way to manually
+                 * trigger the process that matches a volume with a claim
+                 * we change something else on the claim to try to kick things
+                 * off sooner. Otherwise in the worse case
+                 * the user will need to wait for around 10 mins.
+                 */
+                if ($scope.pvc) {
+                    return methods.patch($scope.pvc, {
+                            "metadata" : {
+                                "annotations" : {
+                                    "claimTrigger": "on"
+                                }
+                            }
+                        })
+                        .then(function () {
+                            methods.patch($scope.pvc, {
+                                "metadata" : {
+                                    "annotations" : {
+                                        "claimTrigger": null
+                                    }
+                                }
+                            });
+                        });
+                }
+            }
+
             $scope.select = function(type) {
                 $scope.selected = type;
                 selectType(type.type);
+            };
+
+            $scope.setField = function(name, value) {
+                $scope.fields[name] = value;
             };
 
             $scope.hasField = function(name) {
@@ -813,10 +965,12 @@
 
             $scope.performModify = function performModify() {
                 return validate().then(function(data) {
+                    var res;
                     if (!$scope.item)
-                        return methods.create(data, null);
+                        res = methods.create(data, null);
                     else
-                        return methods.patch($scope.item, data);
+                        res = methods.patch($scope.item, data);
+                    return res.then(updatePVC);
                 });
             };
         }

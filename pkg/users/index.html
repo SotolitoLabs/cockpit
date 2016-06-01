@@ -32,7 +32,25 @@
     <script src="local.js"></script>
     <!-- debug:end -->
 </head>
-<body class="page" hidden>
+<body class="page-ct" hidden>
+
+  <div class="modal" id="error-popup" tabindex="-1" role="dialog" data-backdrop="static">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h4 class="modal-title" id="error-popup-title"></h4>
+        </div>
+        <div class="modal-body">
+          <p id="error-popup-message"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" data-dismiss="modal" translatable="yes">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="accounts" class="container-fluid" hidden>
     <button class="btn btn-default accounts-privileged" id="accounts-create" translatable="yes" data-container="body">Create New Account</button>
@@ -40,7 +58,7 @@
     </div>
   </div>
 
-  <div id="account-failure" class="curtains blank-slate-pf" hidden>
+  <div id="account-failure" class="curtains-ct blank-slate-pf" hidden>
     <div class="blank-slate-pf-icon">
       <i class="fa fa-exclamation-circle"></i>
     </div>
@@ -65,7 +83,7 @@
         <span id="account-title"></span>
       </div>
       <div class="panel-body">
-        <table class="cockpit-info-table col-sm-3">
+        <table class="info-table-ct col-sm-3">
           <tr>
             <td translatable="yes">Full Name</td>
             <td class="accounts-privileged" id="account-real-name-wrapper"><input id="account-real-name" class="form-control" data-container="body"></td>
@@ -127,7 +145,7 @@
           <h4 class="modal-title" translatable="yes">Create New Account</h4>
         </div>
         <div class="modal-body">
-          <table class="cockpit-form-table">
+          <table class="form-table-ct">
             <tr>
               <td><label class="control-label" for="accounts-create-real-name"
                          translatable="yes">Full Name</label></td>
@@ -205,7 +223,7 @@
           <h4 class="modal-title" translatable="yes">Set Password</h4>
         </div>
         <div class="modal-body">
-          <table class="cockpit-form-table">
+          <table class="form-table-ct">
             <tr>
               <td><label class="control-label" for="account-set-password-old"
                          translatable="yes">Old Password</label></td>
@@ -306,7 +324,7 @@
         <span translatable="yes">Invalid key</span>
         {{/valid}}
       </div>
-      <div class="action"><button data-raw="{{raw}}" class="btn btn-default btn-control accounts-self-privileged account-remove-key">-</button></div>
+      <div class="action"><button data-raw="{{raw}}" class="btn btn-default btn-control-ct accounts-self-privileged account-remove-key">-</button></div>
     </div>
     {{/keys}}
     {{^keys}}

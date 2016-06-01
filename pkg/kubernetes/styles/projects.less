@@ -15,14 +15,52 @@ table.project-body {
         border-color: inherit;
     }
 
-    tr.listing-item {
-        border-top: 1px solid #eee;
-        border-bottom: 1px solid #eee;
+    tr.listing-ct-item {
+        border-top: 1px solid color("#eee");
+        border-bottom: 1px solid color("#eee");
         cursor: pointer;
     }
 }
 
-.listing-head .pficon-project {
+.close-icon {
+    color: #000000;
+}
+.user-membership-body {
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: 200px;
+    border-top: 1px solid #eee;
+    border-bottom: 1px solid #eee;
+    padding-top: 10px;
+    padding-bottom: 10px;
+
+    h4 {
+        color: #888;
+        margin-top: 0px;
+        margin-bottom: 5px;
+        font-size: 14px;
+    }
+
+    span {
+        display: block;
+        margin-left: 20px;
+    }
+}
+
+.user-body {
+    border: 0px;
+
+    table.listing-ct thead th {
+        border-bottom: 0px;
+        border-bottom: 1px solid color("#eee");
+    }
+}
+
+table.listing-ct > thead td {
+    padding-top: 0px;
+}
+
+.listing-ct-head .pficon-project {
     margin-bottom: 10px;
 }
 
@@ -35,9 +73,19 @@ p.project-description {
     margin-top: 1em;
 }
 
+a.input-icon {
+    position: absolute;
+    right: 18px;
+}
+
 .project-panel {
     padding-right: 25px;
-    padding-top: 0px;
+    padding-top: 5px;
+}
+
+.project-panel-actions {
+    padding-right: 5px;
+    padding-top: 5px;
 }
 
 table.projects-listing {
@@ -60,9 +108,9 @@ table.projects-listing {
         min-width: 70% !important;
     }
 
-    tr.listing-item {
-        border-top: 1px solid #eee;
-        border-bottom: 1px solid #eee;
+    tr.listing-ct-item {
+        border-top: 1px solid color("#eee");
+        border-bottom: 1px solid color("#eee");
         cursor: pointer;
     }
 
@@ -77,7 +125,7 @@ table.projects-listing {
     }
 
     tbody.last {
-        tr.listing-item.tag-item td:first-child {
+        tr.listing-ct-item.tag-item td:first-child {
             background-size: 100% 20px;
             background-repeat: no-repeat;
         }
@@ -87,7 +135,7 @@ table.projects-listing {
         padding-bottom: 0px;
     }
 
-    tr.listing-item tt {
+    tr.listing-ct-item tt {
         color: @metadata-color;
     }
 }

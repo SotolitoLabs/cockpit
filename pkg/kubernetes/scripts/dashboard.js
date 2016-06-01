@@ -45,14 +45,17 @@
         'dashboardActions',
         'itemActions',
         'nodeActions',
+        'nodeData',
         '$location',
-        function($scope, loader, select, data, actions, itemActions, nodeActions, $location) {
+        function($scope, loader, select, data, actions, itemActions,
+                 nodeActions, nodeData, $location) {
 
         var c = loader.listen(function() {
             $scope.services = select().kind("Service");
             $scope.nodes = select().kind("Node");
             $scope.pods = select().kind("Pod");
             $scope.volumes = select().kind("PersistentVolume");
+            $scope.pvcs = select().kind("PersistentVolumeClaim");
 
             $scope.status = {
                 pods: {
@@ -68,6 +71,7 @@
                 },
                 volumes: {
                     Pending: $scope.volumes.statusPhase("Pending"),
+                    PendingClaims: $scope.pvcs.statusPhase("Pending"),
                     Available: $scope.volumes.statusPhase("Available"),
                     Released: $scope.volumes.statusPhase("Released"),
                     Failed: $scope.volumes.statusPhase("Failed"),
@@ -83,6 +87,8 @@
         loader.watch("Service");
         loader.watch("ReplicationController");
         loader.watch("Pod");
+        loader.watch("PersistentVolume");
+        loader.watch("PersistentVolumeClaim");
 
         $scope.editServices = false;
         $scope.toggleServiceChange = function toggleServiceChange() {
@@ -108,6 +114,7 @@
         /* All the actions available on the $scope */
         angular.extend($scope, actions);
         angular.extend($scope, data);
+        angular.extend($scope, nodeData);
         $scope.modifyService = itemActions.modifyService;
         $scope.addNode = nodeActions.addNode;
 
@@ -130,19 +137,6 @@
             return service ? 'ready' : 'empty';
         };
     }])
-
-    .directive('kubernetesStatusIcon', function() {
-        return {
-            restrict: 'A',
-            link: function($scope, element, attributes) {
-                $scope.$watch(attributes["status"], function(status) {
-                    element
-                        .toggleClass("spinner spinner-sm", status == "wait")
-                        .toggleClass("pficon pficon-error-circle-o", status == "fail");
-                });
-            }
-        };
-    })
 
     .directive('kubernetesAddress', function() {
         return {
@@ -216,18 +210,6 @@
     .factory('dashboardData', [
         'kubeSelect',
         function(select) {
-            select.register({
-                name: "statusPhase",
-                digest: function(arg) {
-                    var status;
-                    if (typeof arg == "string") {
-                        return arg;
-                    } else {
-                        status = arg.status || { };
-                        return status.phase ? status.phase : null;
-                    }
-                }
-            });
 
             function conditionDigest(arg, match) {
                 if (typeof arg == "string")
@@ -258,25 +240,6 @@
             });
 
             return {
-                nodeStatus: function nodeStatus(node) {
-                    var status = node.status || { };
-                    var conditions = status.conditions;
-                    var state = "";
-
-                    /* If no status.conditions then it hasn't even started */
-                    if (!conditions) {
-                        state = "wait";
-                    } else {
-                        conditions.forEach(function(condition) {
-                            if (condition.type == "Ready") {
-                                if (condition.status != "True")
-                                    state = "fail";
-                            }
-                        });
-                    }
-                    return state;
-                },
-
                 nodeContainers: function nodeContainers(node) {
                     var count = 0;
                     var meta = node.metadata || { };

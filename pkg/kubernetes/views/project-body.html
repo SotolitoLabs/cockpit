@@ -1,8 +1,15 @@
 <p ng-if="sharedImages(project()) == true">
-    <span translatable="yes">This project allows non-members to pull images.</span>
+    <span translatable="yes">
+        <a ng-click="modifyProject(project())">Project access policy</a> allows all authenticated users to pull images. Grant additional access to specific members below.
+    </span>
+</p>
+<p ng-if="sharedImages(project()) == false">
+    <span translatable="yes">
+        <a ng-click="modifyProject(project())">Project access policy</a> only allows specific members to access images. Grant access to specific members below.
+    </span>
 </p>
 
-<table listing-table class="listing project-body">
+<table listing-table class="listing-ct project-body">
     <thead >
         <tr >
             <th translatable="yes">Project Members</th>
@@ -10,35 +17,57 @@
             <th translatable="yes"></th>
         </tr>
     </thead>
-    <tbody colspan="3" ng-repeat="user in users()" data-id="{{ user.metadata.name }}" ng-if="subjectIsMember(user, project())">
-        <tr class="listing-item inner-project-listing">
-            <td>{{ user.metadata.name }}</td>
-            <td>
-                <div class="btn-group bootstrap-select namespace-filter" dropdown>
-                        <button class="btn btn-default dropdown-toggle" type="button" dropdown-toggle>
-                            <span class="pull-left">
-                                <span ng-if="isRoles(user, project())" translatable="yes">
-                                    {{ getRegistryRoles(user, project()).join() }}
-                                </span>
-                            </span>
-                            <span class="caret"></span>
-                        </button>
-                        <ul class="dropdown-menu">
-                            <li ng-repeat="roleMp in getRegistryRolesMap()"
-                                ng-class="{ checked: isRegistryRole(user, roleMp.displayRole, project()) }">
-                                <a ng-click="changeRole(user, roleMp, getRegistryRoles(user, project()), project())">
-                                    {{ roleMp.displayRole }}
-                                </a>
-                            </li>
-                        </ul>
-                    </div>
+    <tbody colspan="3" ng-repeat="user in users()" data-id="{{ user.metadata.name }}" ng-if="user && project() && subjectIsMember(user, project())">
+        <tr ng-if="hasRegistryRole(user.metadata.name, project())" class="listing-ct-item inner-project-listing">
+            <td ng-click="listing.activate('/users/' + user.metadata.name)">
+                <div>
+                    <i class="user-page-icons pficon pficon-user"></i>
+                    {{ user.metadata.name }}
+                </div>
             </td>
-            <td></td>
+            <td>
+                <div ng-if="!isSameUser(settings.currentUser, user)"  class="btn-group bootstrap-select namespace-filter" dropdown>
+                    <button class="btn btn-default dropdown-toggle" type="button" dropdown-toggle>
+                        <span class="pull-left">
+                            <span ng-if="isRoles(user, project())" translatable="yes">
+                                {{ getRegistryRoles(user, project()).join() }}
+                            </span>
+                        </span>
+                    <span class="caret"></span>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li ng-repeat="roleMp in getRegistryRolesMap()"
+                            ng-class="{ checked: isRegistryRole(user, roleMp.displayRole, project()) }">
+                            <a ng-click="changeRole(user, roleMp, getRegistryRoles(user, project()), project())"
+                                value="{{ roleMp.displayRole }}">
+                                {{ roleMp.displayRole }}
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div ng-if="isSameUser(settings.currentUser, user)"  class="btn-group bootstrap-select namespace-filter" dropdown disabled>
+                    <button class="btn btn-default dropdown-toggle" type="button" dropdown-toggle disabled>
+                        <span class="pull-left">
+                            <span translatable="yes">Admin</span>
+                        </span>
+                        <span class="caret"></span>
+                    </button>
+                </div>
+            </td>
+            <td><a class="pull-right close-icon">
+                    <i translatable="yes" class=" pficon-close" ng-click="removeMemberFromParent(user, project())"></i>
+                </a>
+            </td>
         </tr>
     </tbody>
-    <tbody colspan="3" ng-repeat="group in groups()" data-id="{{ group.metadata.name }}" ng-if="subjectIsMember(group, project())">
-        <tr class="listing-item inner-project-listing">
-            <td>{{ group.metadata.name }}</td>
+    <tbody colspan="3" ng-repeat="group in groups()" data-id="{{ group.metadata.name }}" ng-if="group && project() && subjectIsMember(group, project())">
+        <tr ng-if="hasRegistryRole(group.metadata.name, project())" class="listing-ct-item inner-project-listing">
+            <td ng-click="listing.activate('/groups/' + group.metadata.name)">
+                <div>
+                    <i class="user-page-icons pficon pficon-users"></i>
+                    {{ group.metadata.name }}
+                </div>
+            </td>
             <td>
                 <div class="btn-group bootstrap-select namespace-filter" dropdown>
                         <button class="btn btn-default dropdown-toggle" type="button" dropdown-toggle>
@@ -52,14 +81,18 @@
                         <ul class="dropdown-menu">
                             <li ng-repeat="roleMp in getRegistryRolesMap()"
                                 ng-class="{ checked: isRegistryRole(group, displayRole, project()) }">
-                                <a ng-click="changeRole(group, roleMp, getRegistryRoles(user, project()), project())">
+                                <a ng-click="changeRole(group, roleMp, getRegistryRoles(group, project()), project())"
+                                    value="{{ roleMp.displayRole }}">
                                     {{ roleMp.displayRole }}
                                 </a>
                             </li>
                         </ul>
                     </div>
             </td>
-            <td></td>
+            <td><a class="pull-right close-icon">
+                    <i translatable="yes" class=" pficon-close" ng-click="removeMemberFromParent(group, project())"></i>
+                </a>
+            </td>
         </tr>
     </tbody>
     <thead>

@@ -97,16 +97,18 @@ require([
     /* Listing clicks */
 
     $("body")
-        .on("click", ".listing-item, .listing-head", function(ev) {
-            /* Only proceed if a .btn a li or .timeline was not clicked on */
-            if($(ev.target).parents().addBack().filter(".btn, a, li, .timeline").length === 0)
+        .on("click", ".listing-ct-item:not(.listing-ct-head)", function(ev) {
+            /* Only proceed if a .btn a li or .timeline-ct was not clicked on */
+            if($(ev.target).parents().addBack().filter(".btn, a, li, .timeline-ct").length === 0)
+                window.alert("Navigate to details page");
+        })
+        .on("click", "tr.listing-ct-head", function(ev) {
+            /* Only proceed if a .btn a li or .timeline-ct was not clicked on */
+            if($(ev.target).parents().addBack().filter(".btn, a, li, .timeline-ct").length === 0)
                 $(this).parents("tbody").toggleClass("open");
         })
-        .on("mouseenter", ".listing-head", function(ev) {
-            $(ev.target).parents("tbody").find(".listing-head").addClass("highlight");
-        })
-        .on("mouseleave", ".listing-head", function(ev) {
-            $(ev.target).parents("tbody").find(".listing-head").removeClass("highlight");
+        .on("click", ".listing-ct-toggle", function(ev) {
+            $(this).parents("tbody").toggleClass("open");
+            ev.stopPropagation();
         });
 });
-

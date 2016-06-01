@@ -30,8 +30,8 @@ define([
     "shell/plot",
     "shell/cockpit-plot",
     "shell/cockpit-util",
-    "base1/bootstrap-datepicker",
-    "base1/bootstrap-combobox",
+    "system/bootstrap-datepicker",
+    "system/bootstrap-combobox",
     "base1/patterns",
 ], function($, cockpit, Mustache, domain, performance, controls, shell, server, service) {
 "use strict";
@@ -47,7 +47,7 @@ function update_hostname_privileged() {
         permission, ".hostname-privileged",
         cockpit.format(
             _("The user <b>$0</b> is not permitted to modify hostnames"),
-            cockpit.user.name)
+            permission.user ? permission.user.name : '')
     );
 }
 
@@ -1287,7 +1287,6 @@ PageCpuStatus.prototype = {
                             [2.0*60, "3 min"],
                             [3.0*60, "2 min"],
                             [4.0*60, "1 min"]]},
-            legend: { show: true },
             x_rh_stack_graphs: true
         };
 
@@ -1374,7 +1373,6 @@ PageMemoryStatus.prototype = {
                             [2.0*60, "3 min"],
                             [3.0*60, "2 min"],
                             [4.0*60, "1 min"]]},
-            legend: { show: true },
             x_rh_stack_graphs: true
         };
 
@@ -1534,6 +1532,6 @@ function init() {
     navigate();
 }
 
-return init;
+$(init);
 
 });

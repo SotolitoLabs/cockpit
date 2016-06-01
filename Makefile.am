@@ -51,7 +51,7 @@ CSSBUNDLE = $(srcdir)/tools/missing $(srcdir)/tools/cssbundle
 
 MIN_JS_RULE = \
 	$(AM_V_GEN) $(MKDIR_P) $(dir $@) && \
-	$(srcdir)/tools/missing $(srcdir)/tools/uglifyjs $< --mangle > $@.tmp && $(MV) $@.tmp $@
+	$(srcdir)/tools/missing $(srcdir)/tools/uglifyjs $^ --mangle > $@.tmp && $(MV) $@.tmp $@
 
 MIN_CSS_RULE = \
 	$(AM_V_GEN) $(MKDIR_P) $(dir $@) && \
@@ -244,6 +244,9 @@ endif
 install-data-local:: install-doc-local
 	@true
 
+print-%:
+	@echo $($*)
+
 # Subdirectories to distribute everything that's committed to git
 COMMITTED_DIST = \
 	bower_components/ \
@@ -255,7 +258,7 @@ COMMITTED_DIST = \
 
 # Build up the distribution using $COMMITTED_DIST and include node_modules and bower licenses
 dist-hook: dist-doc-hook
-	( git -C $(srcdir) ls-tree HEAD --name-only -r $(COMMITTED_DIST) || echo $(COMMITTED_DIST) ) | \
+	( cd $(srcdir); git ls-tree HEAD --name-only -r $(COMMITTED_DIST) || (echo $(COMMITTED_DIST) | tr ' ' '\n' ) ) | \
 		tar -C $(srcdir) -cf - -T - | tar -C $(distdir) -xf -
 	tar -C $(srcdir) -cf - --exclude='phantomjs*' --exclude='jshint*' node_modules/ | tar -C $(distdir) -xf -
 	echo $(VERSION) > $(distdir)/.tarball
@@ -325,7 +328,7 @@ include src/remotectl/Makefile-remotectl.am
 include src/reauthorize/Makefile-reauthorize.am
 include src/retest/Makefile.am
 include src/pam-ssh-add/Makefile.am
-include static/Makefile-static.am
+include src/static/Makefile-static.am
 include branding/centos/Makefile.am
 include branding/default/Makefile.am
 include branding/fedora/Makefile.am

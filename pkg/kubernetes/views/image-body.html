@@ -1,4 +1,6 @@
 <dl>
+    <dt ng-if="labels.name" translatable="yes">Name</dt>
+    <dd ng-if="labels.name">{{ labels.name }}</dd>
     <dt ng-if="labels.summary" translatable="yes">Summary</dt>
     <dd ng-if="labels.summary">{{ labels.summary }}</dd>
     <dt ng-if="labels.description" translatable="yes">Description</dt>
@@ -30,4 +32,4 @@
     <i class="fa fa-info-circle"></i>
     <span translatable="yes">To pull this image:</span>
 </p>
-<pre>$ sudo docker pull <span ng-class="{ placeholder: !settings.registry.host.explicit }">{{settings.registry.host}}</span>/{{names[0]}}</pre>
+<pre>$ sudo docker pull <span ng-class="{ placeholder: !settings.registry.host_explicit }">{{settings.registry.host}}</span>/{{names[0]}}</pre>

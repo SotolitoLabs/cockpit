@@ -2,7 +2,9 @@ PKGDIR=pkg/selinux
 
 setroubleshoot_MODULES = \
 	$(PKGDIR)/setroubleshoot.js \
+	$(PKGDIR)/selinux-client.js \
 	$(PKGDIR)/setroubleshoot-client.js \
+	$(PKGDIR)/moment.js \
 	$(NULL)
 
 setroubleshoot_TESTS = \
@@ -25,11 +27,14 @@ setroubleshootdebug_DATA = \
 	$(PKGDIR)/bundle.js \
 	$(PKGDIR)/setroubleshoot.css \
 	$(PKGDIR)/setroubleshoot.html \
-	$(PKGDIR)/setroubleshoot.js \
-	$(PKGDIR)/setroubleshoot-client.js \
 	$(PKGDIR)/setroubleshoot-view.jsx \
 	$(PKGDIR)/setroubleshoot-view.js \
+	$(setroubleshoot_MODULES) \
 	$(NULL)
+
+# moment.js can't be parsed as strictly as our own modules
+$(PKGDIR)/moment.min.js: $(PKGDIR)/moment.js
+	$(MIN_JS_RULE)
 
 setroubleshoot_MIN = \
 	$(setroubleshoot_MODULES:.js=.min.js) \

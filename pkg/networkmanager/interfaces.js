@@ -62,7 +62,7 @@ function select_btn(func, spec) {
         $('<div class="caret"></div>')
     );
 
-    var btn = $('<div class="btn-group bootstrap-select dropdown form-control">').append(
+    var btn = $('<div class="btn-group bootstrap-select dropdown">').append(
         toggle,
         $('<ul class="dropdown-menu">').append(spec.map(option_mapper))
     );
@@ -1301,7 +1301,7 @@ function update_network_privileged() {
         permission, ".network-privileged",
         cockpit.format(
             _("The user <b>$0</b> is not permitted to modify network settings"),
-            cockpit.user.name)
+            permission.user ? permission.user.name : '')
     );
 }
 
@@ -1373,9 +1373,9 @@ PageNetworking.prototype = {
         $("#networking-add-vlan").click($.proxy(this, "add_vlan"));
 
         function highlight_netdev_row(event, id) {
-            $('#networking-interfaces tr').removeClass('highlight');
+            $('#networking-interfaces tr').removeClass('highlight-ct');
             if (id) {
-                $('#networking-interfaces tr[data-interface="' + encodeURIComponent(id) + '"]').addClass('highlight');
+                $('#networking-interfaces tr[data-interface="' + encodeURIComponent(id) + '"]').addClass('highlight-ct');
             }
         }
 
@@ -1697,9 +1697,9 @@ PageNetworkInterface.prototype = {
             });
 
         function highlight_netdev_row(event, id) {
-            $('#network-interface-slaves tr').removeClass('highlight');
+            $('#network-interface-slaves tr').removeClass('highlight-ct');
             if (id) {
-                $('#network-interface-slaves tr[data-interface="' + encodeURIComponent(id) + '"]').addClass('highlight');
+                $('#network-interface-slaves tr[data-interface="' + encodeURIComponent(id) + '"]').addClass('highlight-ct');
             }
         }
 
@@ -2167,7 +2167,10 @@ PageNetworkInterface.prototype = {
                                          settings.connection.autoconnect = $(this).prop('checked');
                                          apply();
                                      }),
-                                 _("Connect automatically")))),
+                                    $('<span>').text(_("Connect automatically"))
+                                 )
+                             )
+                         ),
                      render_ip_settings_row("ipv4", _("IPv4")),
                      render_ip_settings_row("ipv6", _("IPv6")),
                      render_vlan_settings_row(),
@@ -2284,8 +2287,7 @@ PageNetworkInterface.prototype = {
                                            }
                                        }, "network-privileged")),
                                    $('<td width="28px">').append(
-                                       $('<button class="btn btn-default btn-control network-privileged">').
-                                           text("-").
+                                       $('<button class="btn btn-default btn-control-ct network-privileged fa fa-minus">').
                                            click(function () {
                                                slave_con.delete_().
                                                    fail(show_unexpected_error);
@@ -2303,10 +2305,9 @@ PageNetworkInterface.prototype = {
 
             var add_btn =
                 $('<div>', { 'class': 'dropdown' }).append(
-                    $('<button>', { 'class': 'network-privileged btn btn-default btn-control dropdown-toggle',
+                    $('<button>', { 'class': 'network-privileged btn btn-default btn-control-ct dropdown-toggle fa fa-plus',
                                     'data-toggle': 'dropdown'
-                                  }).
-                        text("+"),
+                                  }),
                     $('<ul>', { 'class': 'dropdown-menu add-button',
                                 'role': 'menu'
                               }).
@@ -2344,7 +2345,7 @@ function PageNetworkInterface(model) {
 }
 
 function switchbox(val, callback) {
-    var onoff = $('<div class="btn-onoff">').onoff();
+    var onoff = $('<div class="btn-onoff-ct">').onoff();
     onoff.onoff("value", val);
     onoff.on("change", function () {
         callback(onoff.onoff("value"));
@@ -2394,6 +2395,7 @@ PageNetworkIpSettings.prototype = {
                     self.update();
                 },
                 choices);
+            btn.addClass("col-left");
             select_btn_select(btn, params[p]);
             return btn;
         }
@@ -2455,8 +2457,7 @@ PageNetworkIpSettings.prototype = {
                         $('<strong>').text(title),
                         $('<div class="pull-right">').append(
                             header_buttons,
-                            add_btn = $('<button class="btn btn-default">').
-                                text("+").
+                            add_btn = $('<button class="btn btn-default fa fa-plus">').
                                 css("margin-left", "10px").
                                 click(add()))),
                     $('<table width="100%">').append(
@@ -2472,8 +2473,7 @@ PageNetworkIpSettings.prototype = {
                                             }));
                                 }),
                                 $('<td>').append(
-                                    $('<button class="btn btn-default">').
-                                        text(_("-")).
+                                    $('<button class="btn btn-default fa fa-minus">').
                                         click(remove(i)))));
                         })));
 
@@ -2639,7 +2639,7 @@ function slave_interface_choices(model, master) {
 }
 
 function render_slave_interface_choices(model, master) {
-    return $('<ul class="list-group available-interfaces-group dialog-list">').append(
+    return $('<ul class="list-group available-interfaces-group dialog-list-ct">').append(
         slave_interface_choices(model, master).map(function (iface) {
             return $('<li class="list-group-item">').append(
                 $('<div class="checkbox">').

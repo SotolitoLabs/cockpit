@@ -33,7 +33,7 @@ define([
     "data!shell/templates/not-supported.html",
     "data!shell/templates/sync-users.html",
     "data!shell/templates/unknown-hostkey.html",
-    'translated!base1/po',
+    'shell/po',
     "base1/patterns",
 ], function($, cockpit, mustache, machines, credentials, local_manifests,
             add_tmpl, auth_failed_tmpl, change_auth_tmpl,
@@ -43,9 +43,8 @@ define([
 
     cockpit.locale(po);
     var _ = cockpit.gettext;
-    var machines_ins;
 
-    var problems = {
+    var default_codes = {
         "no-cockpit": "not-supported",
         "not-supported": "not-supported",
         "protocol-error": "not-supported",
@@ -55,7 +54,8 @@ define([
         "unknown-hostkey": "unknown-hostkey",
         "invalid-hostkey": "invalid-hostkey",
         "not-found": "add-machine",
-        "no-host": "change-port"
+        "no-host": "change-port",
+        "sync-users": "sync-users"
     };
 
     function translate_and_init(tmpl) {
@@ -82,7 +82,7 @@ define([
         "unknown-hostkey" : translate_and_init(unknown_hosts_tmpl)
     };
 
-    function full_address(address) {
+    function full_address(machines_ins, address) {
         var machine = machines_ins.lookup(address);
         if (machine && machine.address != "localhost")
             return machine.connection_string;
@@ -90,10 +90,12 @@ define([
         return address;
     }
 
-    function Dialog(selector, address) {
+    function Dialog(selector, address, machines_ins, codes) {
         var self = this;
 
-        self.address = full_address(address);
+        self.machines_ins = machines_ins;
+        self.codes = codes;
+        self.address = full_address(self.machines_ins, address);
 
         var promise_callback = null;
 
@@ -103,8 +105,8 @@ define([
         var current_instance = null;
 
         function address_or_label() {
-            var machine = machines_ins.lookup(self.address);
-            var host = machines_ins.split_connection_string(self.address).address;
+            var machine = self.machines_ins.lookup(self.address);
+            var host = self.machines_ins.split_connection_string(self.address).address;
             if (machine && machine.label)
                 host = machine.label;
             return host;
@@ -139,6 +141,32 @@ define([
             old_instance = null;
         }
 
+        self.try_to_connect = function(address, options) {
+            var dfd = $.Deferred();
+            var conn_options = $.extend({ "payload": "echo",
+                                          "host": address },
+                                        options);
+
+            var machine = self.machines_ins.lookup(address);
+            if (machine && machine.host_key && !machine.on_disk) {
+                conn_options['temp-session'] = false;
+                conn_options['host-key'] = machine.host_key;
+            }
+            var client = cockpit.channel(conn_options);
+            client.send("x");
+            $(client)
+               .on("message", function() {
+                    $(client).off();
+                    client.close();
+                    dfd.resolve();
+                })
+                .on("close", function(event, options) {
+                    dfd.reject(options);
+                });
+
+            return dfd.promise();
+        };
+
         self.get_sel = function(child_selector) {
             var ret_txt = selector;
             if (child_selector)
@@ -165,7 +193,7 @@ define([
             if (!template)
                 template = current_template;
 
-            var address_data = machines_ins.split_connection_string(self.address);
+            var address_data = self.machines_ins.split_connection_string(self.address);
             var context = $.extend({
                 'host' : address_or_label(),
                 'full_address' : self.address,
@@ -184,7 +212,7 @@ define([
         self.render_error = function render_error(error) {
             var template;
             if (error.problem && error.command == "close")
-                template = problems[error.problem];
+                template = self.codes[error.problem];
 
             if (template && current_template !== template)
                 change_content(template, error);
@@ -240,26 +268,6 @@ define([
         };
     }
 
-    function try_to_connect(address, options) {
-        var dfd = $.Deferred();
-        var conn_options = $.extend({ "payload": "echo",
-                                      "host": address },
-                                    options);
-        var client = cockpit.channel(conn_options);
-        client.send("x");
-        $(client)
-           .on("message", function() {
-                $(client).off();
-                client.close();
-                dfd.resolve();
-            })
-            .on("close", function(event, options) {
-                dfd.reject(options);
-            });
-
-        return dfd.promise();
-    }
-
     function is_method_supported(methods, method) {
         var result = methods[method];
         return result ? result != "no-server-support" : false;
@@ -271,19 +279,8 @@ define([
         return false;
     }
 
-    function MachineColorPicker() {
+    function MachineColorPicker(machines_ins) {
         var self = this;
-        var colors = [];
-        for (var i = 0; i < machines.colors.length; i += 6) {
-            var part = machines.colors.slice(i, i+6);
-            colors.push({"list" : part});
-        }
-
-        function switch_color() {
-            /*jshint validthis: true */
-            var color = $(this).css('background-color');
-            $('#host-edit-color').css('background-color', color);
-        }
 
         self.render = function(selector, address, selected_color) {
             var machine;
@@ -297,18 +294,30 @@ define([
             if (!selected_color)
                 selected_color = machines_ins.unused_color();
 
-            var text = mustache.render(templates["color-picker"], {
-                'colors' : colors,
-                'selected_color' : selected_color
+            var part, colors = [];
+            for (var i = 0; i < machines.colors.length; i += 6) {
+                part = machines.colors.slice(i, i+6);
+                colors.push({"list" : part});
+            }
+
+            var text = mustache.render(templates["color-picker"], { 'colors' : colors, });
+            $(selector).html(text);
+
+            $("#host-edit-color", selector).css("background-color", selected_color);
+            $(".color-cell", selector).each(function(index) {
+                $(this).css("background-color", machines.colors[index]);
             });
 
-            $(selector).html(text);
-            $('#host-edit-color-popover .popover-content .color-cell').click(switch_color);
+            $('#host-edit-color-popover .popover-content .color-cell', selector)
+                .click(function() {
+                    var color = $(this).css('background-color');
+                    $('#host-edit-color', selector).css('background-color', color);
+                });
 
-            $("#host-edit-color").parent().
+            $("#host-edit-color", selector).parent().
                 on('show.bs.dropdown', function () {
-                    var $div = $('#host-edit-color');
-                    var $pop = $('#host-edit-color-popover');
+                    var $div = $('#host-edit-color', selector);
+                    var $pop = $('#host-edit-color-popover', selector);
                     var div_pos = $div.position();
                     var div_width = $div.width();
                     var div_height = $div.height();
@@ -329,11 +338,10 @@ define([
                     $pop.show();
                 }).
                 on('hide.bs.dropdown', function () {
-                    $('#host-edit-color-popover').hide();
+                    $('#host-edit-color-popover', selector).hide();
                 });
         };
     }
-    var color_picker = new MachineColorPicker();
 
     function Simple(dialog) {
         var self = this;
@@ -349,15 +357,15 @@ define([
         var selector = dialog.get_sel();
         var run_error = null;
 
-        var invisible = machines_ins.addresses.filter(function(addr) {
-            var m = machines_ins.lookup(addr);
+        var invisible = dialog.machines_ins.addresses.filter(function(addr) {
+            var m = dialog.machines_ins.lookup(addr);
             return !m || !m.visible;
         });
 
         function existing_error(address) {
             var ex = null;
-            var machine = machines_ins.lookup(address);
-            if (machine && machine.visible) {
+            var machine = dialog.machines_ins.lookup(address);
+            if (machine && machine.visible && machine.on_disk) {
                 ex = new Error(_("This machine has already been added."));
                 ex.target = "#add-machine-address";
             }
@@ -397,13 +405,13 @@ define([
         function add_machine() {
             run_error = null;
             dialog.address = $('#add-machine-address').val();
-            color = $.color.parse($('#host-edit-color').css('background-color')).toString();
+            color = machines.colors.parse($('#add-machine-color-picker #host-edit-color').css('background-color'));
             if (existing_error(dialog.address))
                 return;
 
             dialog.set_goal(function() {
                 var dfp = $.Deferred();
-                machines_ins.add(dialog.address, color)
+                dialog.machines_ins.add(dialog.address, color)
                     .done(dfp.resolve)
                     .fail(function (ex) {
                         var msg = cockpit.format(_("Failed to add machine: $0"),
@@ -414,7 +422,7 @@ define([
                 return dfp.promise();
             });
 
-            dialog.run(try_to_connect(dialog.address), function (ex) {
+            dialog.run(dialog.try_to_connect(dialog.address), function (ex) {
                 if (ex.problem == "no-host") {
                     var host_id_port = dialog.address;
                     var port_index = host_id_port.lastIndexOf(":");
@@ -434,11 +442,12 @@ define([
         self.load = function() {
             var manifest = local_manifests["shell"] || {};
             var limit = parseInt(manifest["machine-limit"], 10);
+            var color_picker = new MachineColorPicker(dialog.machines_ins);
             if (!limit || isNaN(limit))
                 limit = 20;
 
             dialog.render({
-                'nearlimit' : limit * 0.75 <= machines_ins.list.length,
+                'nearlimit' : limit * 0.75 <= dialog.machines_ins.list.length,
                 'limit' : limit,
                 'placeholder' : _("Enter IP address or host name"),
                 'options' : invisible,
@@ -465,15 +474,27 @@ define([
 
         function change_port() {
             var dfp = $.Deferred();
-            var parts = machines_ins.split_connection_string(dialog.address);
+            var parts = dialog.machines_ins.split_connection_string(dialog.address);
             parts.port = $("#edit-machine-port").val();
-            var address = machines_ins.generate_connection_string(parts.user,
+            var address = dialog.machines_ins.generate_connection_string(parts.user,
                                                                   parts.port,
                                                                   parts.address);
-            function update_host() {
+            function update_host(ex) {
                 dialog.address = address;
-                machines_ins.change(parts.address, { "port": parts.port })
-                    .done(dfp.resolve)
+                dialog.machines_ins.change(parts.address, { "port": parts.port })
+                    .done(function () {
+                        // We failed before so try to connect again
+                        // now that the machine is saved.
+                        if (ex) {
+                            dialog.try_to_connect(address)
+                                .done(dialog.complete)
+                                .fail(function (e) {
+                                    dfp.reject(e);
+                                });
+                        } else {
+                            dfp.resolve();
+                        }
+                    })
                     .fail(function (ex) {
                         var msg = cockpit.format(_("Failed to edit machine: $0"),
                                                  cockpit.message(ex));
@@ -481,20 +502,23 @@ define([
                     });
             }
 
-            try_to_connect(address)
-                .done(update_host)
+            dialog.try_to_connect(address)
+                .done(function () {
+                    update_host();
+                })
                 .fail(function (ex) {
                     /* any other error means progress, so save */
                     if (ex.problem != 'no-host')
-                        update_host();
-                    dfp.reject(ex);
+                        update_host(ex);
+                    else
+                        dfp.reject(ex);
                 });
 
             dialog.run(dfp.promise());
         }
 
         self.load = function() {
-            var machine = machines_ins.lookup(dialog.address);
+            var machine = dialog.machines_ins.lookup(dialog.address);
             if (!machine)
                 dialog.get_sel().modal('hide');
 
@@ -512,15 +536,35 @@ define([
         var allow_change = problem == "unknown-hostkey";
 
         function add_key() {
-            var dfp = $.Deferred();
-            machines_ins.add_key(key)
-                .done(function() {
-                    try_to_connect(dialog.address)
-                        .done(dfp.resolve)
-                        .fail(dfp.reject);
-                })
-                .fail(dfp.reject);
-            dialog.run(dfp.promise());
+            var q;
+            var machine = dialog.machines_ins.lookup(dialog.address);
+            if (!machine || machine.on_disk) {
+                q = dialog.machines_ins.add_key(key);
+            } else {
+                /* When machine isn't saved to disk
+                   don't save the key either */
+                q = dialog.machines_ins.change(dialog.address, {
+                    'host_key': key
+                });
+            }
+
+            var promise = q.then(function () {
+                var inner = dialog.try_to_connect(dialog.address);
+
+                inner.fail(function(ex) {
+                    if ((ex.problem == "invalid-hostkey" ||
+                        ex.problem == "unknown-hostkey") &&
+                        !machine.on_disk) {
+                            dialog.machines_ins.change(dialog.address, {
+                                'host_key': null
+                            });
+                        }
+                    });
+
+                return inner;
+            });
+
+            dialog.run(promise);
         }
 
         function render() {
@@ -540,7 +584,7 @@ define([
             });
 
             if (!key) {
-                promise = try_to_connect(dialog.address)
+                promise = dialog.try_to_connect(dialog.address)
                     .fail(function(ex) {
                         if (ex.problem != problem) {
                             dialog.render_error(ex);
@@ -574,7 +618,9 @@ define([
         var available = null;
         var supported = null;
         var keys = null;
-        var machine = machines_ins.lookup(dialog.address);
+        var machine = dialog.machines_ins.lookup(dialog.address);
+
+        self.user = null;
 
         function update_keys() {
             var loaded_keys = [];
@@ -597,10 +643,10 @@ define([
             var dfp = $.Deferred();
             var user = $("#login-custom-user").val();
 
-            var parts = machines_ins.split_connection_string(dialog.address);
+            var parts = dialog.machines_ins.split_connection_string(dialog.address);
             parts.user = user;
 
-            address = machines_ins.generate_connection_string(parts.user,
+            address = dialog.machines_ins.generate_connection_string(parts.user,
                                                               parts.port,
                                                               parts.address);
 
@@ -611,16 +657,16 @@ define([
                      * so we pass current user as an option, but make sure the
                      * session isn't private
                      */
-                    options["user"] = cockpit.user.user;
+                    options["user"] = self.user.name;
                     options["temp-session"] = false;
                 }
             }
 
-            try_to_connect(address, options)
+            dialog.try_to_connect(address, options)
                 .done(function () {
                     dialog.address = address;
                     if (machine) {
-                        machines_ins.change(machine.address, { "user" : user })
+                        dialog.machines_ins.change(machine.address, { "user" : user })
                             .done(dfp.resolve)
                             .fail(dfp.reject);
                     } else {
@@ -650,7 +696,7 @@ define([
             var available = null;
             var supported = null;
 
-            var machine_user = machines_ins.split_connection_string(dialog.address).user;
+            var machine_user = dialog.machines_ins.split_connection_string(dialog.address).user;
             if (!machine_user && machine)
                 machine_user = machine.user;
 
@@ -676,8 +722,9 @@ define([
                 'supported' : methods,
                 'available' : available,
                 'machine_user' : machine_user,
-                'user' : cockpit.user.user,
+                'user' : self.user.name,
                 'allows_password' : allows_password,
+                'can_sync': !!dialog.codes['sync-users'],
                 'machines.allow_connection_string' : machines.allow_connection_string,
                 'sync_link' : function() {
                     return function(text, render) {
@@ -687,7 +734,7 @@ define([
             }, template);
 
             if (methods === null && machines.has_auth_results) {
-                promise = try_to_connect(dialog.address)
+                promise = dialog.try_to_connect(dialog.address)
                     .fail(function(ex) {
                         error_options = ex;
                         render();
@@ -717,14 +764,24 @@ define([
 
         self.load = function(ex) {
             error_options = ex;
-            keys = credentials.keys_instance();
-            $(keys).on("changed", update_keys);
-            render();
+            if (credentials) {
+                keys = credentials.keys_instance();
+                $(keys).on("changed", update_keys);
+            }
+            cockpit.user()
+                .done(function (user) {
+                    self.user = user;
+                })
+                .always(function (user) {
+                    render();
+                });
         };
 
         self.close = function(ex) {
-            $(keys).off();
-            keys.close();
+            if (keys) {
+                $(keys).off();
+                keys.close();
+            }
             keys = null;
         };
     }
@@ -907,7 +964,7 @@ define([
                 methods = error_options['auth-method-results'];
 
             render();
-            try_to_connect(dialog.address, remote_options).fail(function(ex) {
+            dialog.try_to_connect(dialog.address, remote_options).fail(function(ex) {
                 needs_auth = true;
                 if (ex.problem == "access-denied") {
                     needs_root = true;
@@ -917,7 +974,7 @@ define([
                          * closes. Passing an invalid username should
                          * open new transport that fails.
                          */
-                        try_to_connect(dialog.address, { "user" : "1" })
+                        dialog.try_to_connect(dialog.address, { "user" : "1" })
                             .fail(function(ex) {
                                 methods = ex['auth-method-results'];
                             })
@@ -931,38 +988,47 @@ define([
         };
     }
 
-    return {
-        setup_machines: function (instance) {
-            machines_ins = instance;
-        },
+    function MachineDialogManager(machines_ins, codes) {
+        var self = this;
 
-        troubleshoot: function (target_id, machine) {
+        if (!codes)
+            codes = default_codes;
+
+        var color_picker = new MachineColorPicker(machines_ins);
+
+        self.troubleshoot = function(target_id, machine) {
             var selector = "#" + target_id;
             if (!machine || !machine.problem)
                 return;
 
-            var template = problems[machine.problem];
-            var dialog = new Dialog(selector, machine.address);
+            var template = codes[machine.problem];
+            var dialog = new Dialog(selector, machine.address, machines_ins, codes);
             dialog.render_template(template);
             dialog.show();
-        },
+        };
 
-        needs_troubleshoot: function (machine) {
+        self.needs_troubleshoot = function (machine) {
             if (!machine || !machine.problem)
                 return false;
 
-            return problems[machine.problem] ? true : false;
-        },
+            return codes[machine.problem] ? true : false;
+        };
 
-        render_dialog: function (template, target_id, address) {
+        self.render_dialog = function (template, target_id, address) {
             var selector = "#" + target_id;
-            var dialog = new Dialog(selector, address);
+            var dialog = new Dialog(selector, address, machines_ins, codes);
             dialog.render_template(template);
             dialog.show();
-        },
+        };
 
-        render_color_picker: function (selector, address) {
+        self.render_color_picker = function (selector, address) {
             color_picker.render(selector, address);
-        },
+        };
+    }
+
+    return {
+        new_manager: function (machines_ins, codes) {
+            return new MachineDialogManager(machines_ins, codes);
+        }
     };
 });

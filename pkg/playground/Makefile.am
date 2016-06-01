@@ -10,6 +10,10 @@ playground_DATA = \
 	pkg/playground/patterns.html \
 	pkg/playground/patterns.js \
 	pkg/playground/patterns.min.html \
+	pkg/playground/react-patterns.html \
+	pkg/playground/react-patterns.js \
+	pkg/playground/react-demo-dialog.js \
+	pkg/playground/react-demo-listing.js \
 	pkg/playground/service.html \
 	pkg/playground/service.min.html \
 	pkg/playground/service.js \
@@ -18,12 +22,15 @@ playground_DATA = \
 	pkg/playground/manifest.json \
 	pkg/playground/hammer.gif \
 	pkg/playground/po.de.js \
-	pkg/playground/po.en.js \
+	pkg/playground/po.js \
 	$(NULL)
 
 playground_NOINST = \
 	pkg/playground/test.min.js \
 	pkg/playground/patterns.min.js \
+	pkg/playground/react-patterns.min.js \
+	pkg/playground/react-demo-dialog.min.js \
+	pkg/playground/react-demo-listing.min.js \
 	pkg/playground/service.min.js \
 	$(NULL)
 
@@ -34,11 +41,15 @@ CLEANFILES += \
 	pkg/playground/test.min.js \
 	pkg/playground/speed.min.html \
 	pkg/playground/metrics.min.html \
+	pkg/playground/patterns.min.html \
 	pkg/playground/patterns.min.js \
 	pkg/playground/plot.min.html \
+	pkg/playground/react-patterns.min.html \
+	pkg/playground/react-patterns.min.js \
+	pkg/playground/react-demo-dialog.min.js \
+	pkg/playground/react-demo-listing.min.js \
 	pkg/playground/service.min.html \
 	pkg/playground/service.min.js \
-	pkg/playground/patterns.min.html \
 	$(NULL)
 
 EXTRA_DIST += \

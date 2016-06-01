@@ -30,39 +30,17 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
 
 <body>
     <script id="subscription-notification-success-template" type="x-template/mustache">
-      <div class="container-fluid alert alert-success alert-dismissible" role="alert">
-        <span class="pficon pficon-ok"></span>
-        <span class="subscriptions-emphasize" translatable="yes">
-          System successfully subscribed.
-        </span>
-        <span translatable="yes">
-          You will now receive software updates.
-        </span>
-        <button type="button" class="close" data-dismiss="alert">
-          <span class="pficon pficon-close"></span>
-        </button>
-      </div>
+        <div class="container-fluid alert alert-success alert-dismissable">
+            <span class="pficon pficon-ok"></span>
+            <strong translatable="yes">System successfully subscribed.</strong>
+            <span translatable="yes">You will now receive software updates.</span>
+            <button type="button" class="close" data-dismiss="alert" aria-hidden="true">
+                <span class="pficon pficon-close"></span>
+            </button>
+        </div>
     </script>
 
-    <script id="subscription-notification-failure-template" type="x-template/mustache">
-      <div class="container-fluid alert alert-danger alert-dismissible" role="alert">
-        <span class="pficon-layered">
-          <span class="pficon pficon-error-octagon"></span>
-          <span class="pficon pficon-error-exclamation"></span>
-        </span>
-        <span class="subscriptions-emphasize">
-          {{message}}
-        </span>
-        <span>
-          {{message_detail}}
-        </span>
-        <button type="button" class="close" data-dismiss="alert">
-          <span class="pficon pficon-close"/>
-        </button>
-      </div>
-    </script>
-
-    <div id="subscription-manager-not-found" class="container-fluid page" hidden>
+    <div id="subscription-manager-not-found" class="container-fluid page-ct" hidden>
       <br/>
       <span class="subscriptions-block-center" translatable="yes">
         In order to manage this system's subscriptions, please verify subscription-manager is installed.
@@ -96,13 +74,13 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
       </button>
     </div>
 
-    <div id="subscriptions-system-status" class="container-fluid page" hidden>
+    <div id="subscriptions-system-status" class="container-fluid page-ct" hidden>
       <div class="panel panel-default">
         <div class="panel-heading">
           <span translatable="yes">Installed Products</span>
         </div>
         <div class="panel-body">
-          <table class="cockpit-form-table">
+          <table class="form-table-ct">
             <tbody>
               <tr>
                 <td></td>
@@ -121,7 +99,7 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
             <h4 class="modal-title" translatable="yes">Register system</h4>
           </div>
           <div class="modal-body">
-            <table class="cockpit-form-table">
+            <table class="form-table-ct">
               <tr>
                 <td class="top">
                   <label class="control-label top" for="subscription-register-url" translatable="yes">
@@ -141,7 +119,6 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
                     </div>
                     <input id="subscription-register-url-custom" class="form-control" type="text"
                            value="subscription.rhn.redhat.com" hidden>
-                  </div>
                 </td>
               </tr>
               <tr>
@@ -185,7 +162,7 @@ along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
           <span translatable="yes">Installed Product ({{product_name}})</span>
         </div>
         <div class="panel-body">
-          <table class="cockpit-form-table">
+          <table class="form-table-ct">
             <tbody>
               <tr><td translatable="yes">Product name</td><td><span>{{product_name}}</span></td></tr>
               <tr><td translatable="yes">Product ID</td><td><span>{{product_id}}</span></td></tr>

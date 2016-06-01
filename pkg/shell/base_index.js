@@ -605,8 +605,12 @@ define([
             return current_frame;
         };
 
-        self.start = function (messages) {
-            self.router.start(messages);
+        self.start = function() {
+            /* window.messages is initialized in shell/bundle.js */
+            var messages = window.messages;
+            if (messages)
+                messages.cancel();
+            self.router.start(messages || []);
         };
 
         self.ready = function () {
@@ -681,15 +685,19 @@ define([
              */
             var manifest = local_manifests["shell"] || { };
             $(".display-language-menu").toggle(!!manifest.linguas);
+            var language = document.cookie.replace(/(?:(?:^|.*;\s*)CockpitLang\s*\=\s*([^;]*).*$)|^.*$/, "$1");
             $.each(manifest.linguas || { }, function(code, name) {
                 var el = $("<option>").text(name).val(code);
-                if (code == cockpit.language)
+                if (code == language)
                     el.attr("selected", "true");
                 $("#display-language-list").append(el);
             });
 
             $("#display-language-select-button").on("click", function(event) {
                 var code_to_select = $("#display-language-list").val();
+                var cookie = "CockpitLang=" + encodeURIComponent(code_to_select) +
+                             "; path=/; expires=Sun, 16 Jul 3567 06:23:41 GMT";
+                document.cookie = cookie;
                 window.localStorage.setItem("cockpit.lang", code_to_select);
                 window.location.reload(true);
                 return false;
@@ -710,27 +718,19 @@ define([
         }
 
         /* Account link */
-        function setup_account(id) {
+        function setup_account(id, user) {
             $(id).on("click", function() {
-                self.jump({ host: "localhost", component: "users", hash: "/" + cockpit.user["user"] });
+                self.jump({ host: "localhost", component: "users", hash: "/" + user.name });
             });
         }
 
         /* User information */
-        function setup_user(id) {
-            function update_user(first) {
-                var str = cockpit.user["name"] || cockpit.user["user"];
-                if (!str)
-                    str = first ? "" : "???";
-                $(id).text(str);
+        function setup_user(id, user) {
+            $(id).text(user.full_name || user.name || '???');
 
-                var is_root = (cockpit.user["user"] == "root");
-                var is_not_root = (cockpit.user["user"] && !is_root);
-                $('#deauthorize-item').toggle(is_not_root);
-            }
-
-            $(cockpit.user).on("changed", update_user);
-            update_user(true);
+            var is_root = (user.name == "root");
+            var is_not_root = (user.name && !is_root);
+            $('#deauthorize-item').toggle(is_not_root);
         }
 
         if (self.oops_sel)
@@ -748,12 +748,14 @@ define([
         if (self.about_sel)
             setup_about(self.about_sel);
 
-        if (self.user_sel)
-            setup_user(self.user_sel);
-
-        if (self.account_sel)
-            setup_account(self.account_sel);
-
+        if (self.user_sel || self.account_sel) {
+            cockpit.user().done(function (user) {
+                if (self.user_sel)
+                    setup_user(self.user_sel, user);
+                if (self.account_sel)
+                    setup_account(self.account_sel, user);
+            });
+        }
     }
 
     function CompiledComponants() {
@@ -801,6 +803,27 @@ define([
             }
         };
     }
+
+    function follow(arg) {
+        /* A promise of some sort */
+        if (arguments.length == 1 && typeof arg.then == "function") {
+            arg.then(function() { console.log.apply(console, arguments); },
+                     function() { console.error.apply(console, arguments); });
+            if (typeof arg.stream == "function")
+                arg.stream(function() { console.log.apply(console,arguments); });
+        }
+    }
+
+    var zz_value;
+
+    /* For debugging utility in the index window */
+    Object.defineProperties(window, {
+        cockpit: { value: cockpit },
+        zz: {
+            get: function() { return zz_value; },
+            set: function(val) { zz_value = val; follow(val); }
+        }
+    });
 
     return {
         new_index_from_proto: function (proto) {

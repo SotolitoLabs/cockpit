@@ -17,14 +17,25 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
+/* globals d3 */
+
+/* This is here to support cockpit.jump
+ * If this ever needs to be used outsite of cockpit
+ * then we'll need abstract this away in kube-client-cockpit
+ */
+/* globals cockpit */
+
 (function() {
     "use strict";
 
     angular.module('kubernetes.nodes', [
         'ngRoute',
         'kubeClient',
+        'kubernetes.date',
         'kubernetes.listing',
+        'kubeUtils',
         'ui.cockpit',
+        'ui.charts',
     ])
 
     .config([
@@ -55,35 +66,48 @@
         '$routeParams',
         '$location',
         'nodeActions',
+        'nodeData',
+        'nodeStatsSummary',
         '$timeout',
+        '$window',
         function($scope, loader, select,  ListingState, filterService,
-                 $routeParams, $location, actions, $timeout) {
+                 $routeParams, $location, actions, nodeData, statsSummary,
+                 $timeout, $window) {
             var target = $routeParams["target"] || "";
             $scope.target = target;
 
+            $scope.stats = statsSummary.newNodeStatsSummary();
+
             var c = loader.listen(function() {
-                var timer;
+                var timer, selection;
                 $scope.nodes = select().kind("Node");
-                if (target)
-                    $scope.item = select().kind("Node").name(target).one();
+                if (target) {
+                    selection = select().kind("Node").name(target);
+                    $scope.item = selection.one();
+                } else {
+                    selection = $scope.nodes;
+                }
+                $scope.stats.trackNodes(selection);
             });
 
             loader.watch("Node");
 
             $scope.$on("$destroy", function() {
                 c.cancel();
+                if ($scope.stats)
+                    $scope.stats.close();
+                $scope.stats = null;
             });
 
             $scope.listing = new ListingState($scope);
 
             /* All the actions available on the $scope */
             angular.extend($scope, actions);
+            angular.extend($scope, nodeData);
 
             $scope.$on("activate", function(ev, id) {
-                if (!$scope.listing.expandable) {
-                    ev.preventDefault();
-                    $location.path('/nodes/' + encodeURIComponent(id));
-                }
+                $location.path('/nodes/' + encodeURIComponent(id));
+                $scope.$applyAsync();
             });
 
             $scope.nodePods = function node_pods(item) {
@@ -91,17 +115,54 @@
                 return select().kind("Pod").host(meta.name);
             };
 
-            $scope.nodeReadyCondition = function node_read_condition(conditions) {
-                var ret = {};
-                if (conditions) {
-                    conditions.forEach(function(condition) {
-                        if (condition.type == "Ready") {
-                            ret = condition;
-                            return false;
-                        }
-                    });
+            $scope.deleteSelectedNodes = function() {
+                var k, selected = [];
+                for (k in $scope.listing.selected) {
+                    if ($scope.nodes[k] && $scope.listing.selected[k])
+                        selected.push($scope.nodes[k]);
                 }
-                return ret;
+
+                if (!selected.length)
+                    return;
+
+                return actions.deleteNodes(selected).then(function() {
+                    $scope.listing.selected = {};
+                });
+            };
+
+            /* Redirect after a delete */
+            $scope.deleteNode = function(val) {
+                var promise = actions.deleteNodes(val);
+
+                /* If the promise is successful, redirect to another page */
+                promise.then(function() {
+                    if ($scope.target)
+                        $location.path("/nodes");
+                });
+
+                return promise;
+            };
+
+            $scope.jump = function (node) {
+                var host, key, ip;
+                if (!node || !node.spec)
+                    return;
+
+                host = node.spec.externalID;
+                ip = nodeData.nodeExternalIP(node);
+
+                if (ip == "127.0.0.1" || ip == "::1") {
+                    ip = "localhost";
+                } else {
+                    $window.sessionStorage.setItem(
+                        "v1-session-machine/" + ip,
+                        JSON.stringify({"address": ip,
+                                        "label": host,
+                                        visible: true })
+                    );
+                }
+
+                cockpit.jump("/", ip);
             };
         }
     ])
@@ -110,7 +171,7 @@
         function() {
             return {
                 restrict: 'A',
-                templateUrl: 'views/node-body.html'
+                templateUrl: 'views/node-body.html',
             };
         }
     )
@@ -120,6 +181,15 @@
             return {
                 restrict: 'A',
                 templateUrl: 'views/node-capacity.html',
+            };
+        }
+    )
+
+    .directive('nodeStats',
+        function() {
+            return {
+                restrict: 'A',
+                templateUrl: 'views/node-stats.html',
             };
         }
     )
@@ -136,8 +206,146 @@
                 }).result;
             }
 
+            function deleteNodes(val) {
+                var nodes;
+                if (angular.isArray(val))
+                    nodes = val;
+                else
+                    nodes = [ val ];
+
+                return $modal.open({
+                    animation: false,
+                    controller: 'NodeDeleteCtrl',
+                    templateUrl: 'views/node-delete.html',
+                    resolve: {
+                        dialogData: function() {
+                            return { nodes: nodes };
+                        }
+                    },
+                }).result;
+            }
+
             return {
-                addNode: addNode
+                addNode: addNode,
+                deleteNodes: deleteNodes
+            };
+        }
+    ])
+
+    .controller("NodeDeleteCtrl", [
+        "$q",
+        "$scope",
+        "$modalInstance",
+        "dialogData",
+        "kubeMethods",
+        "kubeSelect",
+        function($q, $scope, $instance, dialogData, methods, select) {
+
+            angular.extend($scope, dialogData);
+
+            $scope.performDelete = function performDelete() {
+                var k;
+                var errors = [];
+                var nodes = {};
+                var promises = [];
+
+                function handleError(ex) {
+                    errors.push(ex.message || ex.statusText);
+                    nodes[k] = $scope.nodes[k];
+                    return $q.reject();
+                }
+
+                for (k in $scope.nodes) {
+                    var p = methods.delete($scope.nodes[k])
+                        .catch(handleError);
+                    promises.push(p);
+                }
+
+                return $q.all(promises).catch(function () {
+                    $scope.nodes = select(nodes);
+                    return $q.reject(errors);
+                });
+            };
+        }
+    ])
+
+    .factory('nodeData', [
+        "KubeMapNamedArray",
+        "KubeTranslate",
+        function (mapNamedArray, translate) {
+            var _ = translate.gettext;
+
+            function nodeConditions(node) {
+                var status;
+                if (!node)
+                    return;
+
+                if (!node.conditions) {
+                    status = node.status || { };
+                    node.conditions = mapNamedArray(status.conditions, "type");
+                }
+                return node.conditions;
+            }
+
+            function nodeCondition(node, type) {
+                var conditions = nodeConditions(node) || {};
+                return conditions[type] || {};
+            }
+
+            function nodeStatus(node) {
+                var spec = node ? node.spec : {};
+                if (!nodeCondition(node, "Ready").status)
+                    return _("Unknown");
+
+                if (nodeCondition(node, "Ready").status != 'True')
+                    return _("Not Ready");
+
+                if (spec && spec.unschedulable)
+                    return _("Scheduling Disabled");
+
+                return _("Ready");
+            }
+
+            function nodeStatusIcon(node) {
+                var state = "";
+                /* If no status.conditions then it hasn't even started */
+                if (!nodeCondition(node, "Ready").status) {
+                    state = "wait";
+                } else {
+                    if (nodeCondition(node, "Ready").status != 'True') {
+                        state = "fail";
+                    } else if (nodeCondition(node, "OutOfDisk").status == "True" ||
+                             nodeCondition(node, "OutOfMemory").status == "True") {
+                        state = "warn";
+                    }
+                }
+                return state;
+            }
+
+            function nodeExternalIP(node) {
+                if (!node || !node.status)
+                    return;
+
+                var addresses = node.status.addresses;
+                var address;
+                /* If no addresses then it hasn't even started */
+                if (addresses) {
+                    addresses.forEach(function(a) {
+                        if (a.type == "LegacyHostIP" || address.type == "ExternalIP") {
+                            address = a.address;
+                            return false;
+                        }
+                    });
+                }
+                return address;
+            }
+
+            return {
+                nodeStatusIcon: nodeStatusIcon,
+                nodeCondition: nodeCondition,
+                nodeConditions: nodeConditions,
+                nodeStatus: nodeStatus,
+                nodeExternalIP: nodeExternalIP
             };
         }
     ])
@@ -223,44 +431,433 @@
         }
     ])
 
-    .filter('nodeStatus', [
-        "KubeTranslate",
-        function(KubeTranslate) {
-            return function(conditions) {
-                var ready = false;
-                var _ = KubeTranslate.gettext;
+    .directive('kubernetesStatusIcon', function() {
+        return {
+            restrict: 'A',
+            link: function($scope, element, attributes) {
+                $scope.$watch(attributes["status"], function(status) {
+                    element
+                        .toggleClass("spinner spinner-xs", status == "wait")
+                        .toggleClass("pficon pficon-error-circle-o", status == "fail")
+                        .toggleClass("pficon pficon-warning-triangle-o", status == "warn");
+                });
+            }
+        };
+    })
 
-                /* If no status.conditions then it hasn't even started */
-                if (conditions) {
-                    conditions.forEach(function(condition) {
-                        if (condition.type == "Ready") {
-                            ready = condition.status == "True";
-                            return false;
+    .directive('nodeAlerts', function() {
+        return {
+            restrict: 'A',
+            templateUrl: 'views/node-alerts.html'
+        };
+    })
+
+    .factory('nodeStatsSummary', [
+        "$q",
+        "$interval",
+        "$exceptionHandler",
+        "KubeRequest",
+        "nodeData",
+        "KubeStringToBytes",
+        "KubeFormat",
+        function ($q, $interval, $exceptionHandler, KubeRequest, nodeData,
+                  kubeStringToBytes, format) {
+            function NodeStatsSummary() {
+                var self = this;
+
+                var requests = {};
+                var statData = {};
+                var callbacks = [];
+                var interval;
+
+                function request(name) {
+                    if (requests[name])
+                        return $q.when([]);
+
+                    var path = "/api/v1/nodes/" + encodeURIComponent(name) + "/proxy/stats/summary/";
+                    var req = KubeRequest("GET", path);
+                    requests[name] = req;
+
+                    return req.then(function(data) {
+                            delete requests[name];
+                            statData[name] = data.data;
+                        })
+                        .catch(function(ex) {
+                            delete requests[name];
+                            delete statData[name];
+                            if (ex.status != 503)
+                                console.warn(ex);
+                        });
+                }
+
+                function invokeCallbacks(/* ... */) {
+                    var i, len, func;
+                    for (i = 0, len = callbacks.length; i < len; i++) {
+                        func = callbacks[i];
+                        try {
+                            if (func)
+                                func.apply(self, arguments);
+                        } catch (e) {
+                            $exceptionHandler(e);
+                        }
+                    }
+                }
+
+                function fetchForNames(names) {
+                    var q = [];
+                    angular.forEach(names, function(name) {
+                        q.push(request(name));
+                    });
+
+                    $q.all(q).then(invokeCallbacks, invokeCallbacks);
+                }
+
+                interval = $interval(function () {
+                    fetchForNames(Object.keys(statData));
+                }, 5000);
+
+                self.watch = function watch(callback) {
+                    callbacks.push(callback);
+
+                    return {
+                        cancel: function() {
+                            var i, len;
+                            for (i = 0, len = callbacks.length; i < len; i++) {
+                                if (callbacks[i] === callback)
+                                    callbacks[i] = null;
+                            }
+                        }
+                    };
+                };
+
+                self.close = function close() {
+                    var name, body;
+                    if (interval)
+                        $interval.cancel(interval);
+
+                    for (name in requests) {
+                        var req = requests[name];
+                        if (req && req.cancel)
+                            req.cancel();
+                    }
+                };
+
+                self.trackNodes = function trackNodes(selection) {
+                    var names = [];
+                    angular.forEach(selection, function(node) {
+                        var ready = nodeData.nodeCondition(node, "Ready");
+                        var meta = node ? node.metadata : {};
+                        var name = meta ? meta.name : "";
+
+                        if (ready && ready.status === 'True') {
+                            if (!statData[name])
+                                names.push(name);
+                        } else {
+                            // Unfortunally i'm seen some requests
+                            // not error so clean them out.
+                            delete statData[name];
+                            if (request[name]) {
+                                request[name].cancel();
+                                delete request[name];
+                            }
                         }
                     });
-                }
-                return ready ? _("Ready") : _("Not Ready");
+                    fetchForNames(names);
+                };
+
+                self.getSimpleUsage = function getSimpleUsage(node, section) {
+                    var meta =  node ? node.metadata : {};
+                    var status = node ? node.status : {};
+                    var name = meta ? meta.name : "";
+
+                    var nodeData = statData[name] ? statData[name].node : {};
+                    var result = nodeData[section];
+
+                    if (!result)
+                        return;
+
+                    var allocatable = status ? status.allocatable : {};
+                    if (!allocatable)
+                        return;
+
+                    switch(section) {
+                        case "cpu":
+                            if (!allocatable.cpu)
+                                return;
+                            return {
+                                used: result.usageNanoCores,
+                                total: allocatable.cpu * 1000000000
+                            };
+                        case "memory":
+                            if (!allocatable.memory)
+                                return;
+                            return {
+                                used: result.usageBytes,
+                                total: kubeStringToBytes(allocatable.memory)
+                            };
+                        case "fs":
+                            return {
+                                used: result.usedBytes,
+                                total: result.capacityBytes
+                            };
+                        default:
+                            return;
+                    }
+                };
+            }
+
+            return {
+                newNodeStatsSummary: function(interval) {
+                    return new NodeStatsSummary(interval);
+                },
             };
         }
     ])
 
-    .filter('nodeExternalIP', [
+    .directive('nodeOsGraph', [
         "KubeTranslate",
-        function(KubeTranslate) {
-            return function(addresses) {
-                var address = null;
-                var _ = KubeTranslate.gettext;
+        function(translate) {
+            var _ = translate.gettext;
 
-                /* If no status.conditions then it hasn't even started */
-                if (addresses) {
-                    addresses.forEach(function(a) {
-                        if (a.type == "LegacyHostIP" || address.type == "ExternalIP") {
-                            address = a.address;
-                            return false;
-                        }
+            return {
+                scope: {
+                    'nodes' : '='
+                },
+                template: '<div class="col-xs-12 col-md-6" id="os-counts-graph" donut-pct-chart data="data" bar-size="8" legend="os-counts-legend" large-title="largeTitle"></div><div class="col-xs-12 col-md-6 legend-col"><div id="os-counts-legend"></div></div>',
+                restrict: 'A',
+                link: function($scope, element, attributes) {
+                    $scope.data = [];
+                    $scope.largeTitle = 0;
+
+                    function refresh(items) {
+                        items = items || [];
+                        var data = {};
+                        angular.forEach(items, function(node) {
+                            var os;
+                            var color;
+                            if (node.status && node.status.nodeInfo)
+                                os = node.status.nodeInfo.osImage;
+
+                            if (!os) {
+                                os = _("Unknown");
+                                color = "#bbbbbb";
+                            }
+
+                            if (data[os])
+                                data[os].value++;
+                            else
+                                data[os] = { value: 1, label: os, color: color };
+                        });
+
+                        var arr = Object.keys(data).map(function(k) {
+                            return data[k];
+                        });
+
+                        arr.sort(function (a, b) {
+                            if (a.label < b.label)
+                                return -1;
+                            if (a.label > b.label)
+                                return 1;
+                            return 0;
+                        });
+
+                        $scope.data = arr;
+                        $scope.largeTitle = items.length;
+                    }
+
+                    $scope.$watchCollection('nodes', function(nodes) {
+                        refresh(nodes);
                     });
                 }
-                return address ? address : _("Unknown");
+            };
+        }
+    ])
+
+    .directive('nodeHeatMap', [
+        "KubeTranslate",
+        "KubeFormat",
+        function(translate, format) {
+            var _ = translate.gettext;
+            return {
+                restrict: 'A',
+                scope: {
+                    'nodes' : '=',
+                    'stats' : '='
+                },
+                template: '<div class="card-pf-title"><ul class="nav nav-tabs nav-tabs-pf"></ul></div><div threshold-heat-map class="card-pf-body node-heatmap" data="data" clickAction="clickAction()" legend="nodes-heatmap-legend"></div><div id="nodes-heatmap-legend"></div></div>',
+                link: function($scope, element, attributes) {
+                    var outer = d3.select(element[0]);
+                    var currentTab;
+                    var tabs = {
+                        cpu: {
+                            label: _("CPU"),
+                        },
+                        memory: {
+                            label: _("Memory"),
+                        },
+                        fs: {
+                            label: _("Disk"),
+                        }
+                    };
+
+                    outer.select("ul.nav-tabs")
+                        .selectAll("li")
+                            .data(Object.keys(tabs))
+                          .enter().append("li")
+                            .attr("data-metric", function(d) { return d; })
+                          .append("a")
+                            .text(function(d) { return tabs[d].label; });
+
+                    function changeTab(tab) {
+                        currentTab = tab;
+                        outer.selectAll("ul.nav-tabs li")
+                            .attr("class", function(d) { return tab === d ? "active": null; });
+                        refreshData();
+                    }
+
+                    outer.selectAll("ul.nav-tabs li")
+                        .on("click", function() {
+                            changeTab(d3.select(this).attr("data-metric"));
+                        });
+
+                    function refreshData() {
+                        var nodes = $scope.nodes;
+                        var data = [];
+
+                        if (!nodes)
+                            nodes = [];
+
+                        angular.forEach(nodes, function(node) {
+                            var result, value, name;
+
+                            if (node && node.metadata)
+                                name = node.metadata.name;
+
+                            if (!name)
+                                return;
+
+                            result = $scope.stats.getSimpleUsage(node, currentTab);
+                            if (result)
+                                value = result.used / result.total;
+
+                            if (value === undefined)
+                                value = -1;
+
+                            data.push({ value: value, name: name });
+                        });
+
+                        data.sort(function (a, b) {
+                            return b.value - a.value;
+                        });
+
+                        $scope.$applyAsync(function() {
+                            $scope.data = data;
+                        });
+                        return true;
+                    }
+
+                    $scope.$on("boxClick", function (ev, name) {
+                       $scope.$emit("activate", name);
+                    });
+
+                    var sw = $scope.stats.watch(refreshData);
+                    $scope.$on("$destroy", function() {
+                        sw.cancel();
+                    });
+
+                    changeTab("cpu");
+                }
+            };
+        }
+    ])
+
+    .directive('nodeUsageDonutChart', [
+        "KubeTranslate",
+        "KubeFormat",
+        function(translate, format) {
+            var _ = translate.gettext;
+            return {
+                restrict: 'A',
+                scope: {
+                    'node' : '=',
+                    'stats' : '=',
+                },
+                template: '<div ng-if="data" donut-pct-chart data="data" bar-size="8" large-title="largeTitle" small-title="smallTitle"></div><div class="text-center" ng-if="data">{{ title }}</div>',
+                link: function($scope, element, attributes) {
+                    var colorFunc = d3.scale.threshold()
+                        .domain([0.7, 0.8, 0.9])
+                        .range(['#d4f0fa', '#F9D67A', '#EC7A08', '#CE0000' ]);
+
+                    var types = {
+                        cpu: {
+                            label: _("CPU"),
+                            smallTitle: function () {},
+                            largeTitle: function (result) {
+                                var r = result.used / result.total;
+                                var p = Math.round(r * 100);
+                                return format.format("$0%", p);
+                            },
+                        },
+                        memory: {
+                            label: _("Memory"),
+                            smallTitle: function (result) {
+                                return _("Used");
+                            },
+                            largeTitle: function (result) {
+                                return format.formatBytes(result.used);
+                            },
+                        },
+                        fs: {
+                            label: _("Disk"),
+                            smallTitle: function (result) {
+                                return _("Used");
+                            },
+                            largeTitle: function (result) {
+                                return format.formatBytes(result.used);
+                            },
+                        }
+                    };
+
+                    var type = attributes['type'];
+                    $scope.title = types[type].label;
+
+                    function clear() {
+                        $scope.$applyAsync(function() {
+                            $scope.data = null;
+                            $scope.smallTitle = null;
+                            $scope.largeTitle = null;
+                        });
+                    }
+
+                    function refreshData() {
+                        var node = $scope.node;
+                        var result;
+
+                        if (!node)
+                            return clear();
+
+                        result = $scope.stats.getSimpleUsage(node, type);
+                        if (result) {
+                            $scope.$applyAsync(function() {
+                                $scope.smallTitle = types[type].smallTitle(result);
+                                $scope.largeTitle = types[type].largeTitle(result);
+                                $scope.data = [
+                                    { value: result.total - result.used, color: "#bbbbbb" },
+                                    { value: result.used,
+                                      color: colorFunc(result.used / result.total) }
+                                ];
+                            });
+                        } else {
+                            clear();
+                        }
+                        return true;
+                    }
+
+                    var sw = $scope.stats.watch(refreshData);
+                    $scope.$on("$destroy", function() {
+                        sw.cancel();
+                    });
+                }
             };
         }
     ]);

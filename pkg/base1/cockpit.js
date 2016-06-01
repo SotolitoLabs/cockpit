@@ -1034,6 +1034,31 @@ function basic_scope(cockpit, jquery) {
         uri: calculate_url,
     };
 
+    /* ------------------------------------------------------------------------------------
+     * An ordered queue of functions that should be called later.
+     */
+
+    var later_queue = [];
+    var later_timeout = null;
+
+    function later_drain() {
+        var func, queue = later_queue;
+        later_timeout = null;
+        later_queue = [];
+        for (;;) {
+            func = queue.shift();
+            if (!func)
+                break;
+            func();
+        }
+    }
+
+    function later_invoke(func) {
+        if (func)
+            later_queue.push(func);
+        if (later_timeout === null)
+            later_timeout = window.setTimeout(later_drain, 0);
+    }
 
     /* ------------------------------------------------------------------------------------
      * Promises.
@@ -1146,9 +1171,7 @@ function basic_scope(cockpit, jquery) {
         if (state.process_scheduled || !state.pending)
             return;
         state.process_scheduled = true;
-        window.setTimeout(function() {
-            process_queue(state);
-        }, 0);
+        later_invoke(function() { process_queue(state); });
     }
 
     function deferred_resolve(state, values) {
@@ -1186,7 +1209,7 @@ function basic_scope(cockpit, jquery) {
     function deferred_notify(state, values) {
         var callbacks = state.pending;
         if ((state.status <= 0) && callbacks && callbacks.length) {
-            window.setTimeout(function() {
+            later_invoke(function() {
                 var callback, result;
                 for (var i = 0, ii = callbacks.length; i < ii; i++) {
                     result = callbacks[i][0];
@@ -1196,7 +1219,7 @@ function basic_scope(cockpit, jquery) {
                     else
                         result.notify.apply(result, values);
                 }
-            }, 0);
+            });
         }
     }
 
@@ -1280,6 +1303,14 @@ function basic_scope(cockpit, jquery) {
         return deferred.promise;
     };
 
+    cockpit.resolve = function resolve(result) {
+        return cockpit.defer().resolve(result).promise;
+    };
+
+    cockpit.reject = function reject(ex) {
+        return cockpit.defer().reject(ex).promise;
+    };
+
     cockpit.defer = function() {
         return new Deferred();
     };
@@ -1305,7 +1336,9 @@ function basic_scope(cockpit, jquery) {
         /* TODO: Make the decimal separator translatable */
 
         /* only show as integer if we have a natural number */
-        if (number % 1 === 0)
+        if (!number && number !== 0)
+            return "";
+        else if (number % 1 === 0)
             return number.toString();
         else
             return number.toFixed(1);
@@ -1314,16 +1347,22 @@ function basic_scope(cockpit, jquery) {
     function format_units(number, suffixes, factor, separate) {
         var quotient;
         var suffix = null;
+        var key, keys;
+        var divisor;
+        var y, x, i;
 
         /* Find that factor string */
-        if (typeof (factor) === "string") {
+        if (!number && number !== 0) {
+            suffix = null;
+
+        } else if (typeof (factor) === "string") {
             /* Prefer larger factors */
-            var keys = [];
-            for (var key in suffixes)
+            keys = [];
+            for (key in suffixes)
                 keys.push(key);
             keys.sort().reverse();
-            for (var y = 0; y < keys.length; y++) {
-                for (var x = 0; x < suffixes[keys[y]].length; x++) {
+            for (y = 0; y < keys.length; y++) {
+                for (x = 0; x < suffixes[keys[y]].length; x++) {
                     if (factor == suffixes[keys[y]][x]) {
                         number = number / Math.pow(keys[y], x);
                         suffix = factor;
@@ -1336,8 +1375,8 @@ function basic_scope(cockpit, jquery) {
 
         /* @factor is a number */
         } else if (factor in suffixes) {
-            var divisor = 1;
-            for (var i = 0; i < suffixes[factor].length; i++) {
+            divisor = 1;
+            for (i = 0; i < suffixes[factor].length; i++) {
                 quotient = number / divisor;
                 if (quotient < factor) {
                     number = quotient;
@@ -1349,10 +1388,9 @@ function basic_scope(cockpit, jquery) {
         }
 
         var string_representation = cockpit.format_number(number);
-
         var ret;
 
-        if (suffix)
+        if (string_representation && suffix)
             ret = [string_representation, suffix];
         else
             ret = [string_representation];
@@ -2127,44 +2165,37 @@ function basic_scope(cockpit, jquery) {
             cockpit.info.dispatchEvent("changed");
     };
 
-    function User() {
-        var self = this;
-        event_mixin(self, { });
-
-        self["user"] = null;
-        self["name"] = null;
-
-        var dbus = cockpit.dbus(null, { "bus": "internal" });
-        dbus.call("/user", "org.freedesktop.DBus.Properties",
-                  "GetAll", [ "cockpit.User" ],
-                  { "type": "s" })
-            .done(function(reply) {
-                var user = reply[0];
-                self["user"] = user.Name.v;
-                self["name"] = user.Full.v;
-                self["id"] = user.Id.v;
-                self["groups"] = user.Groups.v;
-                self["home"] = user.Home.v;
-                self["shell"] = user.Shell.v;
-            })
-            .fail(function(ex) {
-                console.warn("couldn't load user info: " + ex.message);
-            })
-            .always(function() {
-                dbus.close();
-                self.dispatchEvent("changed");
-            });
-    }
-
     var the_user = null;
-    Object.defineProperty(cockpit, "user", {
-        enumerable: true,
-        get: function user_get() {
-            if (!the_user)
-                the_user = new User();
-            return the_user;
+    cockpit.user = function () {
+        var dfd = cockpit.defer();
+        var dbus;
+        if (!the_user) {
+            dbus = cockpit.dbus(null, { "bus": "internal" });
+            dbus.call("/user", "org.freedesktop.DBus.Properties", "GetAll",
+                      [ "cockpit.User" ], { "type": "s" })
+                .done(function(reply) {
+                    var user = reply[0];
+                    dfd.resolve({
+                        id: user.Id.v,
+                        name: user.Name.v,
+                        full_name: user.Full.v,
+                        groups: user.Groups.v,
+                        home: user.Home.v,
+                        shell: user.Shell.v
+                    });
+                })
+                .fail(function(ex) {
+                    dfd.reject(ex);
+                })
+                .always(function() {
+                    dbus.close();
+                });
+        } else {
+            dfd.resolve(the_user);
         }
-    });
+
+        return dfd.promise;
+    };
 
     /* ------------------------------------------------------------------------
      * Override for broken browser behavior
@@ -2812,7 +2843,7 @@ function basic_scope(cockpit, jquery) {
                 channel.close({"problem": "protocol-error"});
                 return;
             }
-            var dfd, options, id, subscription;
+            var dfd, options;
             if (msg.id !== undefined)
                 dfd = calls[msg.id];
             if (msg.reply) {
@@ -2825,37 +2856,57 @@ function basic_scope(cockpit, jquery) {
                     dfd.resolve(msg.reply[0] || [], options);
                     delete calls[msg.id];
                 }
+                return;
+
             } else if (msg.error) {
                 if (dfd) {
                     dfd.reject(new DBusError(msg.error));
                     delete calls[msg.id];
                 }
-            } else if (msg.signal) {
-                for (id in subscribers) {
-                    subscription = subscribers[id];
-                    if (subscription.callback) {
-                        if (matches(msg.signal, subscription.match))
-                            subscription.callback.apply(self, msg.signal);
-                    }
-                }
-            } else if (msg.notify) {
-                notify(msg.notify);
-            } else if (msg.meta) {
-                ensure_cache();
-                extend(cache.meta, msg.meta);
-            } else if (msg.owner !== undefined) {
-                self.dispatchEvent("owner", msg.owner);
-
-                // We won't get this signal with the same
-                // owner twice so if we've seen an owner
-                // before that means it has changed.
-                if (track && owner)
-                    self.close();
-
-                owner = msg.owner;
-            } else {
-                dbus_debug("received unexpected dbus json message:", payload);
+                return;
             }
+
+            /*
+             * The above promise resolutions or failures are triggered via
+             * later_invoke(). In order to preserve ordering guarantees we
+             * also have to process other events that way too.
+             */
+            later_invoke(function() {
+                var id, subscription;
+                if (msg.signal) {
+                    for (id in subscribers) {
+                        subscription = subscribers[id];
+                        if (subscription.callback) {
+                            if (matches(msg.signal, subscription.match))
+                                subscription.callback.apply(self, msg.signal);
+                        }
+                    }
+                } else if (msg.notify) {
+                    notify(msg.notify);
+                } else if (msg.meta) {
+                    meta(msg.meta);
+                } else if (msg.owner !== undefined) {
+                    self.dispatchEvent("owner", msg.owner);
+
+                    /*
+                     * We won't get this signal with the same
+                     * owner twice so if we've seen an owner
+                     * before that means it has changed.
+                     */
+                    if (track && owner)
+                        self.close();
+
+                    owner = msg.owner;
+                } else {
+                    dbus_debug("received unexpected dbus json message:", payload);
+                }
+            });
+        }
+
+        function meta(data) {
+            ensure_cache();
+            extend(cache.meta, data);
+            self.dispatchEvent("meta", data);
         }
 
         function notify(data) {
@@ -3688,8 +3739,8 @@ function basic_scope(cockpit, jquery) {
         event_mixin(self, { });
 
         self.allowed = null;
+        self.user = options ? options.user : null;
 
-        var user = cockpit.user;
         var group = null;
         var admin = false;
 
@@ -3699,7 +3750,7 @@ function basic_scope(cockpit, jquery) {
         if (options && options.admin)
             admin = true;
 
-        function decide() {
+        function decide(user) {
             if (user.id === 0)
                 return true;
 
@@ -3724,19 +3775,21 @@ function basic_scope(cockpit, jquery) {
             return false;
         }
 
-        function user_changed() {
-            var allowed = decide();
-            if (self.allowed !== allowed) {
-                self.allowed = allowed;
-                self.dispatchEvent("changed");
-            }
+        if (self.user) {
+            self.allowed = decide(self.user);
+        } else {
+            cockpit.user().done(function (user) {
+                self.user = user;
+                var allowed = decide(user);
+                if (self.allowed !== allowed) {
+                    self.allowed = allowed;
+                    self.dispatchEvent("changed");
+                }
+            });
         }
 
-        user.addEventListener("changed", user_changed);
-        user_changed();
-
         self.close = function close() {
-            user.removeEventListener("changed", user_changed);
+            /* no-op for now */
         };
     }
 

@@ -1,3 +1,38 @@
+/* For table rows containing interactive controls like bars */
+.info-table-ct tr.interactive td {
+    line-height: 26px;
+    padding-top: 0px;
+    vertical-align: center;
+}
+
+.info-table-ct .shrink,
+.form-table-ct .shrink {
+    white-space: nowrap;
+    width: 5px;
+}
+
+/*
+ * For showing and filtering disabled unimportant rows in a table
+ *
+ * Set .unimportant on things, and then .filter-unimportant on
+ * ancestor when you want to filter them.
+ */
+.filter-unimportant .unimportant {
+    display: none;
+}
+
+/*
+ * Used to make a table cell that containts buttons have less padding
+ * HACK: Because CSS has no parant selector.
+ */
+.cell-buttons,
+.table > tbody > tr > .cell-buttons {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    width: 30px;
+    padding-right: 15px;
+}
+
 /* Align with the top of the graphs
   only when not wrapped
 */
@@ -63,6 +98,7 @@
 
 .container-col-memory-text {
     width: 10%;
+    text-align: right;
 }
 
 #image-details-containers .container-col-actions,
@@ -89,7 +125,7 @@
     height: 28px;
 }
 
-#container-details .console {
+#container-details .console-ct {
     margin-top: 0;
     float: right;
 }

@@ -6,9 +6,11 @@
     </div>
 </filter-bar>
 
-<div>
-    <kubernetes-service-graph id="graphs" ng-if="settings.flavor != 'openshift'">
-    </kubernetes-service-graph>
+<div class="container-cards-pf dashboard-cards" ng-if="settings.flavor != 'openshift'">
+    <div class="card-pf card-pf-aggregate-status card-pf-accented dashboard-status">
+        <kubernetes-service-graph id="graphs">
+        </kubernetes-service-graph>
+    </div>
 </div>
 
 <div class="container-cards-pf dashboard-cards">
@@ -73,6 +75,15 @@
                     </span>
                 </span>
             </p>
+            <p class="pvc-notice" ng-if="status.volumes.PendingClaims.length">
+                <span class="card-pf-aggregate-status-notification">
+                    <span class="pficon pficon-info"></span>
+                    <a href="#{{ viewUrl('volumes', true) }}">
+                        <span class="card-pf-aggregate-status-text">{{status.volumes.PendingClaims.length}}</span>
+                        <span class="card-pf-aggregate-status-text" translatable="yes">Pending Volume Claims</span>
+                    </a>
+                </span>
+            </p>
         </div>
     </div>
     <div class="card-pf card-pf-aggregate-status card-pf-accented dashboard-status">
@@ -101,7 +112,7 @@
                         <span class="pficon pficon-ok"></span><span class="card-pf-aggregate-status-text"
                             translatable="yes">All healthy</span>
                     </span>
-                    <span ng-if="pods.length == 0">
+                    <span ng-if="nodes.length == 0">
                         <span class="pficon pficon-warning-triangle-o"></span>
                         <span class="card-pf-aggregate-status-text" translatable="yes">No nodes in cluster</span>
                     </span>
@@ -138,7 +149,7 @@
                 <h3>No services present</h3>
                 <p translatable="yes">You can deploy an application to your cluster.</p>
             </div>
-            <table class="listing dashboard-list" ng-if="servicesState() == 'ready'"
+            <table class="listing-ct dashboard-list" ng-if="servicesState() == 'ready'"
                 ng-class="{editable: editServices}">
                 <thead>
                     <tr>
@@ -151,10 +162,10 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr class="listing-item"
+                    <tr class="listing-ct-item"
                             ng-repeat="service in services track by service.metadata.uid"
                             data-name="{{service.metadata.name}}"
-                            ng-class="{highlight: service.metadata.uid == highlighted}"
+                            ng-class="{'highlight-ct': service.metadata.uid == highlighted}"
                             ng-click="jumpService($event, service)"
                             ng-mouseover="highlight(service.metadata.uid)" ng-mouseout="highlight(null)"
                             ng-if="!(service.metadata.namespace == 'default' && service.metadata.name == 'kubernetes')">
@@ -181,7 +192,7 @@
             <h2 class="card-pf-title" translatable="yes">Nodes</h2>
         </div>
         <div class="card-pf-body">
-            <table class="listing dashboard-list">
+            <table class="listing-ct dashboard-list">
                 <thead>
                     <tr>
                         <th translatable="yes">Name</th>
@@ -190,11 +201,11 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr ng-click="navigateNode(node)" ng-repeat="node in nodes" class="listing-item">
+                    <tr ng-click="navigateNode(node)" ng-repeat="node in nodes" class="listing-ct-item">
                         <td>{{node.metadata.name}}</td>
                         <td class="containers">{{nodeContainers(node)}}</td>
                         <td class="status">
-                            <span kubernetes-status-icon status="nodeStatus(node)"></span>
+                            <span kubernetes-status-icon status="nodeStatusIcon(node)"></span>
                         </td>
                     </tr>
                 </tbody>

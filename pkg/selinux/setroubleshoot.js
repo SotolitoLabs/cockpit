@@ -19,10 +19,11 @@
 
 require([
     "base1/cockpit",
-    "react",
+    "base1/react",
     "selinux/setroubleshoot-client",
+    "selinux/selinux-client",
     "selinux/setroubleshoot-view",
-], function(cockpit, React, troubleshoot_client, troubleshoot_view) {
+], function(cockpit, React, troubleshootClient, selinuxClient, troubleshootView) {
 
 "use strict";
 
@@ -30,175 +31,242 @@ var _ = cockpit.gettext;
 
 var setroubleshoot = { };
 
-var init_store = function(root_element) {
-    var data_store = { };
-    data_store.dom_root_element = root_element;
+var initStore = function(rootElement) {
+    var dataStore = { };
+    dataStore.domRootElement = rootElement;
 
-    data_store.entries = [ ];
+    dataStore.entries = [ ];
 
     // connected to the dbus api of setroubleshootd
-    data_store.connected = false;
+    dataStore.connected = false;
 
     // currently trying to connect / used for timer
-    data_store.connecting = null;
+    dataStore.connecting = null;
 
     // did we have a connection error?
-    data_store.error = false;
+    dataStore.error = null;
 
-    data_store.client = troubleshoot_client;
+    dataStore.client = troubleshootClient;
+
+    dataStore.selinuxStatusError = undefined;
+
+    var selinuxStatusChanged = function(status, errorMessage) {
+        dataStore.selinuxStatus = status;
+        if (errorMessage !== undefined)
+            dataStore.selinuxStatusError = errorMessage;
+        dataStore.render();
+    };
+    var selinuxStatusDismissError = function() {
+        dataStore.selinuxStatusError = undefined;
+        dataStore.render();
+    };
+    var selinuxChangeMode = function(newMode) {
+        selinuxClient.setEnforcing(newMode).then(
+            function() {
+                dataStore.selinuxStatus.enforcing = newMode;
+                dataStore.render();
+            },
+            function(error) {
+                dataStore.selinuxStatusError = cockpit.format(_("Error while setting SELinux mode: '$0'"), error.message);
+                dataStore.render();
+            }
+        );
+    };
+    dataStore.selinuxStatus = selinuxClient.init(selinuxStatusChanged);
 
     // run a fix and update the entries accordingly
-    var run_fix = function(alert_id, analysis_id) {
+    var runFix = function(alertId, analysisId) {
         var idx;
-        for (idx = data_store.entries.length - 1; idx >= 0; --idx) {
-            if (data_store.entries[idx].key == alert_id)
+        for (idx = dataStore.entries.length - 1; idx >= 0; --idx) {
+            if (dataStore.entries[idx].key == alertId)
                 break;
         }
         if (idx < 0) {
-            console.log("Unable to find alert entry for element requesting fix: " + alert_id + " (" + analysis_id + ").");
+            console.log("Unable to find alert entry for element requesting fix: " + alertId + " (" + analysisId + ").");
             return;
         }
-        data_store.entries[idx].fix = {
-            plugin: analysis_id,
+        dataStore.entries[idx].fix = {
+            plugin: analysisId,
             running: true,
             result: null,
             success: false,
         };
-        data_store.render();
-        data_store.client.run_fix(alert_id, analysis_id)
+        dataStore.render();
+        dataStore.client.runFix(alertId, analysisId)
             .done(function(output) {
-                 data_store.entries[idx].fix = {
-                     plugin: analysis_id,
+                 dataStore.entries[idx].fix = {
+                     plugin: analysisId,
                      running: false,
                      result: output,
                      success: true,
                  };
-                 data_store.render();
+                 dataStore.render();
             })
             .fail(function(error) {
-                 data_store.entries[idx].fix = {
-                     plugin: analysis_id,
+                 dataStore.entries[idx].fix = {
+                     plugin: analysisId,
                      running: false,
                      result: error,
                      success: false,
                  };
-                 data_store.render();
+                 dataStore.render();
             });
     };
 
-    var render = function() {
-        React.render(React.createElement(troubleshoot_view.SETroubleshootPage, {
-                connected: data_store.connected,
-                connecting: data_store.connecting,
-                error: data_store.error,
-                entries: data_store.entries,
-                run_fix: run_fix,
-            }), root_element);
+    /* Delete an alert via the client
+     * if it goes wrong, show an error
+     * remove the entry if successful
+     * This function will only be called if the backend functionality is actually present
+     */
+    var deleteAlert = function(alertId) {
+        dataStore.client.capabilities.deleteAlert(alertId)
+            .done(function() {
+                var idx;
+                for (idx = dataStore.entries.length - 1; idx >= 0; --idx) {
+                    if (dataStore.entries[idx].key == alertId)
+                        break;
+                }
+                if (idx < 0)
+                    return;
+                dataStore.entries.splice(idx, 1);
+                dataStore.render();
+            })
+            .fail(function(error) {
+                dataStore.error = error;
+                dataStore.render();
+            });
     };
-    data_store.render = render;
+
+    var dismissError = function() {
+        dataStore.error = null;
+        dataStore.render();
+    };
+
+    var render = function() {
+        var enableDeleteAlert = ('capabilities' in dataStore.client && 'deleteAlert' in dataStore.client.capabilities);
+        React.render(React.createElement(troubleshootView.SETroubleshootPage, {
+                connected: dataStore.connected,
+                connecting: dataStore.connecting,
+                error: dataStore.error,
+                dismissError: dismissError,
+                entries: dataStore.entries,
+                runFix: runFix,
+                deleteAlert: enableDeleteAlert?deleteAlert:undefined,
+                selinuxStatus: dataStore.selinuxStatus,
+                selinuxStatusError: dataStore.selinuxStatusError,
+                changeSelinuxMode: selinuxChangeMode,
+                dismissStatusError: selinuxStatusDismissError,
+            }), rootElement);
+    };
+    dataStore.render = render;
 
     /* Update an alert entry if it exists, otherwise create one
        Details: if undefined, we don't have info on them yet,
        while null means an error occurred while retrieving them
        The function doesn't trigger a render
     */
-    var maybe_update_alert = function(local_id, description, count, details) {
+    var maybeUpdateAlert = function(localId, description, count, details) {
         // if we already know about this alert, ignore unless the repetition count changed
         var idx;
         // we start at the back because that's where we push new entries
         // if we receive an alert multiple times, this is where it will be
-        for (idx = data_store.entries.length - 1; idx >= 0; --idx) {
-            if (data_store.entries[idx].key == local_id) {
+        for (idx = dataStore.entries.length - 1; idx >= 0; --idx) {
+            if (dataStore.entries[idx].key == localId) {
                 if (description === undefined || count === undefined) {
-                    data_store.entries[idx].details = details;
+                    dataStore.entries[idx].details = details;
                     return;
                 }
                 // don't update newer information
                 // this can happen in cases of highly frequent updates
-                if (data_store.entries[idx].count <= count) {
+                if (dataStore.entries[idx].count <= count) {
                     // don't tamper with the status of a fix being run
                     // new alerts might be coming in while a fix is running and we don't want
                     // to lose the progress or result
 
                     // only allow details to be null if the count has increased
-                    if ((details !== undefined) || (data_store.entries[idx].count < count)) {
-                        data_store.entries[idx].details = details;
+                    if ((details !== undefined) || (dataStore.entries[idx].count < count)) {
+                        dataStore.entries[idx].details = details;
                     }
-                    data_store.entries[idx].description = description;
-                    data_store.entries[idx].count = count;
+                    dataStore.entries[idx].description = description;
+                    dataStore.entries[idx].count = count;
                 }
                 return;
             }
         }
         // nothing found, so we create a new entry
-        data_store.entries.push({ key: local_id, description: description, count: count, details: details, fix: null });
+        dataStore.entries.push({ key: localId, description: description, count: count, details: details, fix: null });
     };
 
     /* Add a list of messages and triggers getting details for each of them
        The list is added without details at first (if it's a new entry) to preserve the order
      */
     var handleMultipleMessages = function(entries) {
-        var idx_entry;
+        var idxEntry;
         var entry;
-        for (idx_entry = 0; idx_entry != entries.length; ++idx_entry) {
-            entry = entries[idx_entry];
-            maybe_update_alert(entry.local_id, entry.summary, entry.report_count, undefined);
-            data_store.get_alert_details(entry.local_id);
+        for (idxEntry = 0; idxEntry != entries.length; ++idxEntry) {
+            entry = entries[idxEntry];
+            maybeUpdateAlert(entry.localId, entry.summary, entry.reportCount, undefined);
+            dataStore.getAlertDetails(entry.localId);
         }
         // make sure we render
         render();
     };
 
-    data_store.handleAlert = function(level, local_id) {
+    dataStore.handleAlert = function(level, localId) {
         // right now the level is unused, since we can't access it for existing alerts
 
-        // we receive the item details in a delayed fashion, render only once we have the full info
-        data_store.get_alert_details(local_id);
+        // we receive the item details in added delayed fashion, render only once we have the full info
+        dataStore.getAlertDetails(localId);
     };
 
-    var get_alert_details = function(id) {
-        data_store.client.get_alert(id)
+    var getAlertDetails = function(id) {
+        dataStore.client.getAlert(id)
             .done(function(details) {
-                maybe_update_alert(id, details.summary, details.report_count, details);
+                maybeUpdateAlert(id, details.summary, details.reportCount, details);
                 render();
             })
             .fail(function(error) {
-                maybe_update_alert(id, undefined, undefined, null);
+                maybeUpdateAlert(id, undefined, undefined, null);
                 render();
             });
     };
-    data_store.get_alert_details = get_alert_details;
+    dataStore.getAlertDetails = getAlertDetails;
 
     var setDisconnected = function() {
-        data_store.connected = false;
+        dataStore.connected = false;
         render();
     };
 
     var setErrorIfNotConnected = function() {
-        if (data_store.connecting === null)
+        if (dataStore.connecting === null)
             return;
-        data_store.error = true;
+        dataStore.error = _("Not connected");
         render();
     };
 
-    data_store.connection_timeout = 5000;
+    dataStore.connectionTimeout = 5000;
+
+    function capablitiesChanged(capabilities) {
+        dataStore.capabilities = capabilities;
+        render();
+    }
 
     // try to connect
-    data_store.try_connect = function() {
-        if (data_store.connecting === null) {
-            data_store.connecting = window.setTimeout(setErrorIfNotConnected, data_store.connection_timeout);
+    dataStore.tryConnect = function() {
+        if (dataStore.connecting === null) {
+            dataStore.connecting = window.setTimeout(setErrorIfNotConnected, dataStore.connectionTimeout);
             render();
             // initialize our setroubleshootd client
-            data_store.client.init()
-                .done(function() {
-                    data_store.connected = true;
-                    window.clearTimeout(data_store.connecting);
-                    data_store.connecting = null;
+            dataStore.client.init(capablitiesChanged)
+                .done(function(capablitiesChanged) {
+                    dataStore.connected = true;
+                    window.clearTimeout(dataStore.connecting);
+                    dataStore.connecting = null;
                     render();
                     // now register a callback to get new entries and get all existing ones
                     // the order is important, since we don't want to miss an entry
-                    data_store.client.handle_alert(data_store.handleAlert);
-                    data_store.client.get_alerts()
+                    dataStore.client.handleAlert(dataStore.handleAlert);
+                    dataStore.client.getAlerts()
                         .done(handleMultipleMessages)
                         .fail(function() {
                             console.error("Unable to get setroubleshootd messages");
@@ -206,10 +274,10 @@ var init_store = function(root_element) {
                         });
                 })
                 .fail(function(error) {
-                    data_store.connected = false;
-                    window.clearTimeout(data_store.connecting);
-                    data_store.connecting = null;
-                    data_store.error = true;
+                    dataStore.connected = false;
+                    window.clearTimeout(dataStore.connecting);
+                    dataStore.connecting = null;
+                    dataStore.error = _("Error while connecting.");
                     render();
                     // TODO: should we propagate the error message here?
                 });
@@ -220,13 +288,13 @@ var init_store = function(root_element) {
     render();
 
     // try to connect immediately
-    data_store.try_connect();
+    dataStore.tryConnect();
 
-    return data_store;
+    return dataStore;
 };
 
 setroubleshoot.init = function (app) {
-    setroubleshoot.data_store = init_store(app);
+    setroubleshoot.dataStore = initStore(app);
 };
 
 setroubleshoot.init(document.getElementById('app'));

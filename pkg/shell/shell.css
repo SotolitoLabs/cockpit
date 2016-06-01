@@ -25,6 +25,10 @@ html, body {
     height: 100%;
 }
 
+html.index-page body {
+    overflow: hidden;
+}
+
 #dashboard-add {
     height: 28px;
     width: 28px;
@@ -125,6 +129,17 @@ html, body {
     float: right;
 }
 
+#dashboard-toolbar > div.dropdown {
+    display: inline-block;
+}
+
+#dashboard-toolbar .dropdown-toggle span {
+    display: inline-block;
+    width: 6em;
+    text-align: left;
+    padding-left: 5px;
+}
+
 @media (max-width: 400px) {
     #dashboard-hosts .list-group-item div.os {
         display: none;
@@ -149,6 +164,12 @@ html, body {
 
 .dashboard-plot {
     margin-bottom: 10px;
+    height: 250px;
+}
+
+#host-edit-color {
+    width:100px;
+    height:26px;
 }
 
 #host-edit-color-popover .popover-content {
@@ -162,6 +183,10 @@ html, body {
     margin: 2px;
 }
 
+#host-edit-avatar {
+    margin-top: 10px;
+}
+
 #host-edit-avatar canvas:hover,
 #host-edit-color:hover,
 #host-edit-color-popover .color-cell:hover {
@@ -171,6 +196,10 @@ html, body {
 
 #host-edit-apply {
     min-width: 55px;
+}
+
+#host-edit-file-input {
+    display: none;
 }
 
 /* Make the time range buttons equal width */
@@ -267,6 +296,10 @@ html, body {
     border-color: transparent;
 }
 
+#navbar-oops {
+    display: none;
+}
+
 /* The server avatar */
 #server-avatar {
     width:       128px;
@@ -351,34 +384,34 @@ html, body {
 }
 
 /* server overview dashboard */
-#server .cockpit-info-table button {
+#server .info-table-ct button {
   max-width: 300px;
 }
 
-#server .cockpit-info-table td:first-child {
+#server .info-table-ct td:first-child {
     max-width: 50%
 }
 
-#server .cockpit-info-table {
+#server .info-table-ct {
     width: 100%;
 }
 
 @media (min-width: 992px) {
-    #server .cockpit-info-table {
+    #server .info-table-ct {
         table-layout: fixed;
         width: 100%;
         min-width: 220px;
     }
 
   /* server overview dashboard */
-  #server .cockpit-info-table-container td button {
+  #server .info-table-ct-container td button {
       max-width: 100%;
   }
 }
 
 @media (max-width: 480px) {
   /* server overview dashboard */
-  #server .cockpit-info-table-container td button {
+  #server .info-table-ct-container td button {
       max-width: 200px;
   }
 }
@@ -577,6 +610,10 @@ iframe.container-frame {
   color: #333;
 }
 
+#tools-panel {
+    height: 0px;
+}
+
 #tools-panel > .panel-body {
   border: none;
 }
@@ -604,7 +641,7 @@ iframe.container-frame {
     max-height: 500px;
 }
 
-#credentials-dialog .btn-onoff .btn {
+#credentials-dialog .btn-onoff-ct .btn {
     padding-top: 1px;
     padding-bottom: 1px;
     height: 24px;
@@ -674,16 +711,45 @@ tbody.unlock .credential-unlock {
     padding-right: 15px;
 }
 
-.listing-body .alert {
+.listing-ct-body .alert {
     border: none;
     margin: 0px 0px 10px 0px;
     padding: 0px;
     background-color: transparent;
 }
 
-.listing-body .alert .fa {
+.listing-ct-body .alert .fa {
     position: relative;
     left: 0px;
     top: 3px;
     padding-right: 5px;
+}
+
+.spinner-white {
+  border-bottom: 4px solid rgba(255, 255, 255, 0.25);
+  border-left: 4px solid rgba(255, 255, 255, 0.25);
+  border-right: 4px solid rgba(255, 255, 255, 0.25);
+  border-top: 4px solid rgba(255, 255, 255, 0.75);
+}
+
+
+/* Scrollable modal body, needs max-height set elsewhere */
+.modal-scrollable {
+    overflow-y: auto;
+    margin-right: 7px;
+    padding-right: 8px;
+    margin-top: 15px;
+    padding-top: 0px;
+}
+
+/* allow text only branding */
+.navbar-pf .navbar-brand {
+    text-transform: uppercase;
+    margin: 0 8px;
+    height: 25px;
+    padding: 2px 0;
+}
+
+.navbar-pf .navbar-brand:hover {
+    color: #F1F1F1;
 }

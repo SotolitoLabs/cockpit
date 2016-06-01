@@ -9,15 +9,29 @@ table.images-listing {
         background-color: #d4edfa;
     }
 
+    tbody.open .listing-ct-panel .listing-ct-body {
+        border-right: 1px solid #ccc;
+    }
+
+    tbody.open tr.listing-ct-panel td div.listing-ct-head {
+        border-right: 1px solid #ccc;
+    }
+
     thead {
         th {
             border-top: none;
         }
     }
 
-    tr.listing-item {
-        td:first-child {
-            background: linear-gradient(90deg, transparent 30px, @tag-border 30px, @tag-border 32px, transparent 32px);
+    tr.listing-ct-item {
+
+        td.tag-label {
+            vertical-align: top;
+            background: linear-gradient(90deg, transparent 10px, @tag-border 10px, @tag-border 12px, transparent 12px);
+        }
+
+        td.listing-ct-toggle:hover + td.tag-label {
+            background-color: #ededed
         }
 
         border-top: none;
@@ -31,41 +45,25 @@ table.images-listing {
     }
 
     tbody.last {
-	tr.listing-item.tag-item td:first-child {
+	tr.listing-ct-item.tag-item td.tag-label {
             background-size: 100% 20px;
             background-repeat: no-repeat;
-        }
-
-        tr.listing-item.image-item td:first-child {
-            background: none;
         }
     }
 
     tr.imagestream-item {
         border-top: 1px solid @gray-lighter;
 
-        th {
+        th, td {
             border-bottom: 2px solid @tag-border;
             font-size: 14px;
             padding-bottom: 5px;
         }
     }
 
-    tr.tag-item td {
-        padding-bottom: 0px;
-    }
-
-    tr.image-item td {
-        padding-top: 0px;
-    }
-
-    tr.listing-item tt {
+    tr.listing-ct-item tt {
         color: @metadata-color;
     }
-}
-
-.listing-inline h3 {
-    margin-bottom: 20px;
 }
 
 dl.image-tags {
@@ -84,22 +82,10 @@ dl.image-tags {
     }
 }
 
-.image-tag {
-    border: 2px solid @tag-border;
-    border-radius: 7px;
-    padding: 3px 5px;
-    white-space: nowrap;
-    background-color: @listing-hover;
-}
-
 .imagestream-lock {
     color: #deaa87;
     font-size: 1.5em;
     vertical-align: middle;
-}
-
-a.image-tag {
-    color: inherit;
 }
 
 pre {
@@ -121,3 +107,11 @@ pre {
     padding: 0px 5px;
 }
 
+.image-metadata-layers {
+    padding-top: 15px;
+    clear: both;
+
+    p {
+        margin-bottom: 3px;
+    }
+}

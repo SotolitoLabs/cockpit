@@ -179,18 +179,61 @@
                     kind: "RoleBinding",
                     apiVersion: "v1",
                     metadata: {
-                        name: name,
+                        name: role,
                         namespace: namespace,
-                        subjects: subjects,
+                        creationTimestamp: null,
                     },
+                    userNames: [],
+                    groupNames: [],
+                    subjects: [],
                     roleRef: {
-                        name: name
+                        name: role
                     }
                 };
-
-                return methods.create([binding], namespace);
+                addToArray(roleArray(binding, "subjects"), subjects);
+                addToArray(roleArrayKind(binding, subjects.kind), subjects.name);
+                return methods.create(binding, namespace);
             }
 
+            function removeFromRole(project, role, subject) {
+                var namespace = toName(project);
+                return modifyRole(namespace, role, function(data) {
+                    removeFromArray(roleArray(data, "subjects"), subject);
+                    removeFromArray(roleArrayKind(data, subject.kind), subject.name);
+                }).then(function() {
+                    expireWhoCan(namespace);
+                    $rootScope.$applyAsync();
+                }, function(resp) {
+                    /* If the role doesn't exist consider removed to work */
+                    if (resp.code !== 404)
+                        return $q.reject(resp);
+                });
+            }
+
+            function removeMemberFromPolicyBinding(policyBinding, project, subjectRoleBindings, subject) {
+                var registryRoles = ["registry-admin", "registry-edit", "registry-view"];
+                var chain = $q.when();
+                var roleBinding, i, defaultPolicybinding;
+                var roleBindings = [];
+
+                if(policyBinding && policyBinding.one()){
+                    defaultPolicybinding = policyBinding.one();
+                    roleBindings = defaultPolicybinding.roleBindings;
+                }
+                var patchData = {"roleBindings": roleBindings};
+                angular.forEach(subjectRoleBindings, function(o) {
+                    angular.forEach(roleBindings, function(role) {
+                        //Since we only added registry roles 
+                        //remove ONLY registry roles
+                        if (( indexOf(registryRoles, role.name) !== -1) && role.name === o.metadata.name) {
+                            chain = chain.then(function() {
+                                return removeFromRole(project, role.name, subject);
+                            });
+                        }
+                    });
+                });
+                return chain;
+            }
             function indexOf(array, value) {
                 var i, len;
                 for (i = 0, len = array.length; i < len; i++) {
@@ -250,24 +293,12 @@
                     }, function(resp) {
                         /* If the role doesn't exist create it */
                         if (resp.code === 404)
-                            return createRole(namespace, role, [ subject ]);
+                            return createRole(namespace, role, subject);
                         return $q.reject(resp);
                     });
                 },
-                removeFromRole: function removeFromRole(project, role, subject) {
-                    var namespace = toName(project);
-                    return modifyRole(namespace, role, function(data) {
-                        removeFromArray(roleArray(data, "subjects"), subject);
-                        removeFromArray(roleArrayKind(data, subject.kind), subject.name);
-                    }).then(function() {
-                        expireWhoCan(namespace);
-                        $rootScope.$applyAsync();
-                    }, function(resp) {
-                        /* If the role doesn't exist consider removed to work */
-                        if (resp.code !== 404)
-                            return $q.reject(resp);
-                    });
-                },
+                removeFromRole: removeFromRole,
+                removeMemberFromPolicyBinding: removeMemberFromPolicyBinding,
             };
         }
     ]);
