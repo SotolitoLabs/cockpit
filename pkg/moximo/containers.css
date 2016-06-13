@@ -1,0 +1,13 @@
+
+.containers-listing {
+    width: 100%;
+}
+
+.containers-listing i.fa-cube {
+    position: relative;
+    font-size: 22px;
+}
+
+.containers-listing .console {
+    min-height: 310px;
+}

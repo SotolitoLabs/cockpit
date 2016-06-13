@@ -1,0 +1,42 @@
+<div ng-init="containers = client.containers(item)">
+    <div class="listing-head" ng-click="select(id, $event)">
+        <div class="listing-actions">
+            <button title="Delete" class="delete-pod btn btn-danger btn-delete pficon pficon-delete"
+                data-toggle="modal" data-target="#delete-pod-dialog"
+                data-link="{{item.metadata.selfLink}}"></button>
+        </div>
+        <h3><i class="fa fa-cubes"></i>{{ item.metadata.name }}</h3>
+        <div class="listing-status">
+            <span>{{item.status.phase}}</span>
+        </div>
+        <ul class="nav nav-tabs nav-tabs-pf">
+            <li ng-class="{active: tab('main')}"><a ng-click="tab('main', $event)">Pod</a></li>
+            <li ng-class="{active: tab('containers')}"><a ng-click="tab('containers', $event)">Containers</a></li>
+            <li ng-class="{active: tab('logs')}">
+                <a ng-click="tab('logs', $event); tabbed = true">Logs</a></li>
+            <li ng-class="{active: tab('shell')}">
+                <a ng-click="tab('shell', $event); tabbed = true">Shell</a></li>
+        </ul>
+    </div>
+    <div class="listing-body" ng-show="tab('main')">
+        <kube-pod-body ng-init="pod = item">
+        </kube-pod-body>
+    </div>
+    <div class="listing-body" ng-show="tab('containers')">
+        <kube-container-body ng-repeat="container in containers">
+        </kube-container-body>
+    </div>
+    <div class="listing-body" ng-show="tab('logs')">
+        <div class="container-fluid" ng-repeat="container in containers">
+            <kube-console pod="item" container="container.spec.name" prevent="!tabbed">
+            </kube-console>
+        </div>
+    </div>
+    <div class="listing-body" ng-show="tab('shell')">
+        <div class="container-fluid" ng-repeat="container in containers"
+            ng-if="item.status.phase == 'Running' && container.status.state.running">
+            <kubernetes-container-terminal pod="item" container="container.spec.name" prevent="!tabbed">
+            </kubernetes-container-terminal>
+        </div>
+    </div>
+</div>

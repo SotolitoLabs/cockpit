@@ -1,0 +1,40 @@
+.details-listing {
+    min-width: 70% !important;
+}
+
+.details-listing i.pficon-service {
+    font-size: 30px;
+    line-height: 20px;
+    position: relative;
+    padding-right: 5px;
+    left: -5px;
+}
+
+.details-listing i.pficon-route {
+    position: relative;
+    font-size: 25px;
+    line-height: 20px;
+    left: -2px;
+    padding-right: 8px;
+}
+
+.details-listing i.fa-server {
+    position: relative;
+    top: 3px;
+}
+
+.details-listing i.pficon-replicator {
+    position: relative;
+    font-size: 28px;
+    top: -6px;
+}
+
+.details-listing i.fa-cubes {
+
+}
+
+.details-listing i.fa-gear {
+    position: relative;
+    font-size: 25px;
+    top: -3px;
+}
