@@ -33,7 +33,8 @@ define([
                 '$scope',
                 '$location',
                 'kubernetesClient',
-                function($scope, $location, client) {
+                '$http',
+                function($scope, $location, client, $http) {
 
             /* Service Listing */
             $scope.services = client.select("Service");
@@ -204,15 +205,32 @@ define([
             $([$scope.services]).on("changed", digest);
 
             var timeout = null;
+            $scope.moximo_services = null;
             function digest() {
                 if (timeout === null) {
                     timeout = window.setTimeout(function() {
                         timeout = null;
                         $scope.$digest();
+                        $scope.moximo_services = get_moximo_services();
+                        alert("MOXIMO SERVICES: " + $scope.moximo_services);
                         phantom_checkpoint();
                     });
                 }
             }
+
+            /* get the content of the services file */
+            function get_moximo_services() {
+                alert("Getting services...");
+                var ret_data = null;
+                $http.get('/cockpit/@localhost/moximo/services/moximo.json').then(function(data) 
+                    {
+                        ret_data = data;
+                    }
+                );
+                return(ret_data);
+            }
+
+
         }])
 
         .directive('kubernetesStatusIcon', function() {

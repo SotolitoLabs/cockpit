@@ -10,6 +10,7 @@
 *.pyc
 *.typelib
 *.so
+*.swp
 *~
 *.dirstamp
 .deps/

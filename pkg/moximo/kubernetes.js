@@ -14,17 +14,18 @@ require([
     "translated!base1/po",
     "base1/angular",
     "base1/bootstrap-select",
-    "kubernetes/graphs",
-    "kubernetes/deploy",
-    "kubernetes/adjust",
-    "kubernetes/node",
-    "kubernetes/app",
-    "kubernetes/containers",
-    "kubernetes/dashboard",
-    "kubernetes/details",
-    "kubernetes/images",
-    "kubernetes/topology",
-    "kubernetes/object-describer"
+    "moximo/graphs",
+    "moximo/deploy",
+    "moximo/adjust",
+    "moximo/node",
+    "moximo/app",
+    "moximo/containers",
+    "moximo/dashboard",
+    "moximo/details",
+    "moximo/images",
+    "moximo/topology",
+    "moximo/object-describer",
+    "moximo/services"
 ], function(cockpit, po, angular) {
     "use strict";
     cockpit.locale(po);

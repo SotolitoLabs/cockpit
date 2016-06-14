@@ -1,8 +1,11 @@
 {
     "service": [
         {
-            "name": "Web Server",
-            "service_file": "
-        },
+            "name"         : "web-service",
+            "label"        : "Web Server",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml"
+        }
     ]
 }

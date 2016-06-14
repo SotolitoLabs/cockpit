@@ -52,7 +52,9 @@
                         <td>
                             <button style="display: block; z-index: -1"
                                 class="btn btn-primary btn-dashboard" 
-                                title="Stop" onClick="alert('Stopping Service');"
+                                title="Stop" 
+                                id="toggle-service-button"
+                                ng-click="stop_service()"
                                 data-target="#deploy-app-dialog">Stop</button>
                         </td>
                         <td>
