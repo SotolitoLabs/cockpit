@@ -211,8 +211,11 @@ define([
                     timeout = window.setTimeout(function() {
                         timeout = null;
                         $scope.$digest();
-                        $scope.moximo_services = get_moximo_services();
-                        alert("MOXIMO SERVICES: " + $scope.moximo_services);
+                        get_moximo_services();
+                        //if ( $scope.moximo_services != null ){
+                            //$scope.services.moximo = $scope.moximo_services
+                            //alert("MOXIMO SERVICES: " + $scope.moximo_services['web-service'].name);
+                        //}
                         phantom_checkpoint();
                     });
                 }
@@ -220,14 +223,14 @@ define([
 
             /* get the content of the services file */
             function get_moximo_services() {
-                alert("Getting services...");
+                //alert("Getting services...");
                 var ret_data = null;
                 $http.get('/cockpit/@localhost/moximo/services/moximo.json').then(function(data) 
                     {
-                        ret_data = data;
+                        $scope.moximo_services = data.data;
                     }
                 );
-                return(ret_data);
+                //return(ret_data);
             }
 
 

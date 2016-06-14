@@ -1,5 +1,5 @@
 {
-    "service": [
+    "web-service": 
         {
             "name"         : "web-service",
             "label"        : "Web Server",
@@ -7,5 +7,4 @@
             "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
             "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml"
         }
-    ]
 }
