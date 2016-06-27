@@ -204,6 +204,12 @@ define([
 
             $([$scope.services]).on("changed", digest);
 
+            /* Stop service */
+
+            $scope.stopService = function stop_service(link) {
+                alert("Stoping service..." + link);
+                //client.remove(link);
+            };
             var timeout = null;
             $scope.moximo_services = null;
             function digest() {

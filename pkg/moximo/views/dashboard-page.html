@@ -1,4 +1,3 @@
-<kubernetes-service-graph id="graphs"></kubernetes-service-graph>
 
 <div class="row">
     <div class="col-md-8">
@@ -54,7 +53,7 @@
                                 class="btn btn-primary btn-dashboard" 
                                 title="Stop" 
                                 id="toggle-service-button"
-                                ng-click="stop_service()"
+                                ng-click="stopService(service.metadata)"
                                 data-target="#deploy-app-dialog">Stop</button>
                         </td>
                         <td>
@@ -108,3 +107,6 @@
         </div>
     </div>
 </div>
+
+
+<kubernetes-service-graph id="graphs"></kubernetes-service-graph>
