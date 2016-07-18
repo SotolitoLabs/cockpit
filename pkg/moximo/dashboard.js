@@ -1,7 +1,7 @@
 define([
     "jquery",
     "base1/angular",
-    "kubernetes/app"
+    "moximo/app"
 ], function($, angular) {
     'use strict';
 
@@ -93,7 +93,6 @@ define([
             $scope.serviceStatus = function serviceStatus(service) {
                 var spec = service.spec || { };
                 var state = "";
-
                 client.select("Pod", service.metadata.namespace,
                               service.spec.selector || { }).items.forEach(function(pod) {
                     if (!pod.status || !pod.status.phase)
@@ -217,7 +216,8 @@ define([
                     timeout = window.setTimeout(function() {
                         timeout = null;
                         $scope.$digest();
-                        get_moximo_services();
+                        if($scope.moximo_services == null) 
+                            get_moximo_services();
                         //if ( $scope.moximo_services != null ){
                             //$scope.services.moximo = $scope.moximo_services
                             //alert("MOXIMO SERVICES: " + $scope.moximo_services['web-service'].name);
@@ -231,9 +231,26 @@ define([
             function get_moximo_services() {
                 //alert("Getting services...");
                 var ret_data = null;
+                var i, l, keys = 0;
+                var hashed_items = $scope.services.items_hash;
                 $http.get('/cockpit/@localhost/moximo/services/moximo.json').then(function(data) 
                     {
                         $scope.moximo_services = data.data;
+                        keys = Object.keys($scope.moximo_services).sort();
+                        for (i = 0, l = keys.length; i < l; i++) {
+                            //alert("get_moximo_services: Keys[ " + keys[i] + 
+                            //    "]: " + hashed_items[keys[i]].metadata.name);
+                            if(hashed_items[keys[i]] != null) {
+                                $scope.moximo_services[keys[i]].live = 
+                                    hashed_items[keys[i]];
+                            }
+                            else {
+                                $scope.moximo_services[keys[i]].live = null;   
+                            }
+
+                        }
+            
+                        //services.items_hash['AAAA'].metadata
                     }
                 );
                 //return(ret_data);

@@ -2,7 +2,7 @@ define([
     "jquery",
     "base1/cockpit",
     "base1/angular",
-    "kubernetes/app"
+    "moximo/app"
 ], function($, cockpit, angular) {
     'use strict';
 

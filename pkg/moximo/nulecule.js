@@ -39,9 +39,9 @@ define([
     "jquery",
     "base1/cockpit",
     "docker/docker",
-    "kubernetes/client",
+    "moximo/client",
     "system/service",
-    "kubernetes/config"
+    "moximo/config"
 ], function($, cockpit, docker, kubernetes, service, config) {
     "use strict";
 

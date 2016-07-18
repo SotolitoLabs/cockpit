@@ -21,7 +21,7 @@ define([
     "jquery",
     "base1/cockpit",
     "base1/mustache",
-    "kubernetes/client",
+    "moximo/client",
     "base1/patterns"
 ], function($, cockpit, Mustache, kubernetes) {
     "use strict";

@@ -1,62 +1,62 @@
 
 kubernetesdir = $(pkgdatadir)/kubernetes
 nodist_kubernetes_DATA = \
-	pkg/kubernetes/app.min.css.gz \
-	pkg/kubernetes/index.min.html.gz \
-	pkg/kubernetes/kubernetes.min.js.gz \
+	pkg/moximo/app.min.css.gz \
+	pkg/moximo/index.min.html.gz \
+	pkg/moximo/kubernetes.min.js.gz \
 	$(NULL)
 kubernetes_DATA = \
-	pkg/kubernetes/manifest.json \
+	pkg/moximo/manifest.json \
 	$(NULL)
 
 kubernetes_VIEWS = \
-	pkg/kubernetes/views/containers-page.html \
-	pkg/kubernetes/views/container-body.html \
-	pkg/kubernetes/views/container-panel.html \
-	pkg/kubernetes/views/dashboard-page.html \
-	pkg/kubernetes/views/default-panel.html \
-	pkg/kubernetes/views/deploymentconfig-panel.html \
-	pkg/kubernetes/views/details-page.html \
-	pkg/kubernetes/views/filter-bar.html \
-	pkg/kubernetes/views/images-page.html \
-	pkg/kubernetes/views/imagerepository-panel.html \
-	pkg/kubernetes/views/pod-body.html \
-	pkg/kubernetes/views/pod-panel.html \
-	pkg/kubernetes/views/node-panel.html \
-	pkg/kubernetes/views/replicationcontroller-panel.html \
-	pkg/kubernetes/views/route-panel.html \
-	pkg/kubernetes/views/service-panel.html \
-	pkg/kubernetes/views/topology-page.html \
+	pkg/moximo/views/containers-page.html \
+	pkg/moximo/views/container-body.html \
+	pkg/moximo/views/container-panel.html \
+	pkg/moximo/views/dashboard-page.html \
+	pkg/moximo/views/default-panel.html \
+	pkg/moximo/views/deploymentconfig-panel.html \
+	pkg/moximo/views/details-page.html \
+	pkg/moximo/views/filter-bar.html \
+	pkg/moximo/views/images-page.html \
+	pkg/moximo/views/imagerepository-panel.html \
+	pkg/moximo/views/pod-body.html \
+	pkg/moximo/views/pod-panel.html \
+	pkg/moximo/views/node-panel.html \
+	pkg/moximo/views/replicationcontroller-panel.html \
+	pkg/moximo/views/route-panel.html \
+	pkg/moximo/views/service-panel.html \
+	pkg/moximo/views/topology-page.html \
 	$(NULL)
 
 kubernetesdebugdir = $(debugdir)$(kubernetesdir)
 kubernetesdebug_DATA = \
-	pkg/kubernetes/adjust.js \
-	pkg/kubernetes/app.css \
-	pkg/kubernetes/app.js \
-	pkg/kubernetes/client.js \
-	pkg/kubernetes/config.js \
-	pkg/kubernetes/containers.css \
-	pkg/kubernetes/containers.js \
-	pkg/kubernetes/container-terminal.js \
-	pkg/kubernetes/container-terminal.css \
-	pkg/kubernetes/dashboard.js \
-	pkg/kubernetes/details.css \
-	pkg/kubernetes/details.js \
-	pkg/kubernetes/graphs.js \
-	pkg/kubernetes/images.css \
-	pkg/kubernetes/images.js \
-	pkg/kubernetes/index.html \
-	pkg/kubernetes/kubernetes.js \
-	pkg/kubernetes/node.js \
-	pkg/kubernetes/object-describer.js \
-	pkg/kubernetes/deploy.js \
-	pkg/kubernetes/revealable.css \
-	pkg/kubernetes/topology.css \
-	pkg/kubernetes/topology.js \
-	pkg/kubernetes/topology-graph.css \
-	pkg/kubernetes/topology-graph.js \
-	pkg/kubernetes/nulecule.js \
+	pkg/moximo/adjust.js \
+	pkg/moximo/app.css \
+	pkg/moximo/app.js \
+	pkg/moximo/client.js \
+	pkg/moximo/config.js \
+	pkg/moximo/containers.css \
+	pkg/moximo/containers.js \
+	pkg/moximo/container-terminal.js \
+	pkg/moximo/container-terminal.css \
+	pkg/moximo/dashboard.js \
+	pkg/moximo/details.css \
+	pkg/moximo/details.js \
+	pkg/moximo/graphs.js \
+	pkg/moximo/images.css \
+	pkg/moximo/images.js \
+	pkg/moximo/index.html \
+	pkg/moximo/kubernetes.js \
+	pkg/moximo/node.js \
+	pkg/moximo/object-describer.js \
+	pkg/moximo/deploy.js \
+	pkg/moximo/revealable.css \
+	pkg/moximo/topology.css \
+	pkg/moximo/topology.js \
+	pkg/moximo/topology-graph.css \
+	pkg/moximo/topology-graph.js \
+	pkg/moximo/nulecule.js \
 	$(NULL)
 kubernetesviewsdebugdir = $(debugdir)$(kubernetesdir)/views
 kubernetesviewsdebug_DATA = \
@@ -64,55 +64,55 @@ kubernetesviewsdebug_DATA = \
 	$(NULL)
 
 kubernetes_BUNDLE = \
-	pkg/kubernetes/adjust.min.js \
-	pkg/kubernetes/app.min.js \
-	pkg/kubernetes/client.min.js \
-	pkg/kubernetes/config.min.js \
-	pkg/kubernetes/containers.min.js \
-	pkg/kubernetes/dashboard.min.js \
-	pkg/kubernetes/deploy.min.js \
-	pkg/kubernetes/details.min.js \
-	pkg/kubernetes/graphs.min.js \
-	pkg/kubernetes/images.min.js \
-	pkg/kubernetes/nulecule.min.js \
-	pkg/kubernetes/node.min.js \
-	pkg/kubernetes/object-describer.min.js \
-	pkg/kubernetes/topology.min.js \
-	pkg/kubernetes/topology-graph.min.js \
-	pkg/kubernetes/container-terminal.min.js \
-	pkg/kubernetes/templates.js \
-	pkg/kubernetes/kubernetes.js \
+	pkg/moximo/adjust.min.js \
+	pkg/moximo/app.min.js \
+	pkg/moximo/client.min.js \
+	pkg/moximo/config.min.js \
+	pkg/moximo/containers.min.js \
+	pkg/moximo/dashboard.min.js \
+	pkg/moximo/deploy.min.js \
+	pkg/moximo/details.min.js \
+	pkg/moximo/graphs.min.js \
+	pkg/moximo/images.min.js \
+	pkg/moximo/nulecule.min.js \
+	pkg/moximo/node.min.js \
+	pkg/moximo/object-describer.min.js \
+	pkg/moximo/topology.min.js \
+	pkg/moximo/topology-graph.min.js \
+	pkg/moximo/container-terminal.min.js \
+	pkg/moximo/templates.js \
+	pkg/moximo/kubernetes.js \
 	$(NULL)
 
 # Bundles all the view templates into a $templateCache loadable
-pkg/kubernetes/templates.js: $(kubernetes_VIEWS)
-	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/ngbundle -d kubernetes/app -o $@ $^
+pkg/moximo/templates.js: $(kubernetes_VIEWS)
+	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/ngbundle -d moximo/app -o $@ $^
 
 # Everything else into a nice big bundle
-pkg/kubernetes/kubernetes.min.js: $(kubernetes_BUNDLE)
+pkg/moximo/kubernetes.min.js: $(kubernetes_BUNDLE)
 	$(AM_V_GEN) $(srcdir)/tools/missing $(srcdir)/tools/jsbundle $@ $^
 
 kubernetes_TESTS = \
-	pkg/kubernetes/test-kubernetes.html \
+	pkg/moximo/test-kubernetes.html \
 	$(NULL)
 
 TESTS += $(kubernetes_TESTS)
 
 CLEANFILES += \
-	pkg/kubernetes/app.min.css \
-	pkg/kubernetes/index.min.html \
-	pkg/kubernetes/kubernetes.min.js \
+	pkg/moximo/app.min.css \
+	pkg/moximo/index.min.html \
+	pkg/moximo/kubernetes.min.js \
 	$(kubernetes_BUNDLE) \
 	$(nodist_kubernetes_DATA) \
 	$(NULL)
 
 EXTRA_DIST += \
-	pkg/kubernetes/app.min.css \
-	pkg/kubernetes/index.min.html \
-	pkg/kubernetes/kubernetes.min.js \
+	pkg/moximo/app.min.css \
+	pkg/moximo/index.min.html \
+	pkg/moximo/kubernetes.min.js \
 	$(kubernetes_BUNDLE) \
 	$(NULL)
 
 update-lib:: update-bower
-	$(JSMODULE) -m -d base1/angular -o $(srcdir)/pkg/kubernetes/object-describer.js \
+	$(JSMODULE) -m -d base1/angular -o $(srcdir)/pkg/moximo/object-describer.js \
 	    $(BOWER)/kubernetes-object-describer/dist/object-describer.js

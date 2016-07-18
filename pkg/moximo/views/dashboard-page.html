@@ -25,6 +25,8 @@
                 <h3>No services present</h3>
                 <p translatable="yes">You can deploy an application to your cluster.</p>
             </div>
+
+
             <table class="table table-hover" ng-if="servicesState() == 'ready'">
                 <thead>
                     <tr>
@@ -39,23 +41,39 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr ng-repeat="(id, service) in services"
-                            data-name="{{service.metadata.name}}"
-                            ng-class="{highlight: service.metadata.uid == highlighted}"
-                            ng-mouseover="highlight(service.metadata.uid)" ng-mouseout="highlight(null)"
-                            ng-if="!(service.metadata.namespace == 'default' && service.metadata.name == 'kubernetes')">
-                        <td>{{moximo_services[service.metadata.name].label}}</td>
-                        <td><kubernetes-address ng-init="item = service"></td>
-                        <td class="containers">{{serviceContainers(service)}}</td>
-                        <td>{{service.metadata.namespace}}</td>
+                    <tr ng-repeat="(id, service) in moximo_services"
+                            data-name="{{service.live.metadata.name}}"
+                            ng-class="{highlight: service.live.metadata.uid == highlighted}"
+                            ng-mouseover="highlight(service.live.metadata.uid)" ng-mouseout="highlight(null)"
+                            ng-if="!(service.live.metadata.namespace == 'default' && service.live.metadata.name == 'kubernetes')">
+                        <!-- <td>{{moximo_services[service.metadata.name].label}}</td> -->
+                        <td>{{service.label}}</td>
                         <td>
+                            <kubernetes-address ng-init="item = service.live">
+                        </td>
+                        <td class="containers">{{serviceContainers(service.live)}}</td>
+                        <td>{{service.live.metadata.namespace}}</td>
+                        <td
+                            ng-if="service.live != null">
                             <button style="display: block; z-index: -1"
                                 class="btn btn-primary btn-dashboard" 
                                 title="Stop" 
                                 id="toggle-service-button"
-                                ng-click="stopService(service.metadata)"
+                                ng-click="stopService('STOP SERVICE: ' + service.label )"
+                                >Stop</button>
+                                <!-- data-target="#deploy-app-dialog">Stop</button> -->
+                        </td>
+                        <td
+                            ng-if="service.live == null">
+                            <button style="display: block; z-index: -1"
+                                class="btn btn-primary btn-dashboard" 
+                                title="Start" 
+                                id="toggle-service-button"
+                                ng-click="startService('START SERVICE: ' + service.label )"
                                 data-target="#deploy-app-dialog">Stop</button>
                         </td>
+
+
                         <td>
                             <button style="display: block; z-index: -1"
                                 class="btn btn-primary btn-dashboard" 
@@ -63,11 +81,11 @@
                                 ng-click="jumpService($event, service)">Detail</button>
                         </td>
 
-                        <td class="status" ng-init="item = service">
+                        <td class="status" ng-init="item = service.live">
                             <button title="Adjust" class="btn btn-default adjust-service pficon pficon-edit"
                                 data-toggle="modal" data-target="#adjust-dialog"
                                 data-id="{{id}}"></button>
-                            <span kubernetes-status-icon status="serviceStatus(service)"></span>
+                            <span kubernetes-status-icon status="serviceStatus(service.live)"></span>
                         </td>
                     </tr>
                 </tbody>

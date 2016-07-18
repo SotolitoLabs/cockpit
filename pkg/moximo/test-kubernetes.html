@@ -553,9 +553,9 @@ function etcd_server(req) {
 require([
     "jquery",
     "base1/cockpit",
-    "kubernetes/client",
-    "kubernetes/mock-basic",
-    "kubernetes/mock-large"
+    "moximo/client",
+    "moximo/mock-basic",
+    "moximo/mock-large"
 ], function($, cockpit, kubernetes, mock_basic, mock_large) {
     var cockpit_http = cockpit.http;
     cockpit.http = function(endpoint) {

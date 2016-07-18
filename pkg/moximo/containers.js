@@ -3,8 +3,8 @@ define([
     "base1/cockpit",
     "base1/angular",
     "base1/term",
-    "kubernetes/app",
-    "kubernetes/container-terminal",
+    "moximo/app",
+    "moximo/container-terminal",
 ], function($, cockpit, angular, Terminal) {
     'use strict';
 
@@ -151,7 +151,7 @@ define([
                                  * Stay under the limit. I wish we could use some other mechanism
                                  * for limiting the log output, such as:
                                  *
-                                 * https://github.com/kubernetes/kubernetes/issues/12447
+                                 * https://github.com/moximo/moximo/issues/12447
                                  */
                                 count += text.length;
                                 var first;

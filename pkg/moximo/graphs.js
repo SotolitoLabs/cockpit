@@ -22,7 +22,7 @@ define([
     "base1/cockpit",
     "base1/angular",
     "base1/d3",
-    "kubernetes/client",
+    "moximo/client",
 ], function($, cockpit, angular, d3, client) {
     "use strict";
 

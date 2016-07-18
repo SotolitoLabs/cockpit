@@ -3,8 +3,8 @@ define([
     "base1/cockpit",
     "base1/angular",
     "base1/term",
-    "kubernetes/client",
-    "kubernetes/app"
+    "moximo/client",
+    "moximo/app"
 ], function($, cockpit, angular, Terminal, kubernetes) {
     'use strict';
 

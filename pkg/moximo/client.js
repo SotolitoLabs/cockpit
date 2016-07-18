@@ -691,6 +691,31 @@ define([
                 return flat;
             }
         },
+
+        items_hash: {
+            enumerable: false,
+            get: function items_hash() {
+                var self = this;
+                var hashed_items = [];
+                var i, l, keys, flat = self.data.flat;
+                if (!flat) {
+                    keys = Object.keys(self).sort();
+            //alert("item:" + self[keys[0]].metadata.name);
+                    for (i = 0, l = keys.length, flat = []; i < l; i++) {
+                        flat.push(self[keys[i]]);
+                        //alert("DEBUG::items_hash::Key[" + i + "].name: " + self[keys[i]].metadata.name  );
+                        hashed_items[self[keys[i]].metadata.name] = self[keys[i]];
+                    }
+                    self.data.flat = flat;
+                }
+                //return flat;
+                //return Object.keys(self).sort();
+                return hashed_items;
+            }
+        },
+
+
+
         count: {
             enumerable: false,
             get: function length() {
