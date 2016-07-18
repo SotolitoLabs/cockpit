@@ -7,5 +7,47 @@
             "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
             "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
             "metadata"     : {}
+        },
+
+    "wp-service": 
+        {
+            "name"         : "wp-service",
+            "label"        : "Blog",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "metadata"     : {}
+        },
+
+    "file-service": 
+        {
+            "name"         : "file-service",
+            "label"        : "File Sharing",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "metadata"     : {}
+        },
+
+    "erp-service": 
+        {
+            "name"         : "erp-service",
+            "label"        : "ERP",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "metadata"     : {}
+        },
+
+    "mail-service": 
+        {
+            "name"         : "mail-service",
+            "label"        : "Mail Service",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "metadata"     : {}
         }
+
+
 }
