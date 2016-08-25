@@ -34,14 +34,20 @@ define([
                 '$location',
                 'kubernetesClient',
                 '$http',
-                function($scope, $location, client, $http) {
-
+                '$log',
+                function($scope, $location, client, $http, $log) {
+            $scope.$log = $log;
             /* Service Listing */
             $scope.services = client.select("Service");
             client.track($scope.services);
             $($scope.services).on("changed", digest);
+            $scope.moximo_services = null;
+            get_moximo_services();
+
 
             $scope.serviceContainers = function serviceContainers(service) {
+                if (service == null)
+                    return "0"
                 var spec = service.spec || { };
 
                 /* Calculate number of containers */
@@ -91,6 +97,8 @@ define([
             };
 
             $scope.serviceStatus = function serviceStatus(service) {
+                if(service == null)
+                    return;
                 var spec = service.spec || { };
                 var state = "";
                 client.select("Pod", service.metadata.namespace,
@@ -210,18 +218,13 @@ define([
                 //client.remove(link);
             };
             var timeout = null;
-            $scope.moximo_services = null;
             function digest() {
                 if (timeout === null) {
                     timeout = window.setTimeout(function() {
                         timeout = null;
                         $scope.$digest();
-                        if($scope.moximo_services == null) 
-                            get_moximo_services();
-                        //if ( $scope.moximo_services != null ){
-                            //$scope.services.moximo = $scope.moximo_services
-                            //alert("MOXIMO SERVICES: " + $scope.moximo_services['web-service'].name);
-                        //}
+                        $scope.services = client.select("Service");
+                        get_moximo_services();
                         phantom_checkpoint();
                     });
                 }
@@ -229,7 +232,6 @@ define([
 
             /* get the content of the services file */
             function get_moximo_services() {
-                //alert("Getting services...");
                 var ret_data = null;
                 var i, l, keys = 0;
                 var hashed_items = $scope.services.items_hash;
@@ -237,9 +239,12 @@ define([
                     {
                         $scope.moximo_services = data.data;
                         keys = Object.keys($scope.moximo_services).sort();
+                        //Temporal, revisar si no está vacianose items_hash
+                        if (hashed_items == null){
+                            alert("hashed_items is null!!!");
+                            return;
+                        }
                         for (i = 0, l = keys.length; i < l; i++) {
-                            //alert("get_moximo_services: Keys[ " + keys[i] + 
-                            //    "]: " + hashed_items[keys[i]].metadata.name);
                             if(hashed_items[keys[i]] != null) {
                                 $scope.moximo_services[keys[i]].live = 
                                     hashed_items[keys[i]];
@@ -249,8 +254,6 @@ define([
                             }
 
                         }
-            
-                        //services.items_hash['AAAA'].metadata
                     }
                 );
                 //return(ret_data);
@@ -290,7 +293,8 @@ define([
                         } else if (ports.length == 1) {
                             text = address + ":" + ports[0].port;
                             if (ports[0].protocol === "TCP") {
-                                if (ports[0].port === 80)
+                                //TEST if (ports[0].port === 80)
+                                if (ports[0].port >= 80)
                                     href = "http://" + encodeURIComponent(address);
                                 else if (ports[0].port === 443)
                                     href = "https://" + encodeURIComponent(address);
