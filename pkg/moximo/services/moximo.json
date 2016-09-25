@@ -3,9 +3,15 @@
         {
             "name"         : "web-service",
             "label"        : "Web Server",
-            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
-            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
-            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
             "metadata"     : {}
         },
 
@@ -13,9 +19,15 @@
         {
             "name"         : "wp-service",
             "label"        : "Blog",
-            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
-            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
-            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
             "metadata"     : {}
         },
 
@@ -23,9 +35,15 @@
         {
             "name"         : "file-service",
             "label"        : "File Sharing",
-            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
-            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
-            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
             "metadata"     : {}
         },
 
@@ -33,9 +51,15 @@
         {
             "name"         : "erp-service",
             "label"        : "ERP",
-            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
-            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
-            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
             "metadata"     : {}
         },
 
@@ -43,9 +67,15 @@
         {
             "name"         : "mail-service",
             "label"        : "Mail Service",
-            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.yaml",     
-            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.yaml",
-            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.yaml",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
             "metadata"     : {}
         }
 

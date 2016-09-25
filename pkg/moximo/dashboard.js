@@ -213,8 +213,9 @@ define([
 
             /* Stop service */
 
-            $scope.stopService = function stop_service(link) {
-                alert("Stoping service..." + link);
+            $scope.stopService = function stop_service(service) {
+                alert("Stoping service: " + service.live.metadata.selfLink);
+                $scope.client.remove(service.live.metadata.selfLink);
                 //client.remove(link);
             };
             var timeout = null;
@@ -259,6 +260,29 @@ define([
                 //return(ret_data);
             }
 
+            //TODO optimize for already loaded json file
+            $scope.startService = function start_service(service) {
+                var link = "/api/v1/namespaces/default/services/";
+                alert("Starting: " + service.name + " " + link);
+                $http.get(service.service_file).then(function(data) 
+                    {
+                        service.json.service = data.data;
+
+                        client.request({ method: "POST", 
+                        body: JSON.stringify(data.data), path: link })
+                        .fail(function(ex) {
+                            alert("Service " + service.name + " startup FAILED! " + ex);
+                        })
+                        .done(function() {
+                            console.log("Service " + service.name + " started");
+                        });
+                    }
+                );
+            }
+
+
+
+
 
         }])
 
@@ -295,7 +319,8 @@ define([
                             if (ports[0].protocol === "TCP") {
                                 //TEST if (ports[0].port === 80)
                                 if (ports[0].port >= 80)
-                                    href = "http://" + encodeURIComponent(address);
+                                    href = "http://" + encodeURIComponent(address) + 
+                                           ":" + ports[0].port;
                                 else if (ports[0].port === 443)
                                     href = "https://" + encodeURIComponent(address);
                             } else {
