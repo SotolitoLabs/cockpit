@@ -1,0 +1,19 @@
+{
+  "kind": "Service",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "web-service"
+  },
+  "spec": {
+    "ports": [{
+      "protocol": "TCP",
+      "port": 8000,
+      "targetPort": 80
+    }],
+    "selector": {
+      "app": "web"
+    }
+  }
+}
+
+
