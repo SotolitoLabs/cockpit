@@ -1,0 +1,38 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "moximo-webserver",
+    "labels": {
+      "app": "moximo-web"
+    }
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "web-servers",
+        "image": "sotolitolabs-cubie/nginx",
+        "imagePullPolicy": "IfNotPresent",
+        "ports": [
+           {
+            "containerPort": 80
+          }
+        ],
+        "volumeMounts": [
+            {"name": "var", "mountPath": "/var"},
+            {"name": "etc", "mountPath": "/etc/nginx"},
+            {"name": "html", "mountPath": "/usr/share/nginx"},
+            {"name": "run", "mountPath": "/run/php-fpm"},
+            {"name": "apps", "mountPath": "/usr/share/nginx/html/php-apps"}
+        ]
+      }
+    ],
+    "volumes": [
+        {"name": "var",  "hostPath": {"path": "/var/sotolito/vols/nginx/var"}},
+        {"name": "etc",  "hostPath": {"path": "/var/sotolito/vols/nginx/etc/nginx"}},
+        {"name": "html", "hostPath": {"path": "/var/sotolito/vols/nginx/usr/share/nginx"}},
+        {"name": "run",  "hostPath": {"path": "/var/sotolito/vols/php-fpm/run/php-fpm"}},
+        {"name": "apps", "hostPath": {"path": "/var/sotolito/vols/php-apps"}}
+    ]
+  }
+}

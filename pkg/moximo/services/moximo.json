@@ -3,9 +3,9 @@
         {
             "name"         : "web-service",
             "label"        : "Web Server",
-            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
-            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
-            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/moximo-nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/moximo-nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/moximo-nginx-rc.json",
             "json"         : {
                                 "pod"     : {},
                                 "service" : {},
