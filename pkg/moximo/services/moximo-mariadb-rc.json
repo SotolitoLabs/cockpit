@@ -2,7 +2,7 @@
   "kind": "ReplicationController",
   "apiVersion": "v1",
   "metadata": {
-    "name": "webserver-controller",
+    "name": "db-controller",
     "labels": {
       "state": "serving"
     }
@@ -10,12 +10,12 @@
   "spec": {
     "replicas": 1,
     "selector": {
-      "app": "moximo-web"
+      "app": "moximo-db"
     },
     "template": {
       "metadata": {
         "labels": {
-          "app": "moximo-web"
+          "app": "moximo-db"
         }
       },
       "spec": {
@@ -55,7 +55,7 @@
                 {"name": "db-run", "mountPath": "/run"},
                 {"name": "db-lib", "mountPath": "/var/lib/mysql"},
                 {"name": "db-log", "mountPath": "/var/log/mariadb"},
-                {"name": "db-tmp", "mountPath": "/var/sotolito/vols/mariadb/var/tmp"},
+                {"name": "db-tmp", "mountPath": "/var/tmp"},
                 {"name": "db-var-run", "mountPath": "/var/run/mariadb"}
             ],
 

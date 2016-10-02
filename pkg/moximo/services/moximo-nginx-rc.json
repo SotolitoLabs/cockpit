@@ -58,55 +58,7 @@
             ],
 
             "imagePullPolicy": "IfNotPresent"
-          },
-
-          {
-            "name": "moximo-mariadb",
-            "image": "sotolitolabs-cubie/mariadb",
-            "ports": [
-              {
-                "containerPort": 3306,
-                "protocol": "TCP"
-              }
-            ],
-            "volumeMounts": [
-                {"name": "db-cfg", "mountPath": "/etc/my.cnf"},
-                {"name": "db-cfg-d", "mountPath": "/etc/my.cnf.d"},
-                {"name": "db-run", "mountPath": "/run"},
-                {"name": "db-lib", "mountPath": "/var/lib/mysql"},
-                {"name": "db-log", "mountPath": "/var/log/mariadb"},
-                {"name": "db-tmp", "mountPath": "/var/sotolito/vols/mariadb/var/tmp"},
-                {"name": "db-var-run", "mountPath": "/var/run/mariadb"}
-            ],
-
-            "imagePullPolicy": "IfNotPresent"
-          },
-
-          {
-            "name": "moximo-php-fpm",
-            "image": "sotolitolabs-cubie/php-fpm",
-            "ports": [
-              {
-                "containerPort": 9090,
-                "protocol": "TCP"
-              }
-            ],
-            "volumeMounts": [
-                {"name": "fpm-var", "mountPath": "/var"},
-                {"name": "fpm-etc-conf", "mountPath": "/etc/php-fpm.conf"},
-                {"name": "fpm-etc-d", "mountPath": "/etc/php-fpm.d"},
-                {"name": "fpm-etc-ini", "mountPath": "/etc/php.ini"},
-                {"name": "php-etc-d", "mountPath": "/etc/php.d/"},
-                {"name": "fpm-run", "mountPath": "/run/php-fpm"},
-                {"name": "nginx-html", "mountPath": "/usr/share/nginx"},
-                {"name": "php-apps", "mountPath": "/usr/share/nginx/html/php-apps"},
-                {"name": "db-socket", "mountPath": "/var/lib/mysql/mysql.sock"}
-            ],
-
-            "imagePullPolicy": "IfNotPresent"
           }
-
-
         ],
         "restartPolicy": "Always",
         "dnsPolicy": "ClusterFirst"

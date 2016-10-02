@@ -2,7 +2,7 @@
   "kind": "ReplicationController",
   "apiVersion": "v1",
   "metadata": {
-    "name": "webserver-controller",
+    "name": "php-controller",
     "labels": {
       "state": "serving"
     }
@@ -10,12 +10,12 @@
   "spec": {
     "replicas": 1,
     "selector": {
-      "app": "moximo-web"
+      "app": "moximo-php"
     },
     "template": {
       "metadata": {
         "labels": {
-          "app": "moximo-web"
+          "app": "moximo-php"
         }
       },
       "spec": {
