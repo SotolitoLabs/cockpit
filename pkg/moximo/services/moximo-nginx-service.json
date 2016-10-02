@@ -10,6 +10,7 @@
       "port": 8000,
       "targetPort": 80
     }],
+    "clusterIP": "10.254.2.227",
     "selector": {
       "app": "moximo-web"
     }
