@@ -48,9 +48,17 @@
                             ng-if="!(service.live.metadata.namespace == 'default' && service.live.metadata.name == 'kubernetes')">
                         <!-- <td>{{moximo_services[service.metadata.name].label}}</td> -->
                         <td>{{service.label}}</td>
-                        <td>
-                            <kubernetes-address ng-init="item = service.live" ng-if="service.live != null">
+                        <td ng-if="service.live != null">
+                            <a target="_blank" 
+                               href="{{location.protocol()}}://{{location.host()}}{{service.path}}">
+                                {{location.protocol()}}://{{location.host()}}{{service.path}}
+                            </a>
                         </td>
+
+                        <td ng-if="service.live == null">
+                            {{location.protocol()}}://{{location.host()}}{{service.path}}
+                        </td>
+
                         <td class="containers">{{serviceContainers(service.live)}}</td>
                         <td ng-if="service.live == null">{{service.name}}</td>
                         <td ng-if="service.live != null">{{service.live.metadata.namespace}}</td>

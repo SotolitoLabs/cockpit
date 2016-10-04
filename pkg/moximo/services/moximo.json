@@ -3,6 +3,7 @@
         {
             "name"         : "web-service",
             "label"        : "Web Server",
+            "path"         : "/",
             "pod_file"     : "/cockpit/@localhost/moximo/services/moximo-nginx-pod.json",     
             "service_file" : "/cockpit/@localhost/moximo/services/moximo-nginx-service.json",
             "rc_file"      : "/cockpit/@localhost/moximo/services/moximo-nginx-rc.json",
@@ -19,6 +20,7 @@
         {
             "name"         : "wp-service",
             "label"        : "Blog",
+            "path"         : "/php-apps/wordpress",
             "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
             "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
             "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
@@ -35,6 +37,7 @@
         {
             "name"         : "file-service",
             "label"        : "File Sharing",
+            "path"         : "/php-apps/owncloud",
             "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
             "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
             "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
@@ -51,6 +54,7 @@
         {
             "name"         : "erp-service",
             "label"        : "ERP",
+            "path"         : "/php-apps/odoo",
             "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
             "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
             "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
@@ -67,6 +71,7 @@
         {
             "name"         : "mail-service",
             "label"        : "Mail Service",
+            "path"         : "/php-apps/roundcoube",
             "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
             "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
             "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",

@@ -42,6 +42,7 @@ define([
             client.track($scope.services);
             $($scope.services).on("changed", digest);
             $scope.moximo_services = null;
+            $scope.location = $location;
             get_moximo_services();
 
 
