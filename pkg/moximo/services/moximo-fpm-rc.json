@@ -23,6 +23,7 @@
             {"name": "nginx-var",  "hostPath": {"path": "/var/sotolito/vols/nginx/var"}},
             {"name": "nginx-etc",  "hostPath": {"path": "/var/sotolito/vols/nginx/etc/nginx"}},
             {"name": "nginx-html", "hostPath": {"path": "/var/sotolito/vols/nginx/usr/share/nginx"}},
+            {"name": "nginx-html-web", "hostPath": {"path": "/var/sotolito/vols/nginx/usr/share/nginx/html"}},
             {"name": "fpm-run",    "hostPath": {"path": "/var/sotolito/vols/php-fpm/run/php-fpm"}},
             {"name": "fpm-var",    "hostPath": {"path": "/var/sotolito/vols/php-fpm/var"}},
             {"name": "fpm-etc-conf",    "hostPath": {"path": "/var/sotolito/vols/php-fpm/etc/php-fpm.conf"}},

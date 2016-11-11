@@ -1,0 +1,19 @@
+{
+  "kind": "Service",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "wp-service"
+  },
+  "spec": {
+    "ports": [{
+      "protocol": "TCP",
+      "port": 8001,
+      "targetPort": 80
+    }],
+    "selector": {
+      "app": "web"
+    }
+  }
+}
+
+
