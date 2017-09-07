@@ -1,0 +1,20 @@
+{
+  "kind": "Service",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "web-service"
+  },
+  "spec": {
+    "ports": [{
+      "protocol": "TCP",
+      "port": 80,
+      "targetPort": 80
+    }],
+    "clusterIP": "10.254.2.227",
+    "selector": {
+      "app": "moximo-web"
+    }
+  }
+}
+
+

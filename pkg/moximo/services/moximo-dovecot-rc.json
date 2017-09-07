@@ -1,0 +1,63 @@
+{
+  "kind": "ReplicationController",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "webserver-controller",
+    "labels": {
+      "state": "serving"
+    }
+  },
+  "spec": {
+    "replicas": 1,
+    "selector": {
+      "app": "moximo-web"
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "moximo-web"
+        }
+      },
+      "spec": {
+        "volumes": [
+
+
+-v /var/sotolito/vols/postfix/var:/var/ \
+           -v /var/sotolito/vols/postfix/etc/postfix:/etc/postfix \
+           -v /var/sotolito/vols/postfix/etc/sasl:/etc/sasl \
+           -v /var/sotolito/vols/postfix/var/lib/postfix:/var/lib/postfix \
+           -v /var/sotolito/vols/postfix/var/spool/postfix:/var/spool/postfix \
+
+
+
+            {"name": "postfix-etc",   "hostPath": {"path": "/var/sotolito/vols/postfix/etc/postfix"}}
+            {"name": "postfix-sasl",   "hostPath": {"path": "/var/sotolito/vols/postfix/etc/sasl"}}
+            {"name": "postfix-lib",   "hostPath": {"path": "/var/sotolito/vols/postfix/var/lib/postfix"}}
+            {"name": "postfix-spool",   "hostPath": {"path": "/var/sotolito/vols/postfix/var/spool/postfix"}}
+        ],
+        "containers": [
+          {
+            "name": "moximo-postfix",
+            "image": "sotolitolabs-cubie/postfix",
+            "ports": [
+              {
+                "containerPort": 25,
+                "protocol": "TCP"
+              }
+            ],
+            "volumeMounts": [
+ 	       {"name": "postfix-etc",   "mountPath": {"path": "/etc/postfix"}}
+               {"name": "postfix-sasl",   "mountPath": {"path": "/etc/sasl"}}
+               {"name": "postfix-lib",   "mountPath": {"path": "/var/lib/postfix"}}
+               {"name": "postfix-spool",   "mountPath": {"path": "/var/spool/postfix"}}
+            ],
+
+            "imagePullPolicy": "IfNotPresent"
+          }
+        ],
+        "restartPolicy": "Always",
+        "dnsPolicy": "ClusterFirst"
+      }
+    }
+  }
+}

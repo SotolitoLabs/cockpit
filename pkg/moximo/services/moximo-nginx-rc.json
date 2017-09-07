@@ -1,0 +1,68 @@
+{
+  "kind": "ReplicationController",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "webserver-controller",
+    "labels": {
+      "state": "serving"
+    }
+  },
+  "spec": {
+    "replicas": 1,
+    "selector": {
+      "app": "moximo-web"
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "moximo-web"
+        }
+      },
+      "spec": {
+        "volumes": [
+            {"name": "nginx-var",  "hostPath": {"path": "/var/sotolito/vols/nginx/var"}},
+            {"name": "nginx-etc",  "hostPath": {"path": "/var/sotolito/vols/nginx/etc/nginx"}},
+            {"name": "nginx-html", "hostPath": {"path": "/var/sotolito/vols/nginx/usr/share/nginx"}},
+            {"name": "fpm-run",    "hostPath": {"path": "/var/sotolito/vols/php-fpm/run/php-fpm"}},
+            {"name": "fpm-var",    "hostPath": {"path": "/var/sotolito/vols/php-fpm/var"}},
+            {"name": "fpm-etc-conf",    "hostPath": {"path": "/var/sotolito/vols/php-fpm/etc/php-fpm.conf"}},
+            {"name": "fpm-etc-d",  "hostPath": {"path": "/var/sotolito/vols/php-fpm/etc/php-fpm.d"}},
+            {"name": "fpm-etc-ini",  "hostPath": {"path": "/var/sotolito/vols/php-fpm/etc/php.ini"}},
+            {"name": "php-etc-d",  "hostPath": {"path": "/var/sotolito/vols/php-fpm/etc/php.d/"}},
+            {"name": "php-apps",   "hostPath": {"path": "/var/sotolito/vols/php-apps"}},
+            {"name": "db-socket",  "hostPath": {"path": "/var/sotolito/vols/mariadb/var/lib/mysql/mysql.sock"}},
+            {"name": "db-cfg",     "hostPath": {"path": "/var/sotolito/vols/mariadb/etc/my.cnf"}},
+            {"name": "db-cfg-d",   "hostPath": {"path": "/var/sotolito/vols/mariadb/etc/my.cnf.d"}},
+            {"name": "db-run",   "hostPath": {"path": "/var/sotolito/vols/mariadb/run"}},
+            {"name": "db-lib",   "hostPath": {"path": "/var/sotolito/vols/mariadb/var/lib/mysql"}},
+            {"name": "db-log",   "hostPath": {"path": "/var/sotolito/vols/mariadb/var/log/mariadb"}},
+            {"name": "db-tmp",   "hostPath": {"path": "/var/sotolito/vols/mariadb/var/tmp"}},
+            {"name": "db-var-run",   "hostPath": {"path": "/var/sotolito/vols/mariadb/var/run/mariadb"}}
+        ],
+        "containers": [
+          {
+            "name": "moximo-webserver",
+            "image": "sotolitolabs-cubie/nginx",
+            "ports": [
+              {
+                "containerPort": 80,
+                "protocol": "TCP"
+              }
+            ],
+            "volumeMounts": [
+                {"name": "nginx-var", "mountPath": "/var"},
+                {"name": "nginx-etc", "mountPath": "/etc/nginx"},
+                {"name": "nginx-html", "mountPath": "/usr/share/nginx"},
+                {"name": "fpm-run", "mountPath": "/run/php-fpm"},
+                {"name": "php-apps", "mountPath": "/usr/share/nginx/html/php-apps"}
+            ],
+
+            "imagePullPolicy": "IfNotPresent"
+          }
+        ],
+        "restartPolicy": "Always",
+        "dnsPolicy": "ClusterFirst"
+      }
+    }
+  }
+}

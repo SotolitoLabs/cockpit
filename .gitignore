@@ -11,6 +11,8 @@
 *.typelib
 *.so
 *.mo
+=======
+*.swp
 *~
 *.dirstamp
 .deps/
