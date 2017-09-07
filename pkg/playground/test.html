@@ -2,10 +2,11 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Cockpit terminal</title>
+    <title>Cockpit playground</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="../base1/cockpit.css" type="text/css" rel="stylesheet">
-    <script src="../base1/bundle.js"></script>
+    <link href="../base1/patternfly.css" type="text/css" rel="stylesheet">
+    <script src="../base1/jquery.js"></script>
+    <script src="../base1/cockpit.js"></script>
     <script src="test.js"></script>
 </head>
 <body hidden>
@@ -23,9 +24,6 @@
             <button class="btn btn-default">Superuser</button>
             <span></span>
         </div>
-        <p>Translated text: <span translatable="yes">Networking</span></p>
-        <p>On the fly: <span id="translation"></span> <span id="reverse"></span></p>
-        <br/>
         <button class="btn btn-default" id="modify-file">Increment /tmp/counter atomically</button>
         <div id="file-content"></div>
         <div id="file-error"></div>
@@ -36,6 +34,8 @@
           <button class="btn btn-default" id="delete-file">Delete /tmp/counter</button>
         </div>
         <textarea id="edit-file"></textarea>
+        <br/>
+        Visibility: <label id="hidden"></label>
     </div>
 </body>
 </html>

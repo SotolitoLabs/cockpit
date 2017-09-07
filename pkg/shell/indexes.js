@@ -19,13 +19,13 @@
 
 var phantom_checkpoint = phantom_checkpoint || function () { };
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "shell/base_index",
-    "manifests"
-], function($, cockpit, base_index, manifests) {
+(function() {
     "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var base_index = require("./base_index");
 
     var _ = cockpit.gettext;
 
@@ -59,7 +59,7 @@ define([
         /* Reconnect button */
         $("#machine-reconnect").on("click", function(ev) {
             if (watchdog_problem) {
-                window.sessionStorage.clear();
+                cockpit.sessionStorage.clear();
                 window.location.reload(true);
             } else {
                 navigate(null, true);
@@ -109,6 +109,7 @@ define([
         $("#machine-link").on("click", function(ev) {
             if (machines.list.length == 1) {
                 index.jump({ host: machines.list[0].address, sidebar: true, component: "" });
+                ev.preventDefault();
                 return false;
             }
         });
@@ -227,14 +228,24 @@ define([
                 el.toggleClass("active", el.attr("data-component") === state.component);
             });
 
+            /* When no dashboard type components show a minimal navbar */
+            var minimal = Object.keys(compiled.items).every(function(key) {
+                return compiled.items[key].section != "dashboard";
+            });
+
+            /* Unless there are more than one machine */
+            if (machines.list.length > 1)
+                minimal = false;
+
             var hide;
             if (machine && machine.static_hostname) {
                 hide = $(".dashboard-link").length < 2 && machines.list.length < 2;
-                $('#content-navbar').toggleClass("hidden", hide);
+                $('#content-navbar').toggleClass("hidden", hide || minimal);
             } else {
-                $('#content-navbar').toggleClass("hidden", false);
+                $('#content-navbar').toggleClass("hidden", minimal);
             }
 
+            /* When a dashboard no machine or sidebar */
             var item = compiled.items[state.component];
             if (item && item.section == "dashboard") {
                 delete state.sidebar;
@@ -259,7 +270,7 @@ define([
                 color = "transparent";
             else
                 color = machine.color || "";
-            $("#machine-color").css("border-left-color", color);
+            $(".machine-color").css("border-left-color", color);
 
             $("#machine-dropdown").toggleClass("active", !!machine);
 
@@ -274,11 +285,11 @@ define([
 
         function update_sidebar(machine, state, compiled) {
             function links(component) {
-                return $("<li>")
+                return $("<li class='list-group-item'>")
                     .toggleClass("active", state.component === component.path)
                     .append($("<a>")
                         .attr("href", index.href({ host: machine.address, component: component.path }))
-                        .text(component.label));
+                        .append($("<span>").text(component.label)));
             }
 
             var menu = compiled.ordered("menu").map(links);
@@ -286,7 +297,6 @@ define([
 
             var tools = compiled.ordered("tools").map(links);
             $("#sidebar-tools").empty().append(tools);
-            $('#tools-panel li.active').parents('#tools-panel').collapse('show');
         }
 
         function update_title(label, machine) {
@@ -471,7 +481,7 @@ define([
         var index = base_index.new_index_from_proto(index_options);
         var compiled = base_index.new_compiled();
 
-        compiled.load(manifests, "dashboard");
+        compiled.load(cockpit.manifests, "dashboard");
 
         /* Disconnection Dialog */
         var watchdog_problem = null;
@@ -482,7 +492,7 @@ define([
 
         /* Reconnect button */
         $("#machine-reconnect").on("click", function(ev) {
-            window.sessionStorage.clear();
+            cockpit.sessionStorage.clear();
             window.location.reload(true);
         });
 
@@ -535,7 +545,8 @@ define([
             });
 
             var item = compiled.items[state.component];
-            delete state.sidebar;
+            if (item && item.section == "dashboard")
+                delete state.sidebar;
 
             $("#machine-link span").text(default_title);
             if ($(".dashboard-link").length < 2)
@@ -551,7 +562,6 @@ define([
         }
 
         function update_frame(state) {
-            var title;
             var current_frame = index.current_frame();
 
             var hash = state.hash;
@@ -579,7 +589,7 @@ define([
         });
     }
 
-    return {
+    module.exports = {
         simple_index: function (options) {
             return new SimpleIndex(options);
         },
@@ -587,4 +597,28 @@ define([
             return new MachinesIndex(options, machines_ins, loader, mdialogs);
         }
     };
-});
+
+    function message_queue(event) {
+        window.messages.push(event);
+    }
+
+    /* When we're being loaded into the index window we have additional duties */
+    if (document.documentElement.getAttribute("class") === "index-page") {
+        /* Indicates to child frames that we are a cockpit1 router frame */
+        window.name = "cockpit1";
+
+        /* The same thing as above, but compatibility with old cockpit */
+        window.options = { sink: true, protocol: "cockpit1" };
+
+        /* While the index is initializing, snag any messages we receive from frames */
+        window.messages = [ ];
+
+        window.messages.cancel = function() {
+            window.removeEventListener("message", message_queue, false);
+            window.messages = null;
+        };
+
+        window.addEventListener("message", message_queue, false);
+    }
+
+}());

@@ -17,17 +17,12 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-require([
-    "jquery",
-    "base1/cockpit",
-    "data!sosreport/run-sosreport.sh",
-    "shell/po"
-], function($, cockpit, run_sosreport_sh, po) {
-    "use strict";
+    var cockpit = require("cockpit");
+    var $ = require("jquery");
 
-    cockpit.locale(po);
-    cockpit.translate();
     var _ = cockpit.gettext;
+
+    var run_sosreport_sh = require("raw!./run-sosreport.sh");
 
     var sos_task;
     var sos_archive_url;
@@ -160,6 +155,7 @@ require([
             $("#sos-cancel").on("click", sos_cancel);
             $('#sos-download button').on('click', sos_download);
 
+            cockpit.translate();
             $('body').show();
 
             // Send a 'init' message.  This tells the tests that we
@@ -170,4 +166,3 @@ require([
     }
 
     init();
-});

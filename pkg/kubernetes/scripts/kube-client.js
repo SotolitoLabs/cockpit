@@ -20,6 +20,8 @@
 (function() {
     "use strict";
 
+    var angular = require('angular');
+
     /*
      * Some notes on the create fields.
      *
@@ -58,10 +60,12 @@
         { kind: "ProjectRequest", type: "projectrequests", api: OPENSHIFT, global: true, create: -90 },
         { kind: "ReplicationController", type: "replicationcontrollers", api: KUBE, create: -60 },
         { kind: "Service", type: "services", api: KUBE, create: -80 },
+        { kind: "SubjectAccessReview", type: "subjectaccessreviews", api: OPENSHIFT },
         { kind: "User", type: "users", api: OPENSHIFT, global: true },
     ]);
 
     var NAME_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+    var USER_NAME_RE = /^[a-zA-Z0-9_.]([-a-zA-Z0-9 ,=@._]*[a-zA-Z0-9._])?$/;
 
     /* Timeout for non-GET requests */
     var REQ_TIMEOUT = "120s";
@@ -199,7 +203,7 @@
         var self = this;
 
         self.delete = function delete_(obj) {
-            var x, map = obj[weak_property];
+            var map = obj[weak_property];
             if (map)
                 delete map[local_property];
         };
@@ -269,9 +273,6 @@
 
         /*
          * Combine into a path.
-         *
-         * Kubernetes names and namespaces are quite limited in their contents
-         * and do not need escaping to be used in a URI path.
          */
         var schema = SCHEMA[args[0]] || SCHEMA[""];
         var path = schema.api;
@@ -279,7 +280,8 @@
             path += "/namespaces/" + args[2];
         path += "/" + schema.type;
         if (args[1])
-            path += "/" + args[1];
+            path += "/" + encodeURIComponent(args[1]);
+
         return path;
     }
 
@@ -324,7 +326,7 @@
      * Tell the loader about a objects that has been loaded
      * or removed elsewhere.
      *
-     * loader.listen(callback)
+     * loader.listen(callback, until)
      *
      * Register a callback to be invoked some time after new
      * objects have been loaded. Returns an object with a
@@ -362,7 +364,7 @@
      *
      * A dict of all loaded objects.
      *
-     * promise = loader.watch(type)
+     * promise = loader.watch(type, until)
      *
      * Start watching the given resource type. The returned promise
      * will be resolved when an initial set of objects have been
@@ -376,11 +378,13 @@
         "KubeRequest",
         "KUBE_SCHEMA",
         function($q, $timeout, KubeWatch, KubeRequest, KUBE_SCHEMA) {
+            var self;
+
             var callbacks = [];
             var limits = { namespace: null };
 
             /* All the current watches */
-            var watches = { };
+            var watching = { };
 
             /* All the loaded objects */
             var objects = { };
@@ -389,30 +393,55 @@
             var batch = null;
             var batchTimeout = null;
 
-            function ensureWatch(what, namespace) {
+            function ensureWatch(what, namespace, increment) {
                 var schema = SCHEMA[what] || SCHEMA[""];
-                var path = schema.api;
+                var watch, path = schema.api;
                 if (!schema.global && namespace)
                     path += "/namespaces/" + namespace;
                 path += "/" + schema.type;
-                if (!(path in watches)) {
-                    watches[path] = new KubeWatch(path, handleFrames);
-                    watches[path].params = { what: what, global: schema.global, namespace: namespace };
+
+                if (!(path in watching)) {
+                    watch = new KubeWatch(path, handleFrames);
+                    watch.what = what;
+                    watch.global = schema.global;
+                    watch.namespace = namespace;
+                    watch.cancelWatch = watch.cancel;
+
+                    /* Replace the cancel function with one that does ref counting */
+                    watch.cancel = function() {
+                        var w = watching[path];
+                        if (w) {
+                            w.references -= 1;
+                            if (w.references <= 0) {
+                                w.cancelWatch();
+                                delete watching[path];
+                            }
+                        }
+                    };
+                    watching[path] = watch;
                 }
-                return watches[path];
+
+                /* Increase the references here */
+                watching[path].references += increment;
+                return watching[path];
             }
 
-            function ensureWatches(what) {
-                var parts, namespace = limits.namespace;
-                if (angular.isArray(namespace)) {
-                    parts = [];
-                    angular.forEach(namespace, function(val) {
-                        parts.push(ensureWatch(what, val));
+            function ensureWatches(what, increment) {
+                var namespace = limits.namespace;
+                if (!angular.isArray(namespace))
+                    return ensureWatch(what, namespace, increment);
+
+                var parts = [];
+                angular.forEach(namespace, function(val) {
+                    parts.push(ensureWatch(what, val, increment));
+                });
+                var ret = $q.all(parts);
+                ret.cancel = function() {
+                    angular.forEach(parts, function(val) {
+                        val.cancel();
                     });
-                    return $q.all(parts);
-                } else {
-                    return ensureWatch(what, namespace);
-                }
+                };
+                return ret;
             }
 
             function handleFrames(frames) {
@@ -432,6 +461,15 @@
                 handleFlush(invokeCallbacks);
             }
 
+            function resourceVersion(resource) {
+                var version;
+                if (resource && resource.metadata)
+                    version = parseInt(resource.metadata.resourceVersion, 10);
+
+                if (!isNaN(version))
+                    return version;
+            }
+
             function handleFlush(invoke) {
                 var drain = batch;
                 batch = null;
@@ -441,14 +479,31 @@
 
                 var present = { };
                 var removed = { };
-                var i, len, frame, link, resource, key;
+                var i, len, link, resource;
+                var cVersion, lVersion;
                 for (i = 0, len = drain.length; i < len; i++) {
                     resource = drain[i].object;
                     if (resource) {
-                        link = resourcePath([resource]);
+                        link = decodeURIComponent(resourcePath([resource]));
                         if (drain[i].type == "DELETED") {
                             delete objects[link];
+                            delete present[link];
                             removed[link] = resource;
+                        } else if (drain[i].checkResourceVersion) {
+                            /* There is a race between items loaded from
+                             * watchers and items loaded other ways such as
+                             * from KubeMethods callbacks, where we might
+                             * end up saving the older item if loader.load is
+                             * called after the watcher has already loaded fresher
+                             * data. Look at the resourceVersion and only add
+                             * if it is the same or newer than what we already have.
+                             */
+                            cVersion = resourceVersion(resource);
+                            lVersion = resourceVersion(objects[link]);
+                            if (!cVersion || !lVersion || cVersion >= lVersion) {
+                                present[link] = resource;
+                                objects[link] = resource;
+                            }
                         } else {
                             present[link] = resource;
                             objects[link] = resource;
@@ -475,7 +530,7 @@
             }
 
             function resetLoader() {
-                var link, path;
+                var link;
 
                 /* We drop any batched objects in flight */
                 window.clearTimeout(batchTimeout);
@@ -483,10 +538,10 @@
                 batch = null;
 
                 /* Cancel all the watches  */
-                var old = watches;
-                watches = { };
-                angular.forEach(old, function(watch) {
-                    watch.cancel();
+                var old = watching;
+                watching = { };
+                angular.forEach(old, function(w) {
+                    w.cancelWatch();
                 });
 
                 /* Clear out everything */
@@ -508,7 +563,8 @@
 
                     return {
                         type: removed ? "DELETED" : "ADDED",
-                        object: resource
+                        object: resource,
+                        checkResourceVersion: true
                     };
                 }));
                 handleFlush(invokeCallbacks);
@@ -545,7 +601,7 @@
                 batchTimeout = null;
 
                 /* Convert this to our native format */
-                var i, len, only = { };
+                var only = { };
                 if (value === null) {
                     only = null;
                 } else if (angular.isArray(value)) {
@@ -576,14 +632,13 @@
                 }
 
                 /* Cancel any watches not applicable to these namespaces */
-                var path, watch, reconnect = [ ];
-                for (path in watches) {
-                    watch = watches[path];
-                    if ((!only && watch.params.namespace) ||
-                        (only && !watch.params.global && !(watch.params.namespace in only))) {
-                        watches[path].cancel();
-                        delete watches[path];
-                        reconnect.push(watch);
+                var path, w, reconnect = [ ];
+                for (path in watching) {
+                    w = watching[path];
+                    if ((!only && w.namespace) || (only && !w.global && !(w.namespace in only))) {
+                        w.cancelWatch();
+                        delete watching[path];
+                        reconnect.push(w);
                     }
                 }
 
@@ -591,13 +646,29 @@
                 invokeCallbacks(present, removed);
 
                 /* Reconnect all the watches we cancelled with proper namespace */
-                angular.forEach(reconnect, function(watch) {
-                    ensureWatches(watch.params.what);
+                angular.forEach(reconnect, function(w) {
+                    ensureWatches(w.what, w.references);
                 });
             }
 
-            var self = {
-                watch: ensureWatches,
+            function connectUntil(ret, until) {
+                if (until) {
+                    if (until.$on) {
+                        until.$on("destroy", function() {
+                            ret.cancel();
+                        });
+                    } else {
+                        console.warn("invalid until passed to watch", until);
+                    }
+                }
+            }
+
+            self = {
+                watch: function watch(what, until) {
+                    var ret = ensureWatches(what, 1);
+                    connectUntil(ret, until);
+                    return ret;
+                },
                 load: function load(/* ... */) {
                     return loadObjects.apply(this, arguments);
                 },
@@ -606,8 +677,8 @@
                         adjustNamespace(options.namespace);
                 },
                 reset: resetLoader,
-                listen: function listen(callback, before) {
-                    if (before)
+                listen: function listen(callback, until) {
+                    if (callback.early)
                         callbacks.unshift(callback);
                     else
                         callbacks.push(callback);
@@ -615,7 +686,7 @@
                         timeout = null;
                         callback.call(self, objects);
                     }, 0);
-                    return {
+                    var ret = {
                         cancel: function() {
                             var i, len;
                             $timeout.cancel(timeout);
@@ -626,6 +697,8 @@
                             }
                         }
                     };
+                    connectUntil(ret, until);
+                    return ret;
                 },
                 handle: function handle(objects, removed, kind) {
                     if (!angular.isArray(objects))
@@ -701,7 +774,7 @@
             var weakmap = new SimpleWeakMap();
             var version = 1;
 
-            loader.listen(function(present, removed) {
+            function listener(present, removed) {
                 version += 1;
 
                 /* Get called like this when reset */
@@ -712,12 +785,13 @@
                 } else if (index) {
                     indexObjects(present);
                 }
-            }, true);
+            }
+
+            listener.early = true;
+            loader.listen(listener);
 
             /* Create a new index and populate */
             function indexCreate() {
-                var name, filter;
-
                 /* TODO: Derive this value from cluster size */
                 index = new HashIndex(262139);
 
@@ -831,7 +905,7 @@
             }
 
             function digestFilter(filter, what, criteria) {
-                var p, pl, key, keyo, possible, link, object;
+                var p, pl, key, possible, link, object;
                 var results = { }, count = 0;
 
                 key = filter.digest.apply(null, criteria);
@@ -1210,6 +1284,8 @@
 
             function generalMethodRequest(method, resource, body, config) {
                 var path = resourcePath([resource]);
+                if (method != "GET")
+                    path += "?timeout=" + REQ_TIMEOUT;
                 var promise = new KubeRequest(method, path, JSON.stringify(body), config);
                 return promise.then(function(response) {
                     var resp = response.data;
@@ -1240,10 +1316,15 @@
                 if (meta) {
                     ex = null;
                     if (meta.name !== undefined) {
+                        var check_re = (resource.kind == "User") ? USER_NAME_RE : NAME_RE;
                         if (!meta.name)
                             ex = new Error("The name cannot be empty");
-                        else if (!NAME_RE.test(meta.name))
-                            ex = new Error("The name contains invalid characters");
+                        else if (!check_re.test(meta.name))
+                            if (check_re == NAME_RE) {
+                                ex = new Error("The name contains invalid characters. Only letters, numbers and dashes are allowed");
+                            } else {
+                                ex = new Error("The name contains invalid characters. Only letters, numbers, spaces and the following symbols are allowed: , = @  . _");
+                            }
                     }
                     if (ex) {
                         ex.target = targets["metadata.name"];
@@ -1255,7 +1336,7 @@
                         if (!meta.namespace)
                             ex = new Error("The namespace cannot be empty");
                         else if (!NAME_RE.test(meta.namespace))
-                            ex = new Error("The name contains invalid characters");
+                            ex = new Error("The name contains invalid characters. Only letters, numbers and dashes are allowed");
                     }
                     if (ex) {
                         ex.target = targets["metadata.namespace"];

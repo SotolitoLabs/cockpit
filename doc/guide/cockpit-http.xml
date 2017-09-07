@@ -177,7 +177,7 @@ request.always(function() { ... })
 </programlisting>
     <para>This is a standard
       <ulink url="http://api.jquery.com/category/deferred-object/">jQuery promise</ulink> method.
-      It sets up a handler to be called when when the process completes, whether it exits successfully,
+      It sets up a handler to be called when the process completes, whether it exits successfully,
       fails, terminates, or exits with a failure.</para>
   </refsection>
 
@@ -227,6 +227,16 @@ request.close([problem])
 </programlisting>
     <para>Cancel the request. If <code>problem</code> is specified it should be a
       standard <link linkend="cockpit-problems">problem code</link> string.</para>
+  </refsection>
+
+  <refsection id="cockpit-http-close-all">
+    <title>http.close()</title>
+    <programlisting>
+http.close([problem])
+    </programlisting>
+    <para>Cancel all outstanding requests with the given problem code.  This is useful when
+    you know that the server is going down soon.
+    </para>
   </refsection>
 
 </refentry>

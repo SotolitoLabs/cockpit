@@ -21,8 +21,10 @@
 
 #include "mock-service.h"
 #include "mock-dbus-tests.h"
+#include "cockpitunixfd.h"
 
 #include <gio/gio.h>
+#include <gio/gunixfdlist.h>
 #include <glib-unix.h>
 #include <string.h>
 
@@ -44,6 +46,15 @@ on_handle_hello_world (TestFrobber *object,
   response = g_strdup_printf ("Word! You said `%s'. I'm Skeleton, btw!", greeting);
   test_frobber_complete_hello_world (object, invocation, response);
   g_free (response);
+  return TRUE;
+}
+
+static gboolean
+on_handle_never_return (TestFrobber *object,
+                        GDBusMethodInvocation *invocation,
+                        const gchar *greeting,
+                        gpointer user_data)
+{
   return TRUE;
 }
 
@@ -131,6 +142,16 @@ on_handle_test_non_primitive_types (TestFrobber *object,
   test_frobber_complete_test_non_primitive_types (object, invocation, str->str);
   g_string_free (str, TRUE);
   return TRUE;
+}
+
+static gboolean
+on_handle_test_variant (TestFrobber *object,
+                        GDBusMethodInvocation *invocation,
+                        GVariant *v,
+                        gpointer user_data)
+{
+        test_frobber_complete_test_variant (object, invocation);
+        return TRUE;
 }
 
 static gboolean
@@ -423,6 +444,83 @@ on_release_other_name (TestFrobber *frobber,
 
 }
 
+static gboolean
+on_tell_me_your_name (TestFrobber *frobber,
+                      GDBusMethodInvocation *invocation,
+                      gpointer user_data)
+{
+  GDBusMessage *message = g_dbus_method_invocation_get_message (invocation);
+  GVariant *name = g_variant_new_string (g_dbus_message_get_destination (message));
+  g_dbus_method_invocation_return_value (invocation, g_variant_new_tuple (&name, 1));
+  return TRUE;
+
+}
+
+static gboolean
+test_fd_pipe_readable (gint fd,
+                       GIOCondition condition,
+                       gpointer user_data)
+{
+  const char *expected = "Hello, fd";
+  size_t expected_len = strlen (expected);
+  char buffer[100];
+  size_t n;
+
+  g_assert (condition == G_IO_IN);
+
+  n = read (fd, buffer, 100);
+  g_assert (n == expected_len);
+  g_assert (strncmp (buffer, expected, expected_len) == 0);
+
+  close (fd);
+
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean
+on_make_test_fd (TestFrobber *frobber,
+                 GDBusMethodInvocation *invocation,
+                 const char *type,
+                 gpointer user_data)
+{
+  gint fds[2] = { -1, -1 };
+  GUnixFDList *fd_list;
+  const char *data = "Hello, fd";
+  size_t data_size = strlen (data);
+  size_t n;
+  GError *error = NULL;
+
+  g_unix_open_pipe (fds, FD_CLOEXEC, &error);
+  g_assert_no_error (error);
+
+  fd_list = g_unix_fd_list_new ();
+
+  if (g_str_equal (type, "readable"))
+    {
+      g_unix_fd_list_append (fd_list, fds[0], &error);
+      g_assert_no_error (error);
+      close (fds[0]);
+
+      n = write(fds[1], data, data_size);
+      g_assert (n == data_size);
+      close (fds[1]);
+    }
+  else if (g_str_equal (type, "writable"))
+    {
+      g_unix_fd_list_append (fd_list, fds[1], &error);
+      g_assert_no_error (error);
+      close (fds[1]);
+
+      cockpit_unix_fd_add (fds[0], G_IO_IN, test_fd_pipe_readable, NULL);
+    }
+  else
+    g_assert_not_reached ();
+
+  g_dbus_method_invocation_return_value_with_unix_fd_list (invocation, g_variant_new ("(h)", 0), fd_list);
+
+  return TRUE;
+}
+
 /* ------------------------------------------------------------------------
  * Non object manager stuff
  */
@@ -655,12 +753,17 @@ mock_service_create_and_export (GDBusConnection *connection,
   g_assert_no_error (error);
   g_signal_connect (exported_frobber, "handle-hello-world",
                     G_CALLBACK (on_handle_hello_world), NULL);
+  g_signal_connect (exported_frobber, "handle-never-return",
+                    G_CALLBACK (on_handle_never_return), NULL);
   g_signal_connect (exported_frobber,
                     "handle-test-primitive-types",
                     G_CALLBACK (on_handle_test_primitive_types), NULL);
   g_signal_connect (exported_frobber,
                     "handle-test-non-primitive-types",
                     G_CALLBACK (on_handle_test_non_primitive_types), NULL);
+  g_signal_connect (exported_frobber,
+                    "handle-test-variant",
+                    G_CALLBACK (on_handle_test_variant), NULL);
   g_signal_connect (exported_frobber,
                     "handle-request-signal-emission",
                     G_CALLBACK (on_handle_request_signal_emission), NULL);
@@ -700,6 +803,10 @@ mock_service_create_and_export (GDBusConnection *connection,
                     G_CALLBACK (on_claim_other_name), mock_data);
   g_signal_connect (exported_frobber, "handle-release-other-name",
                     G_CALLBACK (on_release_other_name), mock_data);
+  g_signal_connect (exported_frobber, "handle-tell-me-your-name",
+                    G_CALLBACK (on_tell_me_your_name), mock_data);
+  g_signal_connect (exported_frobber, "handle-make-test-fd",
+                    G_CALLBACK (on_make_test_fd), mock_data);
 
   g_object_unref (exported_frobber);
   mock_service_create_introspect_fail (connection);

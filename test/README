@@ -3,85 +3,70 @@
 This directory contains automated integration tests for Cockpit, and the support
 files for them.
 
-To run the tests on Fedora, you need to install the following packages:
+To run the tests on Fedora, refer to the [HACKING](../HACKING.md) guide for
+installation of all of the necessary build and test dependencies. There's
+no need to trigger a build manually - the test suite preparation step below
+will handle that.
 
-    $ sudo yum install npm python-libguestfs qemu qemu-kvm python \
-         libvirt-client openssl libguestfs-tools \
-         krb5-workstation expect rsync libvirt-python curl xz
-
-Testing requires phantomjs inside the cockpit package.
-
-    $ npm install phantomjs-prebuilt
+If test failures are encountered that look like they may be related to problems
+with nested virtualization, refer to
+[this Fedora guide](https://fedoraproject.org/wiki/How_to_enable_nested_virtualization_in_KVM)
+for more details and recommendations on ensuring it is enabled correctly.
 
 ## Introduction
 
-To run the integration tests run the following. Don't run the integration tests
-as root:
+Before running the tests, ensure Cockpit has been built where the test suite
+expects to find it (do NOT run the build step as root):
 
-    $ ./VERIFY
+   $ ./bots/image-prepare
 
-The first time you run the tests, they will create a cockpit1 bridged network used
-for testing. You may be required to type your sudo password for this to work. In
-addition various test images will be downloaded. This can take some time.
+To run the integration tests run the following (do NOT run the integration tests
+as root):
+
+    $ ./test/verify/run-tests
+
+The tests will automatically download the VM images they need, so expect
+that the initial run may take a couple of hours (there are quite a few
+images to retrieve for different scenario tests).
 
 Alternatively you can run an individual test like this:
 
-    $ cd test
-    $ ./testsuite-prepare
-    $ ./verify/check-session
-
-The `./testsuite-prepare` command builds cockpit and puts it into the test. Only
-code currently committed in the current branch will be installed and tested.
+    $ ./bots/image-prepare
+    $ ./test/verify/check-session
 
 To see more verbose output from the test, use the --verbose and/or --trace flags:
 
-    $ ./verify/check-session --verbose --trace
+    $ ./test/verify/check-session --verbose --trace
 
 In addition if you specify `--sit`, then the test wail wait on failure and allow
 you to log into cockpit and/or the test instance and diagnose the issue. An address
 will be printed of the test instance.
 
-    $ ./verify/check-session --trace --sit
+    $ ./test/verify/check-session --trace --sit
 
 ## Details
 
-For setting up the host:
-
- * vm-prep: Create the test network etc. Requires root.
-
-For managing test machines and their images:
-
- * vm-download: Download test images
- * vm-upload: Upload test images
- * vm-create: Create test machine images
- * vm-reset: Start over from a clean slate
- * vm-install: Build and install Cockpit packages into a test machine image
-
-For debugging:
-
- * vm-run: Run a test machine image
- * vm-copy: Copy files into a running test machine
- * vm-sh: Execute commands in a running test machine
-
 The verify test suite is the main test suite:
 
- * verify/testsuite-prepare: Prepare everything so that tests can run
- * verify/run-tests: Run all tests
- * verify/check-*: Run the selected tests
+ * test/verify/run-tests: Run all tests
+ * test/verify/check-*: Run the selected tests
 
 ## Test Configuration
 
 You can set these environment variables to configure the test suite:
 
-  TEST_OS    The OS to run the tests in.  Currently supported values: (vm-create)
-                "fedora-23"
-                "fedora-24"
-                "fedora-testing"
-                "fedora-atomic"
+  TEST_OS    The OS to run the tests in.  Currently supported values:
                 "centos-7"
+                "debian-stable"
+                "debian-testing"
+                "fedora-24"
+                "fedora-25"
+                "fedora-26"
+                "fedora-atomic"
+                "fedora-testing"
                 "rhel-7"
-                "debian-unstable"
-             "fedora-24" is the default (testinfra.py, testlib.sh)
+                "ubuntu-1604"
+             "fedora-26" is the default (testvm.py)
 
   TEST_DATA  Where to find and store test machine images.  The
              default is the same directory that this README file is in.
@@ -94,7 +79,7 @@ The code under test is executed in one or more dedicated virtual
 machines, called the "test machines".  Fresh test machines are started
 for each test. To pull all the needed images for a given commit, use:
 
- $ ./vm-download
+ $ bots/image-download
 
 A test machine runs a "test machine image".  Such a test machine image
 contains the root filesystem that is booted inside the virtual
@@ -104,24 +89,24 @@ image.  Thus, you can run multiple test machines from the same image,
 at the same time or one after the other, and each test machine starts
 with a clean state.
 
-A test machine image is created with vm-create, like so:
+A test machine image is created with image-create, like so:
 
-  $ ./vm-create -v fedora-24
+  $ bots/image-create -v fedora-24
 
 The image will be created in $TEST_DATA/images/. In addition a link
-reference will be created in test/images/.
+reference will be created in bots/images/.
 
 If you wish that others use this new image then you should commit the
-new reference link, and use `vm-upload` to upload the new image. You
+new reference link, and use `image-upload` to upload the new image. You
 would need to have Cockpit commit access to do this:
 
-  $ ./vm-upload fedora-24
+  $ bots/image-upload fedora-24
 
 There is more than one test machine image. For example, you might
 want to test a scenario where Cockpit on one machine talks to FreeIPA
 on another, and you want those two machines to use different images.
 
-This is handled by passing a specific image to vm-create
+This is handled by passing a specific image to image-create
 and other scripts that work with test machine images.
 
   "fedora-NN" -- The basic image for running the development version of Cockpit.
@@ -135,28 +120,31 @@ and other scripts that work with test machine images.
 
   "openshift" -- An Openshift Origin server.
 
-A test machine image created by vm-create doesn't contain any Cockpit
+A test machine image created by image-create doesn't contain any Cockpit
 code in it yet.  You can build and install the currently checked out
 working copy of Cockpit like this:
 
-  $ ./vm-install $(../tools/make-rpms)
+  $ bots/image-prepare fedora-25
 
-This will modify the test machine image that is used for the next run,
+This either needs a configured/built tree (build in mock or a development VM)
+or cockpit's build dependencies installed.
+
+image-prepare will prepare a test machine image used for the next test run,
 but will not modify the saved version in $TEST_DATA/images.  Use
 vm-reset to revert the test machine images for the next run to the
 versions in $TEST_DATA/images.
 
 A typical sequence of steps would thus be the following:
 
-  $ ./vm-download
-  $ ./vm-reset            # Start over
-  $ ../tools/make-rpms    # Create rpms
-  $ ./vm-install ...      # Install code to test
-  $ ./verify/check-...    # Run some tests
+  $ bots/image-download
+  $ test/vm-reset            # Start over
+  $ tools/make-rpms          # Create rpms
+  $ bots/image-install ...   # Install code to test
+  $ test/verify/check-...    # Run some tests
 
-  $ ./vm-reset            # Start over
-  $ ./vm-install ...      # Install code to test
-  $ ./verify/check-...    # Run some tests
+  $ test/vm-reset            # Start over
+  $ bots/image-prepare ...   # Install code to test
+  $ bots/verify/check-...    # Run some tests
 
 You can perform all of the above easily by doing `./testsuite-prepare`
 
@@ -166,13 +154,19 @@ Once you have a test machine image that contains the version of
 Cockpit that you want to test, you can run tests by picking a program
 and just executing it:
 
-  $ ./verify/check-connection
+  $ test/verify/check-connection
 
 Many of the verify tests can also be run against an already running
 machine. Although be aware that lots of the tests change state on
 the target machine.
 
-  $ ./verify/check-connection --machine=10.1.1.2
+  $ test/verify/check-connection --machine=10.1.1.2
+
+The test/containers/ tests use the same VMs as the above test/verify/ ones.
+But they don't have a separate "prepare" step/script; instead, the first time
+you run test/containers/run-tests you need to use the "-i" option to
+build/install cockpit into the test VM. This needs to be done with a compatible
+TEST_OS (usually a recent "fedora-*").
 
 ## Debugging tests
 
@@ -180,7 +174,16 @@ If you pass the "-s" ("sit on failure") option to a test program, it
 will pause when a failure occurs so that you can log into the test
 machine and investigate the problem.
 
-You can log into a running test-machine with "vm-sh".
+A test will print out the commands to access it when it fails in this
+way. You can log into a running test-machine using ssh. If you add
+a snippet like this to your ~/.ssh/config then you'll be able to
+log in without authentication:
+
+    Host 127.0.0.2
+        User root
+        StrictHostKeyChecking no
+        UserKnownHostsFile /dev/null
+        IdentityFile ~/src/cockpit/test/common/identity
 
 You can also put calls to sit() into the tests themselves to stop them
 at strategic places.

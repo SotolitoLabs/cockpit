@@ -28,7 +28,9 @@
 #include "cockpitwebresponse.h"
 #include "cockpitwebfilter.h"
 
+#include "common/cockpitconf.h"
 #include "common/cockpiterror.h"
+#include "common/cockpitlocale.h"
 #include "common/cockpittemplate.h"
 
 #include <errno.h>
@@ -62,6 +64,10 @@ struct _CockpitWebResponse {
   const gchar *path;
   gchar *full_path;
   gchar *query;
+  gchar *url_root;
+  gchar *method;
+  gchar *origin;
+
   CockpitCacheType cache_type;
 
   /* The output queue */
@@ -153,6 +159,9 @@ cockpit_web_response_finalize (GObject *object)
 
   g_free (self->full_path);
   g_free (self->query);
+  g_free (self->url_root);
+  g_free (self->method);
+  g_free (self->origin);
   g_assert (self->io == NULL);
   g_assert (self->out == NULL);
   g_queue_free_full (self->queue, (GDestroyNotify)g_bytes_unref);
@@ -191,6 +200,7 @@ cockpit_web_response_class_init (CockpitWebResponseClass *klass)
  */
 CockpitWebResponse *
 cockpit_web_response_new (GIOStream *io,
+                          const gchar *original_path,
                           const gchar *path,
                           const gchar *query,
                           GHashTable *in_headers)
@@ -198,6 +208,9 @@ cockpit_web_response_new (GIOStream *io,
   CockpitWebResponse *self;
   GOutputStream *out;
   const gchar *connection;
+  const gchar *protocol = NULL;
+  const gchar *host = NULL;
+  gint offset;
 
   /* Trying to be a somewhat performant here, avoiding properties */
   self = g_object_new (COCKPIT_TYPE_WEB_RESPONSE, NULL);
@@ -208,14 +221,27 @@ cockpit_web_response_new (GIOStream *io,
     {
       self->out = (GPollableOutputStream *)out;
     }
-  else
+  else if (out)
     {
       g_critical ("Cannot send web response over non-pollable output stream: %s",
                   G_OBJECT_TYPE_NAME (out));
     }
+  else
+    {
+      g_critical ("Cannot send web response: no output stream available");
+    }
 
+  self->url_root = NULL;
   self->full_path = g_strdup (path);
   self->path = self->full_path;
+
+  if (path && original_path)
+    {
+      offset = strlen (original_path) - strlen (path);
+      if (offset > 0 && g_strcmp0 (original_path + offset, path) == 0)
+        self->url_root = g_strndup (original_path, offset);
+    }
+
   self->query = g_strdup (query);
   if (self->path)
     self->logname = self->path;
@@ -228,9 +254,25 @@ cockpit_web_response_new (GIOStream *io,
       connection = g_hash_table_lookup (in_headers, "Connection");
       if (connection)
         self->keep_alive = g_str_equal (connection, "keep-alive");
+      host = g_hash_table_lookup (in_headers, "Host");
     }
 
+  if (G_IS_SOCKET_CONNECTION (io))
+    protocol = "http";
+  else
+    protocol = "https";
+  if (protocol && host)
+    self->origin = g_strdup_printf ("%s://%s", protocol, host);
+
   return self;
+}
+
+void
+cockpit_web_response_set_method (CockpitWebResponse *response,
+                                 const gchar *method)
+{
+  g_return_if_fail (g_strcmp0 (method, "GET") == 0 || g_strcmp0 (method, "HEAD") == 0);
+  response->method = g_strdup (method);
 }
 
 /**
@@ -244,6 +286,17 @@ cockpit_web_response_get_path (CockpitWebResponse *self)
 {
   g_return_val_if_fail (COCKPIT_IS_WEB_RESPONSE (self), NULL);
   return self->path;
+}
+
+/**
+ * cockpit_web_response_get_url_root:
+ * @self: the response
+ *
+ * Returns: The url root portion of the original path that was removed
+ */
+const gchar *
+cockpit_web_response_get_url_root (CockpitWebResponse *self) {
+  return self->url_root;
 }
 
 /**
@@ -516,6 +569,12 @@ cockpit_web_response_queue (CockpitWebResponse *self,
     {
       g_debug ("%s: ignoring queued block after failure", self->logname);
       return FALSE;
+    }
+
+  if (g_strcmp0 (self->method, "HEAD") == 0)
+    {
+      g_debug ("%s: ignoring queued block for method HEAD", self->logname);
+      return TRUE;
     }
 
   qn.filters = self->filters;
@@ -960,6 +1019,17 @@ substitute_message (const gchar *variable,
   return NULL;
 }
 
+static GBytes *
+substitute_hash_value (const gchar *variable,
+                       gpointer user_data)
+{
+  GHashTable *data = user_data;
+  gchar *value = g_hash_table_lookup (data, variable);
+  if (value)
+    return g_bytes_new (value, strlen (value));
+  return g_bytes_new ("", 0);
+}
+
 /**
  * cockpit_web_response_error:
  * @self: the response
@@ -979,6 +1049,7 @@ cockpit_web_response_error (CockpitWebResponse *self,
 {
   va_list var_args;
   gchar *reason = NULL;
+  gchar *escaped = NULL;
   const gchar *message;
   GBytes *input = NULL;
   GList *output, *l;
@@ -1049,6 +1120,17 @@ cockpit_web_response_error (CockpitWebResponse *self,
 
   if (!input)
     input = g_bytes_new_static (default_failure_template, strlen (default_failure_template));
+  output = cockpit_template_expand (input, substitute_message,
+                                    "@@", "@@", (gpointer)message);
+  g_bytes_unref (input);
+
+  /* If sending arbitrary messages, make sure they're escaped */
+  if (reason)
+    {
+      g_strstrip (reason);
+      escaped = g_uri_escape_string (reason, " :", FALSE);
+      message = escaped;
+    }
 
   if (headers)
     {
@@ -1061,9 +1143,6 @@ cockpit_web_response_error (CockpitWebResponse *self,
       cockpit_web_response_headers (self, code, message, -1, "Content-Type", "text/html; charset=utf8", NULL);
     }
 
-  output = cockpit_template_expand (input, substitute_message, (gpointer)message);
-  g_bytes_unref (input);
-
   for (l = output; l != NULL; l = g_list_next (l))
     {
       if (!cockpit_web_response_queue (self, l->data))
@@ -1074,6 +1153,7 @@ cockpit_web_response_error (CockpitWebResponse *self,
   g_list_free_full (output, (GDestroyNotify)g_bytes_unref);
 
   g_free (reason);
+  g_free (escaped);
 }
 
 /**
@@ -1130,26 +1210,47 @@ path_has_prefix (const gchar *path,
   return FALSE;
 }
 
-/**
- * cockpit_web_response_file:
- * @response: the response
- * @path: escaped path, or NULL to get from response
- * @roots: directories to look for file in
- *
- * Serve a file from disk as an HTTP response.
- */
-void
-cockpit_web_response_file (CockpitWebResponse *response,
-                           const gchar *escaped,
-                           const gchar **roots)
+gchar **
+cockpit_web_response_resolve_roots (const gchar **input)
 {
-  const gchar *csp_header;
+  GPtrArray *roots;
+  char *path;
+  gint i;
+
+  roots = g_ptr_array_new ();
+  for (i = 0; input && input[i]; i++)
+    {
+      path = realpath (input[i], NULL);
+      if (path == NULL)
+        g_debug ("couldn't resolve document root: %s: %m", input[i]);
+      else
+        g_ptr_array_add (roots, path);
+    }
+  g_ptr_array_add (roots, NULL);
+  return (gchar **)g_ptr_array_free (roots, FALSE);
+}
+
+static void
+web_response_file (CockpitWebResponse *response,
+                   const gchar *escaped,
+                   const gchar **roots,
+                   CockpitTemplateFunc template_func,
+                   gpointer user_data)
+{
+  const gchar *default_policy = "default-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:";
+
+  const gchar *headers[5] = { NULL };
   GError *error = NULL;
   gchar *unescaped = NULL;
   gchar *path = NULL;
+  gchar *alloc = NULL;
   GMappedFile *file = NULL;
   const gchar *root;
   GBytes *body;
+  GList *output = NULL;
+  GList *l = NULL;
+  gint content_length = -1;
+  gint at = 0;
 
   g_return_if_fail (COCKPIT_IS_WEB_RESPONSE (response));
 
@@ -1213,33 +1314,80 @@ again:
     }
 
   body = g_mapped_file_get_bytes (file);
+  if (template_func)
+    {
+      output = cockpit_template_expand (body, template_func, "${", "}", user_data);
+    }
+  else
+    {
+      output = g_list_prepend (output, g_bytes_ref (body));
+      content_length = g_bytes_get_size (body);
+    }
+  g_bytes_unref (body);
+
+  if (response->origin)
+    {
+      headers[at++] = "Access-Control-Allow-Origin";
+      headers[at++] = response->origin;
+    }
 
   /*
    * The default Content-Security-Policy for .html files allows
    * the site to have inline <script> and <style> tags. This code
-   * is not used when serving resources once logged in, only for
-   * static resources when we don't yet have a session.
+   * is only used for static resources that do not use the session.
    */
-
-  csp_header = NULL;
   if (g_str_has_suffix (unescaped, ".html"))
-    csp_header = "Content-Security-Policy";
+    {
+      headers[at++] = "Content-Security-Policy";
+      headers[at++] = alloc = cockpit_web_response_security_policy (default_policy, response->origin);
+    }
 
-  cockpit_web_response_headers (response, 200, "OK", g_bytes_get_size (body),
-                                csp_header, "default-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:",
-                                NULL);
+  cockpit_web_response_headers (response, 200, "OK", content_length,
+                                headers[0], headers[1], headers[2], headers[3], NULL);
 
-  if (cockpit_web_response_queue (response, body))
+  for (l = output; l != NULL; l = g_list_next (l))
+    {
+      if (!cockpit_web_response_queue (response, l->data))
+        break;
+    }
+  if (l == NULL)
     cockpit_web_response_complete (response);
 
-  g_bytes_unref (body);
-
 out:
+  g_free (alloc);
   g_free (unescaped);
   g_clear_error (&error);
   g_free (path);
   if (file)
     g_mapped_file_unref (file);
+
+  if (output)
+    g_list_free_full (output, (GDestroyNotify)g_bytes_unref);
+}
+
+/**
+ * cockpit_web_response_file:
+ * @response: the response
+ * @path: escaped path, or NULL to get from response
+ * @roots: directories to look for file in
+ *
+ * Serve a file from disk as an HTTP response.
+ */
+void
+cockpit_web_response_file (CockpitWebResponse *response,
+                           const gchar *escaped,
+                           const gchar **roots)
+{
+  web_response_file (response, escaped, roots, NULL, NULL);
+}
+
+void
+cockpit_web_response_template (CockpitWebResponse *response,
+                                   const gchar *escaped,
+                                   const gchar **roots,
+                                   GHashTable *values)
+{
+  web_response_file (response, escaped, roots, substitute_hash_value, values);
 }
 
 static gboolean
@@ -1445,7 +1593,15 @@ cockpit_web_response_negotiation (const gchar *path,
   gchar *name = NULL;
   GBytes *bytes = NULL;
   GError *local_error = NULL;
+  gchar *locale = NULL;
+  gchar *shorter = NULL;
+  gchar *lang = NULL;
+  gchar *lang_region = NULL;
+
   gint i;
+
+  if (language)
+      locale = cockpit_locale_from_language (language, NULL, &shorter);
 
   ext = find_extension (path);
   if (ext)
@@ -1460,31 +1616,64 @@ cockpit_web_response_negotiation (const gchar *path,
 
   while (!bytes)
     {
-      if (language)
+      /* For a request for a file named "base.ext" and locale "lang_REGION", We try the following variants, in
+         order, and serve the first that is found:
+
+           base.lang_REGION.ext
+           base.lang_REGION.ext.gz
+           base.lang.ext
+           base.lang.ext.gz
+           base.ext
+           base.min.ext
+           base.ext.gz
+           base.ext.min.gz
+
+         If no locale is requested, or a locale without region, those variants are left out by starting
+         further down in the list.
+
+         If none of the variants are found, and the base of the file name has internal dots, these internal
+         extensions are dropped one by one from the right.  For example, for a file named "foo.bar.js", we
+         first try "foo.bar" with extension ".js", and then "foo" with extension ".js".
+      */
+
+      if (locale && shorter && g_strcmp0 (locale, shorter) != 0) {
+        lang = shorter;
+        lang_region = locale;
         i = 0;
-      else
+      } else if (locale) {
+        lang = locale;
         i = 2;
-      for (; i < 6; i++)
+      } else {
+        i = 4;
+      }
+
+      for (; i < 8; i++)
         {
           g_free (name);
           switch (i)
             {
             case 0:
-              name = g_strconcat (base, ".", language, ext, NULL);
+              name = g_strconcat (base, ".", lang_region, ext, NULL);
               break;
             case 1:
-              name = g_strconcat (base, ".", language, ext, ".gz", NULL);
+              name = g_strconcat (base, ".", lang_region, ext, ".gz", NULL);
               break;
             case 2:
-              name = g_strconcat (base, ext, NULL);
+              name = g_strconcat (base, ".", lang, ext, NULL);
               break;
             case 3:
-              name = g_strconcat (base, ".min", ext, NULL);
+              name = g_strconcat (base, ".", lang, ext, ".gz", NULL);
               break;
             case 4:
-              name = g_strconcat (base, ext, ".gz", NULL);
+              name = g_strconcat (base, ext, NULL);
               break;
             case 5:
+              name = g_strconcat (base, ".min", ext, NULL);
+              break;
+            case 6:
+              name = g_strconcat (base, ext, ".gz", NULL);
+              break;
+            case 7:
               name = g_strconcat (base, ".min", ext, ".gz", NULL);
               break;
             default:
@@ -1522,6 +1711,8 @@ out:
     }
   g_free (name);
   g_free (base);
+  g_free (locale);
+  g_free (shorter);
   return bytes;
 }
 
@@ -1536,7 +1727,7 @@ cockpit_web_response_content_type (const gchar *path)
     { ".gif", "image/gif" },
     { ".eot", "application/vnd.ms-fontobject" },
     { ".html", "text/html" },
-    { ".ico", "image/vnd.microsoft.icon" },
+    /* { ".ico", "image/vnd.microsoft.icon" }, */
     { ".jpg", "image/jpg" },
     { ".js", "application/javascript" },
     { ".json", "application/json" },
@@ -1558,4 +1749,115 @@ cockpit_web_response_content_type (const gchar *path)
     }
 
   return NULL;
+}
+
+static gboolean
+strv_have_prefix (gchar **strv,
+                  const gchar *prefix)
+{
+  gint i;
+
+  for (i = 0; strv && strv[i] != NULL; i++)
+    {
+      if (g_str_has_prefix (strv[i], prefix))
+        return TRUE;
+    }
+  return FALSE;
+}
+
+static void
+string_inject_origin (GString *string,
+                      const gchar *origin)
+{
+  const gchar *found;
+  gsize pos = 0;
+
+  for (;;)
+    {
+      found = strstr (string->str + pos, "'self'");
+      if (!found)
+        break;
+
+      pos = (found - string->str) + 6;
+      g_string_insert (string, pos, " ");
+      g_string_insert (string, pos + 1, origin);
+      pos += strlen (origin) + 1;
+    }
+}
+
+/**
+ * cockpit_web_response_content_security_policy:
+ * @content_security_policy: the raw security policy or %NULL for a default
+ * @self_origin: our own web origin or %NULL
+ *
+ * Calculates the security policy.
+ *
+ * Returns: A calculated security policy, filled with defaults if necessary.
+ */
+gchar *
+cockpit_web_response_security_policy (const gchar *content_security_policy,
+                                      const gchar *self_origin)
+{
+  const gchar *default_src = "default-src 'self'";
+  const gchar *connect_src = "connect-src 'self' ws: wss:";
+  gchar **parts = NULL;
+  GString *result;
+  gint i;
+
+  result = g_string_sized_new (128);
+
+  /*
+   * Note that browsers need to be explicitly told they can connect
+   * to a WebSocket. This is non-obvious, but it stems from the fact
+   * that some browsers treat 'https' and 'wss' as different protocols.
+   *
+   * Since each component could establish a WebSocket connection back to
+   * cockpit-ws, we need to insert that into the policy.
+   */
+
+  if (content_security_policy)
+    parts = g_strsplit (content_security_policy, ";", -1);
+
+  for (i = 0; parts && parts[i] != NULL; i++)
+    g_strstrip (parts[i]);
+
+  if (!strv_have_prefix (parts, "default-src "))
+    g_string_append_printf (result, "%s; ", default_src);
+  if (!strv_have_prefix (parts, "connect-src "))
+    g_string_append_printf (result, "%s; ", connect_src);
+
+  for (i = 0; parts && parts[i] != NULL; i++)
+    g_string_append_printf (result, "%s; ", parts[i]);
+
+  g_strfreev (parts);
+
+  /* Remove trailing semicolon */
+  g_string_set_size (result, result->len - 2);
+
+  /* Put in our own origin */
+  if (self_origin)
+    string_inject_origin (result, self_origin);
+
+  return g_string_free (result, FALSE);
+}
+
+const gchar *
+cockpit_web_response_get_protocol (GIOStream *connection,
+                                   GHashTable *headers)
+{
+  const gchar *protocol = NULL;
+  const gchar *protocol_header;
+
+  if (connection && G_IS_TLS_CONNECTION (connection))
+    {
+      protocol = "https";
+    }
+  else
+    {
+      protocol_header = cockpit_conf_string ("WebService", "ProtocolHeader");
+      if (protocol_header && headers)
+         protocol = g_hash_table_lookup (headers, protocol_header);
+    }
+
+  return protocol ? protocol : "http";
 }

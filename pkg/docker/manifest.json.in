@@ -1,0 +1,13 @@
+{
+    "version": "@VERSION@",
+    "requires": {
+	"cockpit": "122"
+    },
+
+    "menu": {
+        "index": {
+            "label": "Containers",
+            "order": 50
+        }
+    }
+}

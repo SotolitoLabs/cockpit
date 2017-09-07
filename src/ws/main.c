@@ -27,28 +27,29 @@
 #include <string.h>
 
 #include "cockpitws.h"
+
+#include "cockpitcertificate.h"
 #include "cockpithandlers.h"
+#include "cockpitbranding.h"
 
 #include "common/cockpitassets.h"
-#include "common/cockpitcertificate.h"
 #include "common/cockpitconf.h"
 #include "common/cockpitlog.h"
 #include "common/cockpitmemory.h"
 #include "common/cockpitsystem.h"
 #include "common/cockpittest.h"
 
-#include <libssh/libssh.h>
-#include <libssh/callbacks.h>
-
 /* ---------------------------------------------------------------------------------------------------- */
 
 static gint      opt_port         = 9090;
+static gchar     *opt_address     = NULL;
 static gboolean  opt_no_tls       = FALSE;
 static gboolean  opt_local_ssh    = FALSE;
 static gboolean  opt_version      = FALSE;
 
 static GOptionEntry cmd_entries[] = {
   {"port", 'p', 0, G_OPTION_ARG_INT, &opt_port, "Local port to bind to (9090 if unset)", NULL},
+  {"address", 'a', 0, G_OPTION_ARG_STRING, &opt_address, "Address to bind to (binds on all addresses if unset)", NULL},
   {"no-tls", 0, 0, G_OPTION_ARG_NONE, &opt_no_tls, "Don't use TLS", NULL},
   {"local-ssh", 0, 0, G_OPTION_ARG_NONE, &opt_local_ssh, "Log in locally via SSH", NULL },
   {"version", 0, 0, G_OPTION_ARG_NONE, &opt_version, "Print version information", NULL },
@@ -66,38 +67,24 @@ print_version (void)
 }
 
 static gchar **
-calculate_static_roots (GHashTable *os_release)
+setup_static_roots (GHashTable *os_release)
 {
-  const gchar *os_id = NULL;
-  const gchar *os_variant_id = NULL;
-  gchar *dirs[4] = { NULL, };
   gchar **roots;
-  gint i = 0;
+  const gchar *os_variant_id;
+  const gchar *os_id;
 
-#ifdef PACKAGE_BRAND
-  os_id = PACKAGE_BRAND;
-#else
   if (os_release)
     {
       os_id = g_hash_table_lookup (os_release, "ID");
       os_variant_id = g_hash_table_lookup (os_release, "VARIANT_ID");
     }
-#endif
-
-  if (os_id)
+  else
     {
-      if (os_variant_id)
-          dirs[i++] = g_strdup_printf (DATADIR "/cockpit/branding/%s-%s", os_id, os_variant_id);
-      dirs[i++] = g_strdup_printf (DATADIR "/cockpit/branding/%s", os_id);
+      os_id = NULL;
+      os_variant_id = NULL;
     }
-  dirs[i++] = g_strdup (DATADIR "/cockpit/branding/default");
-  dirs[i++] = g_strdup (DATADIR "/cockpit/static");
-  g_assert (i <= 4);
 
-  roots = cockpit_web_server_resolve_roots (dirs[0], dirs[1], dirs[2], dirs[3], NULL);
-
-  while (i > 0)
-    g_free (dirs[--i]);
+  roots = cockpit_branding_calculate_static_roots (os_id, os_variant_id, TRUE);
 
   /* Load the fail template */
   g_resources_register (cockpitassets_get_resource ());
@@ -120,6 +107,8 @@ main (int argc,
   gchar **roots = NULL;
   gchar *cert_path = NULL;
   GMainLoop *loop = NULL;
+  gchar *login_html = NULL;
+  gchar *login_po_html = NULL;
 
   signal (SIGPIPE, SIG_IGN);
   g_setenv ("GSETTINGS_BACKEND", "memory", TRUE);
@@ -132,9 +121,6 @@ main (int argc,
   g_setenv ("G_TLS_GNUTLS_PRIORITY", "SECURE128:%LATEST_RECORD_VERSION:-VERS-SSL3.0:-VERS-TLS1.0", FALSE);
 
   g_type_init ();
-
-  ssh_threads_set_callbacks (ssh_threads_get_pthread());
-  ssh_init ();
 
   memset (&data, 0, sizeof (data));
 
@@ -173,12 +159,17 @@ main (int argc,
 
   data.os_release = cockpit_system_load_os_release ();
   data.auth = cockpit_auth_new (opt_local_ssh);
-  roots = calculate_static_roots (data.os_release);
-  data.static_roots = (const gchar **)roots;
+  roots = setup_static_roots (data.os_release);
 
-  server = cockpit_web_server_new (opt_port,
+  data.branding_roots = (const gchar **)roots;
+  login_html = g_strdup (DATADIR "/cockpit/static/login.html");
+  data.login_html = (const gchar *)login_html;
+  login_po_html = g_strdup (DATADIR "/cockpit/static/login.po.html");
+  data.login_po_html = (const gchar *)login_po_html;
+
+  server = cockpit_web_server_new (opt_address,
+                                   opt_port,
                                    certificate,
-                                   NULL,
                                    NULL,
                                    error);
   if (server == NULL)
@@ -189,6 +180,12 @@ main (int argc,
 
   cockpit_web_server_set_redirect_tls (server, !cockpit_conf_bool ("WebService", "AllowUnencrypted", FALSE));
 
+  if (cockpit_conf_string ("WebService", "UrlRoot"))
+    {
+      g_object_set (server, "url-root",
+                    cockpit_conf_string ("WebService", "UrlRoot"),
+                    NULL);
+    }
   if (cockpit_web_server_get_socket_activated (server))
     g_signal_connect_swapped (data.auth, "idling", G_CALLBACK (g_main_loop_quit), loop);
 
@@ -240,6 +237,9 @@ out:
   g_clear_object (&certificate);
   g_free (cert_path);
   g_strfreev (roots);
+  g_free (login_po_html);
+  g_free (login_html);
+  g_free (opt_address);
   cockpit_conf_cleanup ();
   return ret;
 }

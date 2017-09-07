@@ -1,0 +1,14 @@
+{
+    "version": "@VERSION@",
+    "name": "updates",
+    "requires": {
+	"cockpit": "124.x"
+    },
+
+    "tools": {
+        "ostree": {
+            "label": "Software Updates",
+            "path": "index.html"
+        }
+    }
+}

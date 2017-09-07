@@ -17,13 +17,19 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "docker/docker",
-    "docker/util"
-], function($, cockpit, Mustache, docker, util) {
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    require("patterns");
+
+    var docker = require("./docker");
+    var util = require("./util");
+
+    require("console.css");
+
     var _ = cockpit.gettext;
     var C_ = cockpit.gettext;
 
@@ -43,7 +49,7 @@ define([
         setup: function() {
             var self = this;
 
-            $('#container-details .breadcrumb a').on("click", function() {
+            $('#container-details .content-filter a').on("click", function() {
                 cockpit.location.go('/');
             });
 
@@ -62,64 +68,25 @@ define([
                 on("show.bs.modal", function() {
                     var info = self.client.containers[self.container_id];
 
+                    /* This slider is only visible if docker says this option is available */
+                    $("#container-resources-dialog .memory-slider")
+                        .toggle(!!self.client.info.MemoryLimit);
+
+                    if (self.client.info.MemTotal)
+                       self.memory_limit.max = self.client.info.MemTotal;
+
                     /* Fill in the resource dialog */
                     $(this).find(".container-name").text(self.name);
                     self.memory_limit.value = info.MemoryLimit || undefined;
                     self.cpu_priority.value = info.CpuPriority || undefined;
                 }).
                 find(".btn-primary").on("click", function() {
-                    self.client.change_memory_limit(self.container_id, self.memory_limit.value);
-                    var swap = self.memory_limit.value;
-                    if (!isNaN(swap))
-                        swap *= 2;
-                    self.client.change_swap_limit(self.container_id, swap);
-                    self.client.change_cpu_priority(self.container_id, self.cpu_priority.value);
-                });
-
-            var commit = $('#container-commit-dialog')[0];
-            $(commit).
-                on("show.bs.modal", function() {
-                    var info = self.client.containers[self.container_id];
-
-                    $(commit).find(".container-name").text(self.name);
-
-                    var image = self.client.images[info.Config.Image];
-                    var repo = "";
-                    if (image && image.RepoTags)
-                        repo = image.RepoTags[0].split(":", 1)[0];
-                    $(commit).find(".container-repository").attr('value', repo);
-
-                    $(commit).find(".container-tag").attr('value', "");
-
-                    cockpit.user().done(function (user) {
-                        var author = user.full_name || user.name;
-                        $(commit).find(".container-author").attr('value', author);
-                    });
-
-                    var command = "";
-                    if (info.Config)
-                        command = util.quote_cmdline(info.Config.Cmd);
-                    if (!command)
-                        command = info.Command;
-                    $(commit).find(".container-command").attr('value', command);
-                }).
-                find(".btn-primary").on("click", function() {
-                    var location = cockpit.location;
-                    var run = { "Cmd": util.unquote_cmdline($(commit).find(".container-command").val()) };
-                    var options = {
-                        "author": $(commit).find(".container-author").val()
-                    };
-                    var tag = $(commit).find(".container-tag").val();
-                    if (tag)
-                        options["tag"] = tag;
-                    var repository = $(commit).find(".container-repository").val();
-                    self.client.commit(self.container_id, repository, options, run).
-                        fail(function(ex) {
-                            util.show_unexpected_error(ex);
-                        }).
-                        done(function() {
-                            location.go("/");
-                        });
+                    var mem, prom = self.client.change_cpu_priority(self.container_id, self.cpu_priority.value);
+                    if (self.client.info.MemoryLimit) {
+                        mem = self.client.change_memory_limit(self.container_id, self.memory_limit.value);
+                        prom = cockpit.all(mem, prom);
+                    }
+                    $('#container-resources-dialog').dialog('promise', prom);
                 });
         },
 
@@ -137,15 +104,12 @@ define([
             this.container_id = container_id;
             this.name = this.container_id.slice(0,12);
 
-            this.client.machine_info().
-                done(function(info) {
-                    self.memory_limit.max = info.memory;
-                });
-
             $(this.client).on('container.container-details', function (event, id, container) {
                 if (id == self.container_id)
                     self.update();
             });
+
+            $('#container-details-commit')[0].dataset.containerId = container_id;
 
             this.update();
         },
@@ -197,6 +161,10 @@ define([
             $('#container-details-command').text("");
             $('#container-details-state').text("");
             $('#container-details-restart-policy').text("");
+            $('#container-details-ipaddr').text("");
+            $('#container-details-ipprefixlen').text("");
+            $('#container-details-gateway').text("");
+            $('#container-details-macaddr').text("");
             $('#container-details-ports-row').hide();
             $('#container-details-links-row').hide();
             $('#container-details-resource-row').hide();
@@ -221,7 +189,7 @@ define([
             $('#container-details-resource-row').toggle(!!info.State.Running);
 
             this.name = util.render_container_name(info.Name);
-            $('#container-details .breadcrumb .active').text(this.name);
+            $('#container-details .content-filter h3 span').text(this.name);
 
             var port_bindings = [ ];
             if (info.NetworkSettings)
@@ -232,10 +200,18 @@ define([
             $('#container-details-id').text(info.Id);
             $('#container-details-names').text(util.render_container_name(info.Name));
             $('#container-details-created').text(info.Created);
+
             $('#container-details-image').text(info.Image);
+            $('#container-details-image-id').text(info.ImageID);
+            $('#container-details-image-id').toggle(info.ImageID && info.ImageID != info.Image);
+
             $('#container-details-command').text(util.render_container_cmdline(info));
             $('#container-details-state').text(util.render_container_state(info.State));
             $('#container-details-restart-policy').text(util.render_container_restart_policy(info.HostConfig.RestartPolicy));
+            $('#container-details-ipaddr').text(info.NetworkSettings.IPAddress);
+            $('#container-details-ipprefixlen').text(String(info.NetworkSettings.IPPrefixLen));
+            $('#container-details-gateway').text(info.NetworkSettings.Gateway);
+            $('#container-details-macaddr').text(info.NetworkSettings.MacAddress);
 
             $('#container-details-ports-row').toggle(port_bindings.length > 0);
             $('#container-details-ports').html(util.multi_line(port_bindings));
@@ -328,7 +304,7 @@ define([
         };
     }
 
-    return {
+    module.exports = {
         init: init_container_details
     };
-});
+}());

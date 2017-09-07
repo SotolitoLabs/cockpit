@@ -58,7 +58,7 @@ enum {
   PROP_OUT_FD,
   PROP_ERR_FD,
   PROP_PID,
-  PROP_PROBLEM
+  PROP_PROBLEM,
 };
 
 struct _CockpitPipePrivate {
@@ -89,6 +89,8 @@ struct _CockpitPipePrivate {
   int err_fd;
   GSource *err_source;
   GByteArray *err_buffer;
+
+  gboolean is_user_fd;
 };
 
 typedef struct {
@@ -258,6 +260,7 @@ dispatch_input (gint fd,
   gssize ret = 0;
   gsize len;
   gboolean eof;
+  int errn;
 
   g_return_val_if_fail (self->priv->in_source, FALSE);
   len = self->priv->in_buffer->len;
@@ -269,20 +272,29 @@ dispatch_input (gint fd,
    */
   if (cond != G_IO_HUP)
     {
-      g_debug ("%s: reading input", self->priv->name);
+      g_byte_array_set_size (self->priv->in_buffer, len + MAX_PACKET_SIZE);
+      g_debug ("%s: reading input %x", self->priv->name, cond);
+      ret = read (self->priv->in_fd, self->priv->in_buffer->data + len, MAX_PACKET_SIZE);
 
-      g_byte_array_set_size (self->priv->in_buffer, len + 1024);
-      ret = read (self->priv->in_fd, self->priv->in_buffer->data + len, 1024);
+      errn = errno;
       if (ret < 0)
         {
           g_byte_array_set_size (self->priv->in_buffer, len);
-          if (errno != EAGAIN && errno != EINTR)
+          if (errn == EAGAIN || errn == EINTR)
             {
-              set_problem_from_errno (self, "couldn't read", errno);
+              return TRUE;
+            }
+          else if (errn == ECONNRESET)
+            {
+              g_debug ("couldn't read: %s", g_strerror (errn));
+              ret = 0;
+            }
+          else
+            {
+              set_problem_from_errno (self, "couldn't read", errn);
               close_immediately (self, NULL); /* problem already set */
               return FALSE;
             }
-          return TRUE;
         }
     }
 
@@ -411,6 +423,9 @@ set_problem_from_errno (CockpitPipe *self,
     problem = "access-denied";
   else if (errn == ENOENT || errn == ECONNREFUSED)
     problem = "not-found";
+  /* only warn about Cockpit-internal fds, not opaque user ones */
+  else if (errn == EBADF && self->priv->is_user_fd)
+    problem = "protocol-error";
 
   g_free (self->priv->problem);
 
@@ -568,6 +583,9 @@ cockpit_pipe_constructed (GObject *object)
   GError *error = NULL;
 
   G_OBJECT_CLASS (cockpit_pipe_parent_class)->constructed (object);
+
+  if (self->priv->name == NULL)
+    self->priv->name = g_strdup ("pipe");
 
   if (self->priv->in_fd >= 0)
     {
@@ -892,7 +910,7 @@ _cockpit_pipe_write (CockpitPipe *self,
   */
   if (self->priv->closed && self->priv->child && self->priv->pid != 0)
     {
-      g_message ("%s: dropping message while waiting for child to exit", self->priv->name);
+      g_debug ("%s: dropping message while waiting for child to exit", self->priv->name);
       return;
     }
 
@@ -1005,11 +1023,18 @@ cockpit_pipe_connect (const gchar *name,
   else
     {
       if (!g_unix_set_fd_nonblocking (sock, TRUE, NULL))
-        g_return_val_if_reached (NULL);
+        {
+          close (sock);
+          g_return_val_if_reached (NULL);
+        }
+
       native_len = g_socket_address_get_native_size (address);
       native = g_malloc (native_len);
       if (!g_socket_address_to_native (address, native, native_len, NULL))
-        g_return_val_if_reached (NULL);
+        {
+          close (sock);
+          g_return_val_if_reached (NULL);
+        }
       if (connect (sock, native, native_len) < 0)
         {
           if (errno == EINPROGRESS)
@@ -1178,6 +1203,8 @@ cockpit_pipe_spawn (const gchar **argv,
  * @argv: null terminated string array of command arguments
  * @env: optional null terminated string array of child environment
  * @directory: optional working directory of child process
+ * @window_rows: initial number of rows in the window
+ * @window_cols: initial number of columns in the window
  *
  * Launch a child pty and create a CockpitPipe for it.
  *
@@ -1189,17 +1216,20 @@ cockpit_pipe_spawn (const gchar **argv,
 CockpitPipe *
 cockpit_pipe_pty (const gchar **argv,
                   const gchar **env,
-                  const gchar *directory)
+                  const gchar *directory,
+                  guint16 window_rows,
+                  guint16 window_cols)
 {
   CockpitPipe *pipe = NULL;
   const gchar *path = NULL;
   GPid pid = 0;
   int fd;
+  struct winsize winsz = { window_rows, window_cols, 0, 0 };
 
   if (env)
     path = g_environ_getenv ((gchar **)env, "PATH");
 
-  pid = forkpty (&fd, NULL, NULL, NULL);
+  pid = forkpty (&fd, NULL, NULL, &winsz);
   if (pid == 0)
     {
       if (cockpit_unix_fd_close_all (3, -1) < 0)
@@ -1340,7 +1370,7 @@ cockpit_pipe_exit_status (CockpitPipe *self)
  * @length: length of data to consume
  * @after: amount of trailing bytes to discard
  *
- * Used to consume data from the buffer passed to the the
+ * Used to consume data from the buffer passed to the
  * read signal.
  *
  * @before + @length + @after bytes will be removed from the @buffer,
@@ -1418,4 +1448,109 @@ cockpit_pipe_new (const gchar *name,
                        "in-fd", in_fd,
                        "out-fd", out_fd,
                        NULL);
+}
+
+/**
+ * cockpit_pipe_new_user_fd:
+ * @name: a name for debugging
+ * @fd: the file descriptor (might be input or output or both)
+ *
+ * Create a pipe for the given user-supplied opaque file descriptor. This is
+ * not being read/written by cockpit itself, but intended for passing fds.
+ *
+ * Returns: (transfer full): a new CockpitPipe
+ */
+CockpitPipe *
+cockpit_pipe_new_user_fd (const gchar *name,
+                          gint fd)
+{
+  CockpitPipe *p = g_object_new (COCKPIT_TYPE_PIPE,
+                                 "name", name,
+                                 "in-fd", fd,
+                                 "out-fd", fd,
+                                 NULL);
+  p->priv->is_user_fd = TRUE;
+  return p;
+}
+
+static gint
+environ_find (gchar **env,
+              const gchar *variable)
+{
+  gint len, x;
+  gchar *pos;
+
+  pos = strchr (variable, '=');
+  if (pos == NULL)
+    len = strlen (variable);
+  else
+    len = pos - variable;
+
+  for (x = 0; env && env[x]; x++)
+    {
+      if (strncmp (env[x], variable, len) == 0 &&
+          env[x][len] == '=')
+        return x;
+    }
+
+  return -1;
+}
+
+/**
+ * cockpit_pipe_get_environ:
+ * @input: Input environment array
+ * @directory: Working directory to put in environment
+ *
+ * Prepares an environment for spawning a CockpitPipe process.
+ * This merges the fields in @input with the current process
+ * environment.
+ *
+ * This is the standard way of processing an "environ" field
+ * in either an "open" message or a "bridges" definition in
+ * manifest.json.
+ *
+ * The current working @directory for the new process is
+ * optionally specified. It will set a $PWD environment
+ * variable as expected by shells.
+ *
+ * Returns: (transfer full): A new environment block to
+ *          be freed with g_strfreev().
+ */
+gchar **
+cockpit_pipe_get_environ (const gchar **input,
+                          const gchar *directory)
+{
+  gchar **env = g_get_environ ();
+  gsize length = g_strv_length (env);
+  gboolean had_pwd = FALSE;
+  gint i, x;
+
+  for (i = 0; input && input[i] != NULL; i++)
+    {
+      if (g_str_has_prefix (input[i], "PWD="))
+        had_pwd = TRUE;
+      x = environ_find (env, input[i]);
+      if (x != -1)
+        {
+          g_free (env[x]);
+          env[x] = g_strdup (input[i]);
+        }
+      else
+        {
+          env = g_renew (gchar *, env, length + 2);
+          env[length] = g_strdup (input[i]);
+          env[length + 1] = NULL;
+          length++;
+        }
+    }
+
+  /*
+   * The kernel only knows about the inode of the current directory.
+   * So when we spawn a shell, it won't know the directory it's
+   * meant to display. Pass it the path we care about in $PWD
+   */
+  if (!had_pwd && directory)
+    env = g_environ_setenv (env, "PWD", directory, TRUE);
+
+  return env;
 }

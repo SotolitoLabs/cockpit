@@ -52,6 +52,10 @@
  */
 
 static gboolean cockpit_test_init_was_called = FALSE;
+static const gchar *orig_g_debug;
+
+/* In cockpitconf.c */
+extern const gchar *cockpit_config_file;
 
 G_LOCK_DEFINE (expected);
 
@@ -65,6 +69,15 @@ typedef struct {
   gboolean skipable;
   gboolean optional;
 } ExpectedMessage;
+
+static void
+expected_message_free (gpointer data)
+{
+  ExpectedMessage *expected = data;
+  g_free (expected->log_domain);
+  g_free (expected->pattern);
+  g_free (expected);
+}
 
 static gint ignore_fatal_count = 0;
 static GSList *expected_messages = NULL;
@@ -150,9 +163,7 @@ expected_message_handler (const gchar *log_domain,
               g_pattern_match_simple (expected->pattern, message))
             {
               expected_messages = g_slist_delete_link (expected_messages, l);
-              g_free (expected->log_domain);
-              g_free (expected->pattern);
-              g_free (expected);
+              expected_message_free (expected);
               skip = TRUE;
               break;
             }
@@ -198,7 +209,7 @@ void
 cockpit_test_init (int *argc,
                    char ***argv)
 {
-  static gchar path[2048];
+  static gchar path[4096];
   gchar *basename;
 
   signal (SIGPIPE, SIG_IGN);
@@ -209,6 +220,9 @@ cockpit_test_init (int *argc,
 
   g_assert (g_snprintf (path, sizeof (path), "%s:%s", BUILDDIR, g_getenv ("PATH")) < sizeof (path));
   g_setenv ("PATH", path, TRUE);
+
+  /* For our process (children are handled through $G_DEBUG) */
+  g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
 
   g_type_init ();
 
@@ -307,6 +321,8 @@ cockpit_assert_expected (void)
       g_free (message);
     }
 
+  g_slist_free_full (expected_messages, expected_message_free);
+  expected_messages = NULL;
   ignore_fatal_count = 0;
 }
 
@@ -466,11 +482,18 @@ _cockpit_assert_data_eq_msg (const char *domain,
   if (!data && !expect)
     return;
   if (len < 0)
-    len = strlen (data);
+    len = strlen (data ?: "");
   if (exp_len < 0)
-    exp_len = strlen (expect);
-  if (len == exp_len && memcmp (data, expect, len) == 0)
-    return;
+    exp_len = strlen (expect ?: "");
+
+  if (len == exp_len)
+    {
+      if (len == 0)
+        return;
+      else if (data && expect && memcmp (data, expect, len) == 0)
+        return;
+    }
+
   a1 = test_escape_data (data, len);
   a2 = test_escape_data (expect, exp_len);
   s = g_strdup_printf ("data is not the same (%s != %s)", a1, a2);
@@ -709,4 +732,23 @@ cockpit_test_find_non_loopback_address (void)
 
   freeifaddrs (ifas);
   return inet;
+}
+
+void
+cockpit_test_allow_warnings (void)
+{
+  /* make some noise if this gets called twice */
+  g_return_if_fail (orig_g_debug == NULL);
+  orig_g_debug = g_getenv ("G_DEBUG");
+  g_setenv ("G_DEBUG", "fatal-criticals", TRUE);
+}
+
+void
+cockpit_test_reset_warnings (void)
+{
+  if (orig_g_debug != NULL)
+    {
+      g_setenv ("G_DEBUG", orig_g_debug, TRUE);
+      orig_g_debug = NULL;
+    }
 }

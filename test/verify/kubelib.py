@@ -35,26 +35,49 @@ __all__ = (
 )
 
 class KubernetesCase(testlib.MachineCase):
+    provision = {
+        "machine1": { "address": "10.111.113.1/20" }
+    }
+
+    def setUp(self):
+        testlib.MachineCase.setUp(self)
+        self.browser.wait_timeout(120)
+
+    def stop_kubernetes(self):
+        try:
+            self.machine.execute('/etc/kubernetes/stop-kubernetes')
+        except subprocess.CalledProcessError:
+            self.machine.execute("systemctl stop kube-apiserver")
 
     def start_kubernetes(self):
+        self.machine.execute("test -f /etc/resolv.conf || touch /etc/resolv.conf")
         self.machine.execute("systemctl start docker || journalctl -u docker")
-        self.machine.execute("systemctl start etcd kube-apiserver kube-controller-manager kube-scheduler kube-proxy kubelet")
+
+        # HACK: work around https://github.com/kubernetes/kubernetes/issues/43805 until
+        # the fix lands in Fedora 26
+        if self.machine.image == "fedora-26":
+            self.machine.execute("""sed -i '/KUBELET_ARGS=/ { s/"$/ --cgroup-driver=systemd"/ }' /etc/kubernetes/kubelet""")
+
+        self.machine.execute("echo 'KUBE_API_ADDRESS=\"$KUBE_API_ADDRESS --bind-address=10.111.113.1\"' >> /etc/kubernetes/apiserver")
+        try:
+            self.machine.execute('/etc/kubernetes/start-kubernetes')
+        except subprocess.CalledProcessError:
+            self.machine.execute("systemctl start etcd kube-apiserver kube-controller-manager kube-scheduler kube-proxy kubelet")
 
     # HACK: https://github.com/GoogleCloudPlatform/kubernetes/issues/8311
     # Work around for the fact that kube-apiserver doesn't notify about startup
     # We wait until available or timeout.
-    def wait_api_server(self, port=8080, timeout=60, scheme='http'):
+    def wait_api_server(self, address="127.0.0.1", port=8080, timeout=120, scheme='http'):
         waiter = """
-        port=%d
-        timeout=%d
-        scheme=%s
-        for a in $(seq 0 $timeout); do
-            if curl -o /dev/null -k -s $scheme://localhost:$port; then
-                break
+        for a in $(seq 0 {timeout}); do
+            if curl -o /dev/null -k -s {scheme}://{address}:{port}; then
+                if kubectl get all | grep -q svc/kubernetes; then
+                    break
+                fi
             fi
             sleep 0.5
         done
-        """ % (port, timeout * 2, scheme)
+        """.format(**locals())
         self.machine.execute(script=waiter)
 
 class VolumeTests(object):
@@ -74,7 +97,12 @@ class VolumeTests(object):
         m.upload(["verify/files/mock-volume-tiny-app.json"], "/tmp")
         m.execute("kubectl create -f /tmp/mock-volume-tiny-app.json")
 
+        # By adding another volume claim more issues are found
+        m.execute("kubectl create namespace another && kubectl create --namespace=another -f /tmp/mock-volume-tiny-app.json")
+
         b.wait_present(".pvc-notice a")
+        b.wait_in_text(".pvc-notice a", "2")
+        b.wait_in_text(".pvc-notice a", "pending volume claims")
         b.click(".pvc-notice a")
         b.wait_present(".pvc-listing")
 
@@ -89,13 +117,12 @@ class VolumeTests(object):
         b.wait_not_in_text("modal-dialog .modal-body ul", "mock-volume-claim")
         b.click("modal-dialog button.btn-danger")
         b.wait_not_present("modal-dialog")
-        b.wait_not_present(".pvc-listing")
+        b.wait_not_present("tbody[data-id='default/mock-volume-claim']")
 
         m.execute("kubectl delete rc/mock-volume")
         m.upload(["verify/files/mock-volume-tiny-app.json"], "/tmp")
         m.execute("kubectl create -f /tmp/mock-volume-tiny-app.json")
 
-        b.wait_present(".pvc-listing")
         b.wait_present("tbody[data-id='default/mock-volume-claim']")
         b.wait_in_text("tbody[data-id='default/mock-volume-claim']", "5Gi")
         b.click("tbody[data-id='default/mock-volume-claim'] tr")
@@ -113,6 +140,8 @@ class VolumeTests(object):
         b.wait_not_present("modal-dialog")
 
         b.wait_present(".pv-listing tbody[data-id='pv1']")
+
+        m.execute("kubectl delete namespace another")
         b.wait_not_present(".pvc-listing")
 
     def testVolumes(self):
@@ -236,7 +265,7 @@ class VolumeTests(object):
         b.wait_in_text("{} .listing-ct-panel".format(base_sel), "mock-volume-claim")
         b.wait_in_text("{} .listing-ct-panel ".format(base_sel), "default / mock-volume")
 
-        pods = m.execute('kubectl get pods --output=template -t="{{ range .items }}{{.metadata.name}}|{{ end }}"')
+        pods = m.execute('kubectl get pods --output=template --template="{{ range .items }}{{.metadata.name}}|{{ end }}"')
         pod = [ x for x in pods.split("|") if x.startswith("mock-volume")][0]
         pod_id = "pods/default/{}".format(pod)
 
@@ -249,7 +278,7 @@ class VolumeTests(object):
         b.wait_present(".listing-ct-body")
         b.wait_js_func("ph_count_check", ".listing-ct-body div.well", 2)
 
-        volumes = m.execute('kubectl get pods/%s --output=template -t="{{ range .spec.volumes }}{{.name}}|{{ end }}"' % pod)
+        volumes = m.execute('kubectl get pods/%s --output=template --template="{{ range .spec.volumes }}{{.name}}|{{ end }}"' % pod)
         secret = [ x for x in volumes.split("|") if x.startswith("default-token")][0]
 
         b.wait_in_text(".listing-ct-body div[data-id='{}']".format(secret), "Secret")
@@ -304,14 +333,14 @@ class KubernetesCommonTests(VolumeTests):
         m.execute("kubectl create -f /tmp/mock-k8s-tiny-app.json")
         b.wait_in_text("#service-list", "mock")
 
-        pods = m.execute('kubectl get pods --output=template -t="{{ range .items }}{{.metadata.name}}|{{ end }}"')
-        podl = pods.split("|")
         b.click("a[href='#/list']")
         b.wait_present("#content .details-listing")
         b.wait_present("#content .details-listing tbody[data-id='services/default/mock']")
         self.assertEqual(b.text(".details-listing tbody[data-id='services/default/mock'] th"), "mock")
         b.wait_present("#content .details-listing tbody[data-id='replicationcontrollers/default/mock']")
         self.assertEqual(b.text(".details-listing tbody[data-id='replicationcontrollers/default/mock'] th"), "mock")
+        b.wait_present(".details-listing tbody[data-id^='pods/default/'] th")
+        podl = m.execute('kubectl get pods --output=template --template="{{ range .items }}{{.metadata.name}}|{{ end }}"').split("|")
         b.wait_present(".details-listing tbody[data-id='pods/default/"+podl[0]+"'] th")
         self.assertEqual(b.text(".details-listing tbody[data-id='pods/default/"+podl[0]+"'] th"), podl[0])
 
@@ -341,8 +370,8 @@ class KubernetesCommonTests(VolumeTests):
         b.wait_not_present(".details-listing tbody[data-id='pods/default/"+podl[0]+"']")
 
     def testDashboard(self):
-        b = self.browser
         m = self.machine
+        b = self.browser
 
         self.login_and_go("/kubernetes")
         b.wait_present("#node-list")
@@ -392,8 +421,7 @@ class KubernetesCommonTests(VolumeTests):
         b.wait_not_present("modal-dialog")
 
         # Make sure pod has started
-        with b.wait_timeout(120):
-            b.wait_text("#service-list tr[data-name='mock']:first-of-type td.containers", "1")
+        b.wait_text("#service-list tr[data-name='mock']:first-of-type td.containers", "1")
 
         # Adjust the service
         b.click("#services-enable-change")
@@ -434,14 +462,14 @@ class KubernetesCommonTests(VolumeTests):
         self.assertTrue(b.is_present(".details-listing tbody:not(.open) tr.listing-ct-item"))
 
         # Click into service
-        b.click(".details-listing tbody[data-id='services/default/mock'] tr.listing-ct-item")
+        b.click(".details-listing tbody[data-id='services/mynamespace1/mock'] tr.listing-ct-item")
         b.wait_in_text(".listing-ct-inline", "Service")
         b.wait_in_text(".listing-ct-inline", "Endpoints")
         b.wait_present(".content-filter h3")
         b.wait_text(".content-filter h3", "mock")
         b.click("a.hidden-xs")
         b.wait_present("#content .details-listing")
-        b.wait_present(".details-listing tbody[data-id='services/default/mock']")
+        b.wait_present(".details-listing tbody[data-id='services/mynamespace1/mock']")
         b.wait_not_present("#pods")
         b.wait_not_present("#replication-controllers")
 
@@ -599,13 +627,11 @@ class KubernetesCommonTests(VolumeTests):
         m = self.machine
         b = self.browser
 
-        m.execute("kubectl create -f /tmp/mock-k8s-tiny-app.json")
-
         # The service has loaded and containers instantiated
         self.login_and_go("/kubernetes")
+        m.execute("kubectl create -f /tmp/mock-k8s-tiny-app.json")
         b.wait_present("#service-list tr[data-name='mock'] td.containers")
-        with b.wait_timeout(120):
-            b.wait_text("#service-list tr[data-name='mock'] td.containers", "1")
+        b.wait_text("#service-list tr[data-name='mock'] td.containers", "1")
 
         # Switch to topology view
         b.click("a[href='#/topology']")
@@ -613,10 +639,41 @@ class KubernetesCommonTests(VolumeTests):
         # Assert that at least one link between Service and Pod has loaded
         b.wait_present("svg line.ServicePod")
 
+        # Make sure that details display works
+        b.wait_present("svg g.Node")
+        b.wait_js_func(
+            """(function() {
+                var el = window.Sizzle("svg g.Node");
+                var i;
+                for (i = 0; i < el.length; i++) {
+                    var x = el[i].getAttribute("cx");
+                    var y = el[i].getAttribute("cy");
+                    if (x && y) {
+                        var ev = document.createEvent("MouseEvent");
+                        ev.initMouseEvent(
+                            "mousedown",
+                            true /* bubble */, true /* cancelable */,
+                            window, null,
+                            0, 0, 0, 0, /* coordinates */
+                            false, false, false, false, /* modifier keys */
+                            0 /*left*/, null);
+
+                        /* Now dispatch the event */
+                        el[i].dispatchEvent(ev);
+                        return true;
+                    }
+                }
+
+            })""", "true")
+
+        b.wait_present("div.sidebar-pf-right")
+        b.wait_present("div.sidebar-pf-right kubernetes-object-describer")
+        b.wait_in_text("div.sidebar-pf-right kubernetes-object-describer", "127.0.0.1")
+        b.wait_in_text("div.sidebar-pf-right kubernetes-object-describer h3:first", "Node")
+
 class OpenshiftCommonTests(VolumeTests):
 
     def testBasic(self):
-        m = self.machine
         b = self.browser
 
         # populate routes
@@ -640,7 +697,8 @@ class OpenshiftCommonTests(VolumeTests):
 
         # Switch to images view
         b.click("a[href='#/images']")
-        b.wait_present("tbody[data-id='marmalade/busybee:0.x']")
+        b.wait_present("tbody[data-id='marmalade/busybee']")
+        b.wait_in_text("tbody[data-id='marmalade/busybee'] tr", "0.x")
 
         # Switch to topology view
         b.click("a[href='#/topology']")
@@ -648,9 +706,7 @@ class OpenshiftCommonTests(VolumeTests):
         b.wait_present("svg line.RouteService")
 
     def testDelete(self):
-        m = self.machine
         b = self.browser
-        b.wait_timeout(120)
 
         self.login_and_go("/kubernetes")
         b.wait_present("#service-list")
@@ -690,15 +746,20 @@ class OpenshiftCommonTests(VolumeTests):
         m = self.machine
         b = self.browser
 
+        # Make sure we can find openshift
+        m.execute("echo '10.111.112.101  f1.cockpit.lan' >> /etc/hosts")
+
         self.login_and_go("/kubernetes")
         b.wait_present("a[href='#/nodes']")
         b.click("a[href='#/nodes']")
 
         b.wait_present(".nodes-listing tbody[data-id='f1.cockpit.lan']")
+        b.wait_in_text(".nodes-listing tbody[data-id='f1.cockpit.lan'] tr.listing-ct-item", "Ready")
 
         b.click(".nodes-listing tbody[data-id='f1.cockpit.lan'] tr.listing-ct-item td.listing-ct-toggle")
         b.wait_present(".nodes-listing tbody[data-id='f1.cockpit.lan'] tr.listing-ct-panel")
         self.assertTrue(b.is_visible(".nodes-listing tbody[data-id='f1.cockpit.lan'] tr.listing-ct-panel"))
+        b.wait_in_text(".nodes-listing tbody[data-id='f1.cockpit.lan'] tr.listing-ct-panel", "10.111.112.101")
         b.wait_present(".nodes-listing tbody[data-id='f1.cockpit.lan'] tr.listing-ct-panel a.machine-jump")
         b.click(".nodes-listing tbody[data-id='f1.cockpit.lan'] tr.listing-ct-panel a.machine-jump")
 
@@ -719,12 +780,37 @@ class OpenshiftCommonTests(VolumeTests):
         b.reload()
         b.wait_visible("#machine-troubleshoot")
         b.wait_in_text(".curtains-ct", "Login failed")
+        b.click('#machine-troubleshoot')
+        b.wait_popup('troubleshoot-dialog')
+        b.wait_in_text("#troubleshoot-dialog", 'Log in to')
+        b.wait_present("#login-type button")
+        b.click("#login-type button");
+        b.click("#login-type li[value=password] a");
+        b.wait_in_text("#login-type button span", "Type a password");
+        b.wait_visible("#login-diff-password")
+        b.wait_not_visible("#login-available")
+        self.assertEqual(b.val("#login-custom-password"), "")
+        self.assertEqual(b.val("#login-custom-user"), "")
+        b.set_val("#login-custom-user", "root")
+        b.set_val("#login-custom-password", "foobar")
+        b.click('#troubleshoot-dialog .btn-primary')
+        b.wait_popdown('troubleshoot-dialog')
+
+        b.wait_not_visible(".curtains-ct")
+        b.enter_page('/system', "root@10.111.112.101")
+        b.wait_present('#system_information_os_text')
+        b.wait_visible('#system_information_os_text')
+        b.wait_text_not("#system_information_os_text", "")
+        b.logout()
 
         # Nothing was saved
-        self.assertFalse(m.execute("grep 10.111.112.101 /var/lib/cockpit/known_hosts || true"))
-        self.assertFalse(m.execute("grep 10.111.112.101 /var/lib/cockpit/machines.json || true"))
+        self.assertFalse(m.execute("grep 10.111.112.101 /etc/ssh/ssh_known_hosts || true"))
+        self.assertFalse(m.execute("grep 10.111.112.101 /etc/cockpit/machines.d/99-webui.json || true"))
 
         self.allow_hostkey_messages()
-        self.allow_journal_messages('.* host key for server is not known: .*',
+        self.allow_journal_messages('/usr/libexec/cockpit-pcp: bridge was killed: .*',
+                                    '.* host key for server is not known: .*',
+                                    'invalid or unusable locale: .*',
+                                    '.* warning: setlocale: .*',
                                     'connection unexpectedly closed by peer',
                                     'Error receiving data: Connection reset by peer')

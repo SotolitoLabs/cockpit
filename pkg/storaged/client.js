@@ -17,21 +17,28 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "storage/utils"
-], function($, cockpit, utils) {
+(function() {
+    "use strict";
+
+    var $ = require('jquery');
+    var cockpit = require('cockpit');
+
+    var utils = require('./utils');
 
     /* STORAGED CLIENT
      */
+
+    /* HACK: https://github.com/storaged-project/storaged/pull/68 */
+    var hacks = { };
+    if (cockpit.manifests["storage"] && cockpit.manifests["storage"]["hacks"])
+        hacks = cockpit.manifests["storage"]["hacks"];
 
     var client = { };
 
     /* Metrics
      */
 
-    function instance_sampler(metrics) {
+    function instance_sampler(metrics, source) {
         var instances;
         var self = {
             data: { },
@@ -67,7 +74,7 @@ define([
         }
 
         var channel = cockpit.channel({ payload: "metrics1",
-                                        source: "internal",
+                                        source: source || "internal",
                                         metrics: metrics
                                       });
         $(channel).on("closed", function (event, error) {
@@ -91,22 +98,14 @@ define([
     /* D-Bus proxies
      */
 
-    var STORAGED_SERVICE =   "org.storaged.Storaged";
-    var STORAGED_OPATH_PFX = "/org/storaged/Storaged";
-    var STORAGED_IFACE_PFX = "org.storaged.Storaged";
-
-    /* This might happen eventually.
-     */
-    if (false) {
-       STORAGED_SERVICE =   "org.freedesktop.UDisks2";
-       STORAGED_OPATH_PFX = "/org/freedesktop/UDisks2";
-       STORAGED_IFACE_PFX = "org.freedesktop.UDisks2";
-    }
+    var STORAGED_SERVICE;
+    var STORAGED_OPATH_PFX;
+    var STORAGED_IFACE_PFX;
 
     client.time_offset = undefined;  /* Number of milliseconds that the server is ahead of us. */
     client.features = undefined;
 
-    client.storaged_client = cockpit.dbus(STORAGED_SERVICE);
+    client.storaged_client = undefined;
 
     function proxy(iface, path) {
         return client.storaged_client.proxy(STORAGED_IFACE_PFX + "." + iface,
@@ -125,34 +124,37 @@ define([
                                               { watch: false });
     }
 
-    client.storaged_client.watch({ path_namespace: STORAGED_OPATH_PFX });
+    client.call = function call(path, iface, method, args, options) {
+        return client.storaged_client.call(path, STORAGED_IFACE_PFX + "." + iface, method, args, options);
+    };
 
-    client.manager = proxy("Manager", "Manager");
-    client.manager_lvm2 = proxy("Manager.LVM2", "Manager");
-    client.manager_iscsi = proxy("Manager.ISCSI.Initiator", "Manager");
+    function init_proxies () {
+        client.storaged_client.watch({ path_namespace: STORAGED_OPATH_PFX });
 
-    client.mdraids = proxies("MDRaid");
-    client.vgroups = proxies("VolumeGroup");
-    client.lvols = proxies("LogicalVolume");
-    client.drives = proxies("Drive");
-    client.drives_ata = proxies("Drive.Ata");
-    client.blocks = proxies("Block");
-    client.blocks_ptable = proxies("PartitionTable");
-    client.blocks_part = proxies("Partition");
-    client.blocks_lvm2 = proxies("Block.LVM2");
-    client.blocks_pvol = proxies("PhysicalVolume");
-    client.blocks_fsys = proxies("Filesystem");
-    client.blocks_crypto = proxies("Encrypted");
-    client.iscsi_sessions = proxies("ISCSI.Session");
-    client.storaged_jobs = proxies("Job");
+        client.mdraids = proxies("MDRaid");
+        client.vgroups = proxies("VolumeGroup");
+        client.lvols = proxies("LogicalVolume");
+        client.drives = proxies("Drive");
+        client.drives_ata = proxies("Drive.Ata");
+        client.blocks = proxies("Block");
+        client.blocks_ptable = proxies("PartitionTable");
+        client.blocks_part = proxies("Partition");
+        client.blocks_lvm2 = proxies("Block.LVM2");
+        client.blocks_pvol = proxies("PhysicalVolume");
+        client.blocks_fsys = proxies("Filesystem");
+        client.blocks_crypto = proxies("Encrypted");
+        client.blocks_swap = proxies("Swapspace");
+        client.iscsi_sessions = proxies("ISCSI.Session");
+        client.storaged_jobs = proxies("Job");
 
-    if (STORAGED_SERVICE != "org.freedesktop.UDisks2") {
-        client.udisks_client = cockpit.dbus("org.freedesktop.UDisks2");
-        client.udisks_jobs = client.udisks_client.proxies("org.freedesktop.UDisks2.Job",
-                                                          "/org/freedesktop/UDisks2");
-    } else {
-        client.udisks_client = null;
-        client.udisks_jobs = { };
+        if (STORAGED_SERVICE != "org.freedesktop.UDisks2") {
+            client.udisks_client = cockpit.dbus("org.freedesktop.UDisks2");
+            client.udisks_jobs = client.udisks_client.proxies("org.freedesktop.UDisks2.Job",
+                                                              "/org/freedesktop/UDisks2");
+        } else {
+            client.udisks_client = null;
+            client.udisks_jobs = { };
+        }
     }
 
     /* Monitors
@@ -161,6 +163,10 @@ define([
     client.fsys_sizes = instance_sampler([ { name: "mount.used" },
                                            { name: "mount.total" }
                                          ]);
+
+    client.swap_sizes = instance_sampler([ { name: "swapdev.length" },
+                                           { name: "swapdev.free" },
+                                         ], "direct");
 
     client.blockdev_io = instance_sampler([ { name: "block.device.read", derive: "rate" },
                                             { name: "block.device.written", derive: "rate" }
@@ -182,7 +188,7 @@ define([
     }
 
     function update_indices() {
-        var path, block, dev, mdraid, vgroup, pvol, lvol, part, i;
+        var path, block, mdraid, vgroup, pvol, lvol, part, i;
 
         client.broken_multipath_present = false;
         client.drives_multipath_blocks = { };
@@ -336,62 +342,125 @@ define([
                 obj.wait(function () {
                     wait_all(objects, callback);
                 });
-            } else
+            } else {
                 callback();
+            }
+        }
+
+        function pull_time() {
+            return cockpit.spawn(["date", "+%s"])
+                .then(function (now) {
+                    client.time_offset = parseInt(now, 10) * 1000 - new Date().getTime();
+                });
+        }
+
+        function enable_features() {
+            if (!client.manager.valid)
+                return cockpit.resolve(false);
+            if (!client.manager.EnableModules)
+                return cockpit.resolve({ });
+            return client.manager.EnableModules(true).then(
+                function() {
+                    var defer = cockpit.defer();
+                    client.manager_lvm2 = proxy("Manager.LVM2", "Manager");
+                    client.manager_iscsi = proxy("Manager.ISCSI.Initiator", "Manager");
+                    wait_all([ client.manager_lvm2, client.manager_iscsi],
+                            function () {
+                                var iscsi = (hacks.with_storaged_iscsi_sessions != "no" &&
+                                        client.manager_iscsi.valid &&
+                                        client.manager_iscsi.SessionsSupported !== false);
+                                defer.resolve({ lvm2: client.manager_lvm2.valid, iscsi: iscsi });
+                            });
+                    return defer.promise;
+                }, function(error) {
+                    console.warn("Can't enable storaged modules", error.toString());
+                    return cockpit.resolve({ });
+                });
         }
 
         wait_all([ client.manager,
                    client.mdraids, client.vgroups, client.drives,
                    client.blocks, client.blocks_ptable, client.blocks_lvm2, client.blocks_fsys
-                 ],
-                 function () {
-                     if (!client.manager.valid) {
-                         client.features = false;
-                         callback();
-                     } else {
-                         client.features = { lvm2: client.manager_lvm2.valid,
-                                             iscsi: client.manager_iscsi.valid
-                                           };
+                 ], function () {
+            pull_time().then(function() {
+                enable_features().then(function(features) {
+                    client.features = features;
+                    callback();
+                });
 
-                         // Additional interfaces like the LVM2
-                         // manager might appear asynchronously some
-                         // time after the modules are loaded, so we
-                         // have to watch them and react dynamically.
-
-                         $(client.manager_lvm2).on("changed", function () {
-                             client.features.lvm2 = client.manager_lvm2.valid;
-                             $(client.features).triggerHandler("changed");
-                         });
-
-                         $(client.manager_iscsi).on("changed", function () {
-                             client.features.iscsi = client.manager_iscsi.valid;
-                             $(client.features).triggerHandler("changed");
-                         });
-
-                         cockpit.spawn(["date", "+%s"])
-                             .done(function (now) {
-                                 client.time_offset = parseInt(now)*1000 - new Date().getTime();
-                             })
-                             .always(function () {
-                                 client.manager.EnableModules(true)
-                                     .fail(function (error) {
-                                         console.warn("Can't enable storaged modules", error.toString());
-                                     });
-                                 $(client.storaged_client).on('notify', function () {
-                                     update_indices();
-                                     $(client).triggerHandler('changed');
-                                 });
-                                 $(client.udisks_jobs).on('added removed changed', function () {
-                                     $(client).triggerHandler('changed');
-                                 });
-                                 update_indices();
-                                 callback();
-                             });
-                     }
-                 });
+                $(client.storaged_client).on('notify', function () {
+                    update_indices();
+                    $(client).triggerHandler('changed');
+                });
+                $(client.udisks_jobs).on('added removed changed', function () {
+                    $(client).triggerHandler('changed');
+                });
+                update_indices();
+            });
+        });
     }
 
-    client.init = init_model;
+    client.older_than = function older_than(version) {
+        return utils.compare_versions(this.manager.Version, version) < 0;
+    };
 
-    return client;
-});
+    function init_manager() {
+        /* Storaged 2.6 and later uses the UDisks2 API names, but try the
+         * older storaged API first as a fallback.
+         */
+
+        var storaged_service = "org.storaged.Storaged";
+        var storaged_opath_pfx = "/org/storaged/Storaged";
+        var storaged_iface_pfx = "org.storaged.Storaged";
+
+        var storaged = cockpit.dbus(storaged_service);
+        var storaged_manager = storaged.proxy(storaged_iface_pfx + ".Manager",
+                storaged_opath_pfx + "/Manager", { watch: true });
+
+        function fallback_udisks() {
+            STORAGED_SERVICE = "org.freedesktop.UDisks2";
+            STORAGED_OPATH_PFX = "/org/freedesktop/UDisks2";
+            STORAGED_IFACE_PFX = "org.freedesktop.UDisks2";
+
+            var udisks = cockpit.dbus(STORAGED_SERVICE);
+            var udisks_manager = udisks.proxy(STORAGED_IFACE_PFX + ".Manager",
+                    STORAGED_OPATH_PFX + "/Manager", { watch: true });
+
+            return udisks_manager.wait().then(function () {
+                return udisks_manager;
+            });
+        }
+
+        return storaged_manager.wait().then(function() {
+            if (storaged_manager.valid) {
+                console.log("Using older 'storaged' API: " + storaged_service);
+                STORAGED_SERVICE = storaged_service;
+                STORAGED_OPATH_PFX = storaged_opath_pfx;
+                STORAGED_IFACE_PFX = storaged_iface_pfx;
+                return storaged_manager;
+            } else {
+                return fallback_udisks();
+            }
+        }, fallback_udisks);
+    }
+
+    client.init = function init_storaged(callback) {
+        init_manager().then(function(manager) {
+            client.storaged_client = manager.client;
+            client.manager = manager;
+
+            // The first storaged version with the UDisks2 API names was 2.6
+            client.is_old_udisks2 = (STORAGED_SERVICE == "org.freedesktop.UDisks2" && client.older_than("2.6"));
+            if (client.is_old_udisks2)
+                console.log("Using older 'udisks2' implementation: " + manager.Version);
+
+            init_proxies();
+            init_model(callback);
+        }, function() {
+            client.features = false;
+            callback();
+        });
+    };
+
+    module.exports = client;
+}());

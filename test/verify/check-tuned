@@ -20,11 +20,8 @@
 
 import parent
 from testlib import *
-import unittest
-import os
 
-@unittest.skipIf("debian" in os.environ.get("TEST_OS", ""), "No tuned on Debian.")
-@unittest.skipIf("fedora-atomic" in os.environ.get("TEST_OS", ""), "No tuned on Fedora Atomic.")
+@skipImage("No tuned packaged", "debian-stable", "debian-testing", "fedora-atomic", "ubuntu-1604", "ubuntu-stable")
 class TestTuned(MachineCase):
     def testBasic(self):
         b = self.browser
@@ -37,12 +34,13 @@ class TestTuned(MachineCase):
         # Stop tuned in case it is running by default, as on RHEL.
 
         m.execute("systemctl stop tuned")
+        m.execute("systemctl disable tuned")
 
         # Login and check initial state
 
         self.login_and_go("/system")
 
-        b.wait_text('#system-info-performance button', "none")
+        b.wait_text('#system-info-performance a.action-trigger', "none")
         b.wait_attr('#system-info-performance [data-toggle="popover"]', 'data-content',
                     "Tuned is not running")
 
@@ -52,13 +50,13 @@ class TestTuned(MachineCase):
 
         m.execute("systemctl start tuned")
         b.click('#system-info-performance [data-toggle="popover"]')
-        b.wait_text('#system-info-performance button', recommended_profile)
+        b.wait_text('#system-info-performance a.action-trigger', recommended_profile)
         b.wait_attr('#system-info-performance [data-toggle="popover"]', 'data-content',
                     "This system is using the recommended profile")
 
         # Switch the profile
 
-        b.click('#system-info-performance button')
+        b.click('#system-info-performance a.action-trigger')
         title_selector = "h4.modal-title:contains('Change Performance Profile')"
         b.wait_present(title_selector)
         body_selector = ".modal-dialog:contains('Change Performance Profile')"
@@ -74,9 +72,41 @@ class TestTuned(MachineCase):
         b.click("{0} button.apply".format(body_selector))
         b.wait_not_present(title_selector)
 
-        b.wait_text('#system-info-performance button', "balanced")
+        b.wait_text('#system-info-performance a.action-trigger', "balanced")
         b.wait_attr('#system-info-performance [data-toggle="popover"]', 'data-content',
                     "This system is using a custom profile")
+
+        # Check the status of tuned, it should show the profile
+        output = m.execute("tuned-adm active 2>&1 || true")
+        self.assertIn("balanced", output)
+        output = m.execute("systemctl status tuned")
+        self.assertIn("enabled;", output)
+
+        # Now disable tuned
+        b.click('#system-info-performance a.action-trigger')
+        b.wait_present(title_selector)
+        b.wait_present("{0} .list-group-item.active p".format(body_selector))
+
+        b.click("{0} .list-group-item p:contains('None')".format(body_selector))
+        b.wait_present("{0} .list-group-item.active p:contains('None')".format(body_selector))
+        b.click("{0} button.apply".format(body_selector))
+        b.wait_not_present(title_selector)
+
+        b.wait_text('#system-info-performance a.action-trigger', "none")
+
+        # Check the status of tuned, it should show disabled
+        output = m.execute("tuned-adm active 2>&1 || true")
+        self.assertIn("No current active profile", output)
+        output = m.execute("systemctl status tuned")
+        self.assertIn("disabled;", output)
+
+        # Click on the button again
+        b.click('#system-info-performance a.action-trigger')
+        b.wait_present(title_selector)
+
+        # Tuned should still be disabled
+        output = m.execute("systemctl status tuned")
+        self.assertIn("disabled;", output)
 
 if __name__ == '__main__':
     test_main()

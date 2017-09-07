@@ -20,6 +20,21 @@
 (function() {
     "use strict";
 
+    var angular = require('angular');
+    require('angular-route');
+    require('angular-gettext/dist/angular-gettext.js');
+    require('angular-bootstrap-npm/dist/angular-bootstrap.js');
+
+    require('./app');
+    require('./date');
+    require('./images');
+    require('./projects');
+    require('./policy');
+    require('./kube-client');
+    require('./kube-client-cockpit');
+
+    require('../views/registry-dashboard-page.html');
+
     var MAX_RECENT_STREAMS = 15;
     var MAX_RECENT_TAGS = 8;
 
@@ -27,11 +42,13 @@
         'ngRoute',
         'ui.bootstrap',
         'ui.bootstrap.popover',
+        'gettext',
         'kubernetes.app',
         'kubernetes.date',
         'registry.images',
         'registry.projects',
         'registry.policy',
+        'registryUI.date',
         'kubeClient',
         'kubeClient.cockpit'
     ])
@@ -41,9 +58,10 @@
         'KubeWatchProvider',
         'KubeRequestProvider',
         'KubeDiscoverSettingsProvider',
+        'MomentLibProvider',
         '$provide',
         function($routeProvider, KubeWatchProvider, KubeRequestProvider,
-                 KubeDiscoverSettingsProvider, $provide) {
+                 KubeDiscoverSettingsProvider, MomentLibProvider, $provide) {
 
             $routeProvider
                 .when('/', {
@@ -57,6 +75,7 @@
             KubeWatchProvider.KubeWatchFactory = "CockpitKubeWatch";
             KubeRequestProvider.KubeRequestFactory = "CockpitKubeRequest";
             KubeDiscoverSettingsProvider.KubeDiscoverSettingsFactory = "cockpitKubeDiscoverSettings";
+            MomentLibProvider.MomentLibFactory = "momentLib";
 
             $provide.decorator("$exceptionHandler",
                 ['$delegate',
@@ -77,16 +96,17 @@
         '$scope',
         'kubeLoader',
         'kubeSelect',
+        'KubeDiscoverSettings',
         'imageData',
         'imageActions',
         'projectActions',
         'projectData',
+        'projectPolicy',
         'filterService',
-        function($scope, loader, select, imageData, imageActions, projectActions, projectData, filter) {
+        function($scope, loader, select, discoverSettings, imageData, imageActions, projectActions, projectData, projectPolicy, filter) {
             loader.load("projects");
-
             /* Watch the policybindings for project access changes */
-            loader.watch("policybindings");
+            loader.watch("policybindings", $scope);
 
             /*
              * For now the dashboard  has to watch all images in
@@ -95,7 +115,7 @@
              * In the future we want to have a metadata or filtering
              * service that we can query for that data.
              */
-            imageData.watchImages();
+            imageData.watchImages($scope);
 
             function compareVersion(a, b) {
                 a = (a.metadata || { }).resourceVersion || 0;
@@ -108,13 +128,6 @@
                 a = a.created || "";
                 b = b.created || "";
                 return (b < a ? -1 : (b > a ? 1 : 0));
-            }
-
-            function recentTags(data) {
-                var status = data.stream.status || { };
-                var tags = (status.tags || []).slice();
-                tags.sort(compareCreated);
-                tags.splice(MAX_RECENT_TAGS);
             }
 
             select.register("buildRecentStreams", function() {
@@ -142,6 +155,31 @@
                 return result;
             });
 
+            function setShowDockerPushCommands(visible) {
+                if (visible != $scope.showDockerPushCommands) {
+                    $scope.showDockerPushCommands = visible;
+                    $scope.$applyAsync();
+                }
+            }
+
+            function updateShowDockerPushCommands() {
+                var ns = filter.namespace();
+
+                if (ns) {
+                    discoverSettings().then(function(settings) {
+                        projectPolicy.subjectAccessReview(ns, settings.currentUser, 'update', 'imagestreamimages')
+                           .then(setShowDockerPushCommands);
+                    });
+                } else {
+                    // no current project, always show push commands; too expensive to iterate through all projects
+                    setShowDockerPushCommands(true);
+                }
+            }
+
+            // watch for project changes to update showDockerPushCommands, and initialize it
+            $scope.$on("$routeUpdate", updateShowDockerPushCommands);
+            updateShowDockerPushCommands();
+
             $scope.createProject = projectActions.createProject;
             $scope.createImageStream = imageActions.createImageStream;
             $scope.sharedImages = projectData.sharedImages;
@@ -151,7 +189,7 @@
             };
 
             $scope.projects = function projects() {
-                return select().kind("Project");
+                return select().kind("Project").statusPhase("Active");
             };
 
             $scope.filter = filter;

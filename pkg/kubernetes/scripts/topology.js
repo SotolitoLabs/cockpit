@@ -20,6 +20,15 @@
 (function() {
     "use strict";
 
+    var angular = require('angular');
+    require('angular-route');
+    require('kubernetes-topology-graph/dist/topology-graph.js');
+
+    require('./kube-client');
+    require('./details');
+
+    require('../views/topology-page.html');
+
     var icons = {
         Pod: '#vertex-Pod',
         ReplicationController: '#vertex-ReplicationController',
@@ -111,20 +120,20 @@
                 return rels;
             }
 
-            loader.watch("Node");
-            loader.watch("Pod");
-            loader.watch("ReplicationController");
-            loader.watch("Service");
-            loader.watch("Endpoints");
+            loader.watch("Node", $scope);
+            loader.watch("Pod", $scope);
+            loader.watch("ReplicationController", $scope);
+            loader.watch("Service", $scope);
+            loader.watch("Endpoints", $scope);
 
             discoverSettings().then(function(settings) {
                 if (settings.flavor === "openshift") {
-                    loader.watch("DeploymentConfig");
-                    loader.watch("Route");
+                    loader.watch("DeploymentConfig", $scope);
+                    loader.watch("Route", $scope);
                 }
             });
 
-            var c = loader.listen(function(changed, removed) {
+            loader.listen(function(changed, removed) {
                 var selected_meta;
                 var relations = [];
                 var item;
@@ -147,11 +156,7 @@
                 }
 
                 $scope.relations = relations;
-            });
-
-            $scope.$on("$destroy", function() {
-                c.cancel();
-            });
+            }, $scope);
 
             $scope.$on("select", function(ev, item) {
                 $scope.$applyAsync(function () {

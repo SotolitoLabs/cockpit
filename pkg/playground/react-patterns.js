@@ -17,32 +17,38 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-require([
-    "base1/cockpit",
-    "base1/react",
-    "performance/dialog-view",
-    "playground/react-demo-dialog",
-    "playground/react-demo-listing",
-], function(cockpit, React, dialog_pattern, demo_dialog, demo_listing) {
-
+(function() {
     "use strict";
 
-    var _ = cockpit.gettext;
+    var cockpit = require("cockpit");
+    var React = require("react");
+
+    require("table.css");
+
+    var dialogPattern = require("cockpit-components-dialog.jsx");
+
+    var demoDialog = require("./react-demo-dialog.jsx");
+    var demoListing = require("./react-demo-listing.jsx");
+    var demoTooltip = require("./react-demo-tooltip.jsx");
+    var demoOnOff = require("./react-demo-onoff.jsx");
+
+    var demoFileAC = require("./react-demo-file-autocomplete.jsx");
+
 
     /*-----------------------------------------------------------------------------
       Modal Dialog
       -----------------------------------------------------------------------------
      */
 
-    var last_action = "";
+    var lastAction = "";
 
-    var on_dialog_standard_clicked = function(mode) {
-        last_action = mode;
+    var onDialogStandardClicked = function(mode) {
+        lastAction = mode;
         var dfd = cockpit.defer();
-        dfd.notify(_("Starting something long"));
+        dfd.notify("Starting something long");
         if (mode == 'steps') {
             var interval, count = 0;
-            window.setInterval(function() {
+            interval = window.setInterval(function() {
                 count += 1;
                 dfd.notify("Step " + count);
             }, 500);
@@ -52,61 +58,84 @@ require([
             }, 5000);
             dfd.promise.cancel = function() {
                 window.clearTimeout(interval);
-                dfd.reject(_("Action canceled"));
+                dfd.notify("Canceling");
+                window.setTimeout(function() {
+                    dfd.reject("Action canceled");
+                }, 1000);
             };
         } else if (mode == 'reject') {
-            dfd.reject(_("Some error occurred"));
+            dfd.reject("Some error occurred");
         } else {
             dfd.resolve();
         }
         return dfd.promise;
     };
 
-    var on_dialog_done = function(success) {
+    var onDialogDone = function(success) {
         var result = success?"successful":"Canceled";
-        var action = success?last_action:"no action";
+        var action = success?lastAction:"no action";
         document.getElementById("demo-dialog-result").textContent = "Dialog closed: " + result + "(" + action + ")";
     };
 
-    var on_standard_demo_clicked = function(static_error) {
-        var dialog_props = {
-            'title': _("Example React Dialog"),
-            'body': React.createElement(demo_dialog),
+    var onStandardDemoClicked = function(staticError) {
+        var dialogProps = {
+            'title': "This shouldn't be seen",
+            'body': React.createElement(demoDialog, { 'clickNested': onStandardDemoClicked }),
         };
-        var footer_props = {
+        // also test modifying properties in subsequent render calls
+        var footerProps = {
             'actions': [
-                  { 'clicked': on_dialog_standard_clicked.bind(null, 'standard action'),
-                    'caption': _("OK"),
+                  { 'clicked': onDialogStandardClicked.bind(null, 'standard action'),
+                    'caption': "OK",
                     'style': 'primary',
                   },
-                  { 'clicked': on_dialog_standard_clicked.bind(null, 'dangerous action'),
-                    'caption': _("Danger"),
+                  { 'clicked': onDialogStandardClicked.bind(null, 'dangerous action'),
+                    'caption': "Danger",
                     'style': 'danger',
                   },
-                  { 'clicked': on_dialog_standard_clicked.bind(null, 'steps'),
-                    'caption': _("Wait"),
-                    'style': 'primary',
-                  },
-                  { 'clicked': on_dialog_standard_clicked.bind(null, 'reject'),
-                    'caption': _("Error"),
+                  { 'clicked': onDialogStandardClicked.bind(null, 'steps'),
+                    'caption': "Wait",
                     'style': 'primary',
                   },
               ],
-            'static_error': static_error,
-            'dialog_done': on_dialog_done,
+            'static_error': staticError,
+            'dialog_done': onDialogDone,
         };
-        dialog_pattern.show_modal_dialog(dialog_props, footer_props);
+        var dialogObj = dialogPattern.show_modal_dialog(dialogProps, footerProps);
+        // if this failed, exit (trying to create a nested dialog)
+        if (!dialogObj)
+            return;
+        footerProps.actions.push(
+                  { 'clicked': onDialogStandardClicked.bind(null, 'reject'),
+                    'caption': "Error",
+                    'style': 'primary',
+                  });
+        dialogObj.setFooterProps(footerProps);
+        dialogProps.title = "Example React Dialog";
+        dialogObj.setProps(dialogProps);
     };
 
-    document.getElementById('demo-show-dialog').addEventListener("click", on_standard_demo_clicked.bind(null, null), false);
-    document.getElementById('demo-show-error-dialog').addEventListener("click", on_standard_demo_clicked.bind(null, 'Some static error'), false);
+    document.addEventListener("DOMContentLoaded", function() {
+        document.getElementById('demo-show-dialog').addEventListener("click", onStandardDemoClicked.bind(null, null), false);
+        document.getElementById('demo-show-error-dialog').addEventListener("click", onStandardDemoClicked.bind(null, 'Some static error'), false);
 
-    /*-----------------------------------------------------------------------------
-      Listing Pattern
-      -----------------------------------------------------------------------------
-     */
-    // create the listing
-    demo_listing.demo(document.getElementById('demo-listing'));
+        /*-----------------------------------------------------------------------------
+          Listing Pattern
+          -----------------------------------------------------------------------------
+         */
+        // create the listing
+        demoListing.demo(document.getElementById('demo-listing'),
+            document.getElementById('demo-listing-selectable'),
+            document.getElementById('demo-listing-empty'));
 
+        /* Tooltip */
+        demoTooltip.demo(document.getElementById('demo-tooltip'), document.getElementById('demo-tooltip-top'));
 
-});
+        // OnOff
+        demoOnOff.demo(document.getElementById('demo-onoff'));
+
+        // File autocomplete
+        demoFileAC.demo(document.getElementById('demo-file-ac'));
+    });
+
+}());

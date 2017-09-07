@@ -23,7 +23,8 @@
 #include <glib.h>
 
 G_BEGIN_DECLS
-extern const gchar *cockpit_config_file;
+
+#define COCKPIT_CONF_SSH_SECTION "Ssh-Login"
 
 const gchar *   cockpit_conf_string           (const gchar *section,
                                                const gchar *field);
@@ -36,6 +37,14 @@ const gchar **  cockpit_conf_strv             (const gchar *section,
 gboolean        cockpit_conf_bool             (const gchar *section,
                                                const gchar *field,
                                                gboolean defawlt);
+
+guint           cockpit_conf_guint            (const gchar *section,
+                                               const gchar *field,
+                                               guint default_value,
+                                               guint64 max,
+                                               guint64 min);
+
+const gchar * const * cockpit_conf_get_dirs   (void);
 
 void            cockpit_conf_cleanup          (void);
 

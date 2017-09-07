@@ -4,17 +4,33 @@
     <meta charset="utf-8">
     <title>Cockpit React Patterns Usage</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="../base1/cockpit.css" type="text/css" rel="stylesheet">
-    <script src="../base1/bundle.js"></script>
-    <script src="../performance/bundle.js"></script>
+    <link href="../base1/patternfly.css" type="text/css" rel="stylesheet">
+    <link href="react-patterns.css" type="text/css" rel="stylesheet">
+    <script src="../base1/cockpit.js"></script>
     <script src="react-patterns.js"></script>
 </head>
 
 <body>
+
+<div class="container-fluid">
+  <div id="demo-tooltip-top"></div>
+  <h3>Tooltip</h3>
+  <div id="demo-tooltip"></div>
+</div>
+
+<hr>
+
+<div class="container-fluid">
+    <h3>Select file</h3>
+    <div id="demo-file-ac"></div>
+</div>
+
+<hr>
+
 <div class="container-fluid">
     <h3>Dialogs</h3>
-    <button id="demo-show-dialog" class="btn btn-default" translatable="yes">Show Dialog</button>
-    <button id="demo-show-error-dialog" class="btn btn-default" translatable="yes">Show Error-Dialog</button>
+    <button id="demo-show-dialog" class="btn btn-default">Show Dialog</button>
+    <button id="demo-show-error-dialog" class="btn btn-default">Show Error-Dialog</button>
     <div id="demo-dialog-result"></div>
 </div>
 
@@ -23,6 +39,13 @@
 <div class="container-fluid">
     <h3>Listing Pattern</h3>
     <div id="demo-listing"></div>
+    <div id="demo-listing-selectable"></div>
+    <div id="demo-listing-empty"></div>
+</div>
+
+<div class="container-fluid">
+    <h3>OnOff Switch</h3>
+    <div id="demo-onoff"></div>
 </div>
 
 <hr>

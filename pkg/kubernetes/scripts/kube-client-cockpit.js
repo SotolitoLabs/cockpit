@@ -17,10 +17,13 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* globals cockpit */
-
 (function() {
     "use strict";
+
+    var angular = require('angular');
+    var cockpit = require('cockpit');
+
+    require('./kube-client');
 
     function debug() {
         if (window.debugging == "all" || window.debugging == "kube")
@@ -48,13 +51,13 @@
      *
      * base64(PEM(data))
      *
-     * Since our http-stream1 expects PEM certificates (although they're
+     * Since our http-stream2 expects PEM certificates (although they're
      * nasty, they're better than all the alternatives) so we strip out
      * the outer base64 layer.
      */
 
     function parseCertOption(object, option) {
-        var match, data, blob = object[option + "-data"];
+        var blob = object[option + "-data"];
         if (blob !== undefined)
             return { data: window.atob(blob) };
 
@@ -71,7 +74,6 @@
 
     angular.module("kubeClient.cockpit", [
         "kubeClient",
-        "kubeUtils",
     ])
 
     .factory("CockpitKubeWatch", [
@@ -212,7 +214,7 @@
                         }
 
                         var meta = object.metadata;
-                        if (!meta || !meta.uid || !object.kind) {
+                        if (!meta || (!meta.uid && object.kind !== "Project") || !object.kind) {
                             console.warn("invalid kube object: ", object);
                             continue;
                         }
@@ -482,11 +484,13 @@
                     channel.addEventListener("message", function(ev, data) {
                         if (base64)
                             data = "1" + window.btoa(data);
-                        var mev = document.createEvent('MessageEvent');
-                        if (!mev.initMessageEvent)
+                        var mev;
+                        if (window.MessageEvent) {
                             mev = new window.MessageEvent('message', { 'data': data });
-                        else
+                        } else {
+                            mev = document.createEvent('MessageEvent');
                             mev.initMessageEvent('message', false, false, data, null, null, window, null);
+                        }
                         ws.dispatchEvent(mev);
                     });
 
@@ -508,10 +512,27 @@
                 }
 
                 function send(data) {
-                    if (base64)
+                    if (base64) {
+                        /*
+                         * HACK: container-terminal sends Width/Height commands but
+                         * many of the kubernetes implementations don't yet support
+                         * that. So filter them out here for now.
+                         */
+                        if (data[0] === "4")
+                            return;
                         data = window.atob(data.slice(1));
+                    }
+
                     if (channel)
                         channel.send(data);
+                }
+
+                var valid = true;
+                if (protocols) {
+                    if (angular.isArray(protocols))
+                        valid = base64 = protocols.indexOf("base64.channel.k8s.io") !== -1;
+                    else
+                        valid = base64 = protocols === "base64.channel.k8s.io";
                 }
 
                 /* A fake WebSocket */
@@ -525,14 +546,6 @@
                     close: { value: close },
                     send: { value: send },
                 });
-
-                var valid = true;
-                if (protocols) {
-                    if (angular.isArray(protocols))
-                        valid = base64 = protocols.indexOf("base64.channel.k8s.io") !== -1;
-                    else
-                        valid = base64 = "base64.channel.k8s.io";
-                }
 
                 if (valid) {
                     window.setTimeout(open);
@@ -551,6 +564,7 @@
         "$injector",
         function($q, $injector) {
             return function CockpitKubeSocket(url, config) {
+                var base64 = false;
                 var connect;
                 var state = 0; /* CONNECTING */
                 var ws = { };
@@ -573,18 +587,20 @@
                 else
                     connect = $injector.get('cockpitKubeDiscover')();
 
-                function fail() {
-                    var ev = document.createEvent('Event');
-                    ev.initEvent('close', false, false, false, 1002, "protocol-error");
-                    ws.dispatchEvent(ev);
-                }
-
                 function close(code, reason) {
                     if (channel)
                         channel.close(reason);
                 }
 
                 function send(data) {
+                    /*
+                     * HACK: container-terminal sends Width/Height commands but
+                     * many of the kubernetes implementations don't yet support
+                     * that. So filter them out here for now.
+                     */
+                    if (base64 && data[0] === "4")
+                        return;
+
                     if (channel)
                         channel.send(data);
                 }
@@ -601,13 +617,15 @@
                     send: { value: send },
                 });
 
+                base64 = protocols.indexOf("base64.channel.k8s.io") !== -1;
+
                 $q.when(connect, function connected(options) {
                     cockpit.event_target(ws);
 
                     channel = cockpit.channel(angular.extend({ }, options, {
                         payload: "websocket-stream1",
                         path: url,
-                        protocols: protocols,
+                        protocols: protocols.length > 0 ? protocols : undefined,
                     }));
 
                     channel.addEventListener("close", function(ev, options) {
@@ -621,11 +639,13 @@
                     });
 
                     channel.addEventListener("message", function(ev, data) {
-                        var mev = document.createEvent('MessageEvent');
-                        if (!mev.initMessageEvent)
+                        var mev;
+                        if (window.MessageEvent) {
                             mev = new window.MessageEvent('message', { 'data': data });
-                        else
+                        } else {
+                            mev = document.createEvent('MessageEvent');
                             mev.initMessageEvent('message', false, false, data, null, null, window, null);
+                        }
                         ws.dispatchEvent(mev);
                     });
 
@@ -678,6 +698,8 @@
                     });
 
                     opts.headers = angular.extend(heads, config.headers || { }, options.headers || { });
+
+                    debug("request:", method, path, opts);
                     channel = cockpit.channel(opts);
 
                     var response = { };
@@ -693,7 +715,6 @@
                     });
 
                     channel.addEventListener("close", function(ev, options) {
-                        var type;
                         channel = null;
 
                         response.options = options;
@@ -787,7 +808,7 @@
         function($q, runCommand) {
 
             function generateKubeOptions(cluster, user) {
-                var parser;
+                var parser, token, provider;
                 var options = { port: 8080, headers: { } };
 
                 if (cluster && cluster.server) {
@@ -808,8 +829,17 @@
                 }
 
                 if (user) {
-                    if (user.token)
-                        options.headers["Authorization"] = "Bearer " + user.token;
+                    token = user.token;
+                    provider = user["auth-provider"] || {};
+                    if (provider.config) {
+                        if (provider.config['access-token'])
+                            token = provider.config['access-token'];
+                        else if (provider.config['token'])
+                            token = provider.config['token'];
+                    }
+
+                    if (token)
+                        options.headers["Authorization"] = "Bearer " + token;
                     if (user.username)
                         options.headers["Authorization"] = "Basic " + basicToken(user.username, user.password || "");
                     if (options.tls) {
@@ -865,7 +895,16 @@
             }
 
             function read() {
-                return runCommand(["kubectl", "config", "view", "--output=json", "--raw"]);
+                var cmd = ["kubectl", "config", "view", "--output=json", "--raw"];
+
+                /* Call kubectl version first incase we have a auth-provider
+                 * that needs to be populated */
+                return runCommand(["kubectl", "version"])
+                        .then(function() {
+                            return runCommand(cmd);
+                        }, function () {
+                            return runCommand(cmd);
+                        });
             }
 
             return {
@@ -881,7 +920,8 @@
         "CockpitKubeRequest",
         "cockpitKubectlConfig",
         "cockpitConnectionInfo",
-        function($q, CockpitKubeRequest, cockpitKubectlConfig, info) {
+        "cockpitBrowserStorage",
+        function($q, CockpitKubeRequest, cockpitKubectlConfig, info, browser) {
             var defer = null;
 
             return function cockpitKubeDiscover(force) {
@@ -889,7 +929,7 @@
                     return defer.promise;
 
                 var last, req, kubectl, loginOptions;
-                var loginData = window.sessionStorage.getItem('login-data');
+                var loginData = browser.localStorage.getItem('login-data', true);
                 defer = $q.defer();
 
                 var schemes = [
@@ -904,7 +944,7 @@
 
                     /* No further ports to try? */
                     if (!options) {
-                        last.statusText = "Couldn't find running API server";
+                        last.statusText = cockpit.gettext("Couldn't find running API server");
                         last.problem = "not-found";
                         defer.reject(last);
                         return;
@@ -1059,10 +1099,15 @@
 
                 var env_p = CockpitEnvironment()
                     .then(function(result) {
-                        var value = result["REGISTRY_HOST"];
-                        if (value) {
-                            settings.registry.host = value;
+                        var regHost = result["REGISTRY_HOST"];
+                        if (regHost) {
+                            settings.registry.host = regHost;
                             settings.registry.host_explicit = true;
+                        }
+                        var openshifthost = result["OPENSHIFT_OAUTH_PROVIDER_URL"];
+                        if (openshifthost) {
+                            settings.registry.openshifthost = openshifthost.replace(/^http(s?):\/\//i, "");
+                            settings.registry.openshifthost_explicit = true;
                         }
 
                     }, function(ex) {});
@@ -1106,6 +1151,20 @@
         }
     ])
 
+    .factory("cockpitBrowserStorage", [
+        "$window",
+        function($window) {
+            var base = $window;
+            if (cockpit && cockpit.sessionStorage && cockpit.localStorage)
+                base = cockpit;
+
+            return {
+                sessionStorage: base.sessionStorage,
+                localStorage: base.localStorage
+            };
+        }
+    ])
+
     .factory('cockpitConnectionInfo', function () {
         return {
             type: null,
@@ -1144,14 +1203,9 @@
     })
 
     .factory('CockpitTranslate', function() {
-        // TODO: Implement translations
         return {
-            gettext: function (context, value) {
-                if (arguments.length > 1)
-                    return value;
-                else
-                    return context;
-            },
+            gettext: cockpit.gettext,
+            ngettext: cockpit.ngettext,
         };
     });
 }());

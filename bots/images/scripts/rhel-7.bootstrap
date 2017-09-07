@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -ex
+
+BASE=$(dirname $0)
+$BASE/virt-builder-fedora "$1" rhel-7.4 x86_64 ${SUBSCRIPTION_PATH:-~/.rhel}

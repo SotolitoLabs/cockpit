@@ -40,6 +40,10 @@
 
 static gboolean opt_lower;
 static gboolean opt_upper;
+static gboolean opt_show_count;
+static gboolean opt_problem;
+
+static GHashTable *channels;
 
 static GType mock_case_channel_get_type (void) G_GNUC_CONST;
 
@@ -69,6 +73,17 @@ mock_case_channel_recv (CockpitChannel *channel,
   g_bytes_unref (bytes);
 }
 
+static gboolean
+mock_case_channel_control (CockpitChannel *channel,
+                           const gchar *command,
+                           JsonObject *options)
+{
+  if (g_strcmp0 (command, "close-later") == 0)
+    cockpit_channel_close (channel, "closed");
+
+  return TRUE;
+}
+
 static void
 mock_case_channel_init (MockCaseChannel *self)
 {
@@ -81,6 +96,9 @@ mock_case_channel_constructed (GObject *obj)
   MockCaseChannel *self = (MockCaseChannel *)obj;
   const gchar *payload = NULL;
   JsonObject *options;
+  JsonObject *ready = json_object_new ();
+
+  const gchar *env = g_getenv ("COCKPIT_TEST_PARAM_ENV");
 
   G_OBJECT_CLASS (mock_case_channel_parent_class)->constructed (obj);
 
@@ -95,7 +113,14 @@ mock_case_channel_constructed (GObject *obj)
   else
     g_assert_not_reached ();
 
-  cockpit_channel_ready (COCKPIT_CHANNEL (self));
+  if (env)
+    json_object_set_string_member (ready, "test-env", env);
+
+  if (opt_show_count)
+    json_object_set_int_member (ready, "count", g_hash_table_size (channels));
+
+  cockpit_channel_ready (COCKPIT_CHANNEL (self), ready);
+  json_object_unref (ready);
 }
 
 static void
@@ -106,9 +131,9 @@ mock_case_channel_class_init (MockCaseChannelClass *klass)
 
   object_class->constructed = mock_case_channel_constructed;
   channel_class->recv = mock_case_channel_recv;
+  channel_class->control = mock_case_channel_control;
 }
 
-static GHashTable *channels;
 static gboolean init_received;
 static gboolean opt_lower;
 
@@ -233,6 +258,12 @@ send_init_command (CockpitTransport *transport)
   json_object_set_string_member (object, "command", "init");
   json_object_set_int_member (object, "version", 1);
 
+  if (opt_problem)
+    {
+      json_object_set_string_member (object, "problem", "canna-do-it");
+      json_object_set_string_member (object, "another-field", "extra");
+    }
+
   bytes = cockpit_json_write_bytes (object);
   json_object_unref (object);
 
@@ -264,7 +295,9 @@ main (int argc,
 
   static GOptionEntry entries[] = {
     { "lower", 0, 0, G_OPTION_ARG_NONE, &opt_lower, "Lower case channel type", NULL },
+    { "count", 0, 0, G_OPTION_ARG_NONE, &opt_show_count, "Show open channels count in ready messages", NULL },
     { "upper", 0, 0, G_OPTION_ARG_NONE, &opt_upper, "Upper case channel type", NULL },
+    { "problem", 0, 0, G_OPTION_ARG_NONE, &opt_problem, "Set a problem in \"init\" message", NULL },
     { NULL }
   };
 
@@ -285,7 +318,7 @@ main (int argc,
     {
       g_printerr ("mock-bridge: %s\n", error->message);
       g_error_free (error);
-      return 1;
+      return 255;
     }
 
   outfd = dup (1);

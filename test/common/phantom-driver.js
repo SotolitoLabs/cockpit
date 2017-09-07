@@ -44,10 +44,16 @@
 
 var page = require('webpage').create();
 var sys = require('system');
-
+var fs = require('fs');
+var clearedStorage = false;
+var messages = [];
+var currentCallMessageIndex = 0;
 var onCheckpoint;
 var waitTimeout;
 var didTimeout;
+
+/* Set by page load handlers */
+var loadStatus = null;
 
 page.viewportSize = { width: 800, height: 480 };
 
@@ -57,85 +63,113 @@ function slot() {
 }
 
 var canary = slot();
-function inject_basics() {
-    var i, len;
-    if (!page.evaluate(function(x) { return x in window; }, canary)) {
-        for (i = 1, len = sys.args.length; i < len; i++) {
-            page.injectJs(sys.args[i]);
-            page.evaluate(function(x) {
-                window.phantom_checkpoint = function() {
+function inject_basics(loading) {
+
+    /*
+     * The canary is a value we set on the top level window object
+     * of the page. It indicates to us that our javascript code
+     * has already been injected.
+     *
+     * When loading is used, we force a new canary to be used
+     */
+
+    /*
+     * Get information about the state of our javascript in the page:
+     *   true: already injected
+     *   null: is returned, not ready to inject
+     *   false: not injected, ready to inject
+     */
+    var injected = page.evaluate(function(canary, loading) {
+        if (loading) {
+            /* A load is not complete until all resources are done */
+	    if (document.readyState !== "complete") {
+                document.addEventListener("readystatechange", function() {
                     console.log("-*-CHECKPOINT-*-");
-                };
-                window[x] = x;
-            }, canary);
+                });
+		return null;
+            }
+            if (typeof loading !== "string")
+                loading = window.location.href;
+            if (window.location.href !== loading)
+                return null;
         }
+        return canary in window;
+    }, canary, loading || false);
+
+    /*
+     * When loading require that the old canary has been
+     * cleared. And once ready create a new one.
+     */
+    if (loading) {
+        if (injected !== false)
+            return false;
+        canary = slot();
+
+    /* Already injected */
+    } else if (injected) {
+        return true;
     }
+
+    /* Perform the injection step */
+    clearedStorage = page.evaluate(function(clearedStorage) {
+        /* Temporarily disable AMD while loading javascript here */
+        if (typeof define === "function" && define.amd) {
+            define.amd_overridden = define.amd;
+            delete define.amd
+        }
+
+        /* Clear storage the first time around, if we can */
+        try {
+            if (!clearedStorage)
+                localStorage.clear();
+            clearedStorage = true;
+        } catch(ex) { };
+
+        return clearedStorage;
+    }, clearedStorage);
+
+    var i, len;
+    for (var i = 1, len = sys.args.length; i < len; i++)
+        page.injectJs(sys.args[i]);
+
+    page.evaluate(function(canary) {
+        window.phantom_checkpoint = function() {
+            console.log("-*-CHECKPOINT-*-");
+        };
+
+        /* Setup the canary for above check */
+        window[canary] = canary;
+
+        /* Reenable AMD if disabled above */
+        if (typeof define === "function" && define.amd_overridden) {
+            define.amd = define.amd_overridden;
+            delete define.amd_overridden;
+        }
+    }, canary);
+
+    /* Yay, everything's injected */
+    return true;
 }
 
 var driver = {
     open: function(respond, url) {
-        var failure = null;
-
-        page.onResourceError = function(ex) {
-            failure = ex.errorString + " " + ex.url;
-        };
-
-        page.onLoadFinished = function(status) {
-            page.onLoadFinished = null;
-            page.onResourceError = null;
-            if (status == "success")
-                respond({ result: null });
-            else
-                respond({ error: failure || status });
-        };
-
-	page.open(url);
+        page.open(url);
+        return this.expect_load(respond, url);
     },
 
     reload: function(respond) {
-        this.expect_load(respond);
         page.reload();
+        return this.expect_load(respond);
     },
 
-    expect_load: function(respond) {
-        var failure = null;
-        var res = null;
-
-        function finish() {
-            page.onResourceError = null;
-            page.onLoadFinished = null;
-            clearTimeout(wait);
-            if (res === "success")
-                respond({ result: res });
-            else
-                respond({ error: res });
-        }
-
-        page.onResourceError = function(ex) {
-            failure = ex.errorString + " " + ex.url;
-        };
-
-        /*
-         * HACK: phantomjs fires the page.onLoadFinished() handler
-         * for each iframe, sometimes with the iframe triggering the
-         * event first. This leads to race conditions.
-         *
-         * The only work around is to use a timeout.
-         *
-         * https://code.google.com/p/phantomjs/issues/detail?id=504
-         */
-        var wait = null;
-        page.onLoadFinished = function(status) {
-            if (status != "success" && failure)
-                status = failure;
-            failure = null;
-            if (!res || res != "success")
-                res = status;
-            clearTimeout(wait);
-            wait = setTimeout(function() {
-                wait = null;
-                finish();
-            }, 500);
+    expect_load: function(respond, url) {
+        return function check() {
+            if (inject_basics(url || true)) {
+                if (loadStatus === "success" || loadStatus === null)
+                    respond({ result: null });
+                else
+                    respond({ error: loadFailure || loadStatus });
+            }
         };
     },
 
@@ -153,9 +187,30 @@ var driver = {
 
     show: function(respond, file) {
         if (!file)
-            file = "page.png"
+            file = "page.png";
         page.render(file);
-        sys.stderr.writeLine("Wrote " + file)
+        sys.stderr.writeLine("Wrote " + file);
+        respond({ result: null });
+    },
+
+    dump: function(respond, file) {
+        if (!file)
+            file = "page.html";
+        var data = page.evaluate(function() {
+            return document.documentElement.outerHTML;
+	});
+        fs.write(file, data, 'w');
+        sys.stderr.writeLine("Wrote " + file);
+        respond({ result: null });
+    },
+
+    dump_log: function(respond, file) {
+        if (messages.length > 0) {
+            if (!file)
+                file = "page.js.log";
+            fs.write(file, messages.join('\n'), 'w');
+            sys.stderr.writeLine("Wrote " + file);
+        }
         respond({ result: null });
     },
 
@@ -226,7 +281,7 @@ var driver = {
 
     arm_timeout: function(respond, timeout) {
         if (waitTimeout) {
-            respond({ error: "timeout already armed" });
+            respond({ error: "already armed timeout" });
             return;
         }
 
@@ -285,7 +340,9 @@ var driver = {
         respond({ result: "pong" });
     },
 
-    cookies: function(respond) {
+    cookies: function(respond, add) {
+        if (add)
+            phantom.addCookie(add);
         respond({ result: phantom.cookies });
     }
 };
@@ -316,7 +373,7 @@ function step() {
         if (responded)
             sys.stderr.writeLine("WARNING: " + line + " was true after timeout, add more checkpoints");
         else
-            respond({ error: "timeout" });
+            respond({ error: "timeout\n" + messages.slice(currentCallMessageIndex).join('\n') });
     }, cmd.timeout || 60 * 1000);
 
     /* This function is called when functions want to respond */
@@ -330,8 +387,11 @@ function step() {
         window.clearTimeout(timeout);
         page.onError = null;
         timeout = null;
+        currentCallMessageIndex = messages.length;
         responded = true;
         onCheckpoint = null;
+        loadFailure = null;
+        loadStatus = null;
 
         sys.stdout.writeLine(line);
         step();
@@ -343,7 +403,7 @@ function step() {
             backtrace += "\n" + trace[i].file + " " + trace[i].line + " " + trace[i].function;
         sys.stderr.writeLine("Page error: " + msg + backtrace);
         respond({ error: msg });
-    }
+    };
 
     if (cmd.cmd in driver) {
         args = (cmd.args || []).slice();
@@ -361,13 +421,49 @@ function step() {
     }
 }
 
+function checkpoint() {
+    if (onCheckpoint)
+        onCheckpoint();
+}
+
+page.onResourceError = function(ex) {
+
+    /* These are errors that are not really errors */
+    if (ex.errorString.indexOf("Host requires authentication") === 0)
+        return;
+
+    var prefix = "Resource Error: ";
+
+    /*
+     * Certain resource errors seem to be noise caused by
+     * cancelled loads, and racy state in phantomjs
+     */
+    if (ex.errorString.indexOf("Network access is disabled") !== -1) {
+        sys.stderr.writeLine("ERROR: fatal problem: " + ex.errorString);
+        phantom.exit(1);
+        process.exit(1);
+    } else {
+        loadFailure = ex.errorString + " " + ex.url;
+    }
+
+    sys.stderr.writeLine(prefix + ex.errorString + " " + ex.url);
+    messages.push(ex.errorString + " " + ex.url);
+    checkpoint();
+};
+
+page.onLoadFinished = function(val) {
+    loadStatus = val;
+    checkpoint();
+};
+
 page.onConsoleMessage = function(msg, lineNum, sourceId) {
     if (msg == "-*-CHECKPOINT-*-") {
         // sys.stderr.writeLine("CHECKPOINT");
-        if (onCheckpoint)
-            onCheckpoint();
-    } else
+        checkpoint();
+    } else {
+        messages.push(msg);
         sys.stderr.writeLine('> ' + msg);
+    }
 };
 
 step();

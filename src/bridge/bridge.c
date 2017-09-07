@@ -18,8 +18,6 @@
  */
 #include "config.h"
 
-#include "cockpitbridge.h"
-
 #include "cockpitchannel.h"
 #include "cockpitdbusinternal.h"
 #include "cockpitdbusjson.h"
@@ -35,13 +33,14 @@
 #include "cockpitpipechannel.h"
 #include "cockpitinternalmetrics.h"
 #include "cockpitpolkitagent.h"
-#include "cockpitportal.h"
+#include "cockpitrouter.h"
 #include "cockpitwebsocketstream.h"
 
 #include "common/cockpitassets.h"
 #include "common/cockpitjson.h"
 #include "common/cockpitlog.h"
 #include "common/cockpitpipetransport.h"
+#include "common/cockpitsystem.h"
 #include "common/cockpittest.h"
 #include "common/cockpitunixfd.h"
 #include "common/cockpitwebresponse.h"
@@ -63,7 +62,7 @@
    of the user that is logged into the Server Console.
 */
 
-static CockpitPackages *packages;
+static CockpitPackages *packages = NULL;
 
 static CockpitPayloadType payload_types[] = {
   { "dbus-json3", cockpit_dbus_json_get_type },
@@ -76,10 +75,21 @@ static CockpitPayloadType payload_types[] = {
   { "fslist1", cockpit_fslist_get_type },
   { "null", cockpit_null_channel_get_type },
   { "echo", cockpit_echo_channel_get_type },
-  { "metrics1", cockpit_internal_metrics_get_type },
   { "websocket-stream1", cockpit_web_socket_stream_get_type },
   { NULL },
 };
+
+static void
+add_router_channels (CockpitRouter *router)
+{
+  JsonObject *match;
+
+  match = json_object_new ();
+  json_object_set_string_member (match, "payload", "metrics1");
+  json_object_set_string_member (match, "source", "internal");
+  cockpit_router_add_channel (router, match, cockpit_internal_metrics_get_type);
+  json_object_unref (match);
+}
 
 static void
 on_closed_set_flag (CockpitTransport *transport,
@@ -90,31 +100,73 @@ on_closed_set_flag (CockpitTransport *transport,
   *flag = TRUE;
 }
 
+static gboolean
+on_logout_set_flag (CockpitTransport *transport,
+                    const gchar *command,
+                    const gchar *channel,
+                    JsonObject *options,
+                    GBytes *payload,
+                    gpointer user_data)
+{
+  gboolean *flag = user_data;
+  if (g_str_equal (command, "logout"))
+    *flag = TRUE;
+  return FALSE;
+}
+
 static void
-send_init_command (CockpitTransport *transport)
+send_init_command (CockpitTransport *transport,
+                   gboolean interactive)
 {
   const gchar *checksum;
-  const gchar *name;
   JsonObject *object;
+  JsonObject *block;
+  GHashTable *os_release;
+  gchar **names;
   GBytes *bytes;
+  gint i;
 
   object = json_object_new ();
   json_object_set_string_member (object, "command", "init");
   json_object_set_int_member (object, "version", 1);
 
-  checksum = cockpit_packages_get_checksum (packages);
-  if (checksum)
-    json_object_set_string_member (object, "checksum", checksum);
+  /*
+   * When in interactive mode pretend we received an init
+   * message, and don't print one out.
+   */
+  if (interactive)
+    {
+      json_object_set_string_member (object, "host", "localhost");
+    }
+  else
+    {
+      checksum = cockpit_packages_get_checksum (packages);
+      if (checksum)
+        json_object_set_string_member (object, "checksum", checksum);
 
-  /* Happens when we're in --interact mode */
-  name = cockpit_dbus_internal_name ();
-  if (name)
-    json_object_set_string_member (object, "bridge-dbus-name", name);
+      /* This is encoded as an object to allow for future expansion */
+      block = json_object_new ();
+      names = cockpit_packages_get_names (packages);
+      for (i = 0; names && names[i] != NULL; i++)
+        json_object_set_null_member (block, names[i]);
+      json_object_set_object_member (object, "packages", block);
+      g_free (names);
+
+      os_release = cockpit_system_load_os_release ();
+      block = cockpit_json_from_hash_table (os_release,
+                                            cockpit_system_os_release_fields ());
+      if (block)
+        json_object_set_object_member (object, "os-release", block);
+      g_hash_table_unref (os_release);
+    }
 
   bytes = cockpit_json_write_bytes (object);
   json_object_unref (object);
 
-  cockpit_transport_send (transport, NULL, bytes);
+  if (interactive)
+    cockpit_transport_emit_recv (transport, NULL, bytes);
+  else
+    cockpit_transport_send (transport, NULL, bytes);
   g_bytes_unref (bytes);
 }
 
@@ -166,7 +218,10 @@ start_dbus_daemon (void)
 
   if (error != NULL)
     {
-      g_warning ("couldn't start %s: %s", dbus_argv[0], error->message);
+      if (g_error_matches (error, G_SPAWN_ERROR, G_SPAWN_ERROR_NOENT))
+        g_debug ("couldn't start %s: %s", dbus_argv[0], error->message);
+      else
+        g_message ("couldn't start %s: %s", dbus_argv[0], error->message);
       g_error_free (error);
       pid = 0;
       goto out;
@@ -208,7 +263,7 @@ start_dbus_daemon (void)
 
   if (address->str[0] == '\0')
     {
-      g_warning ("dbus-daemon didn't send us a dbus address");
+      g_message ("dbus-daemon didn't send us a dbus address; not installed?");
     }
   else
     {
@@ -354,18 +409,58 @@ getpwuid_a (uid_t uid)
   return ret;
 }
 
+static void
+update_router (CockpitRouter *router,
+               gboolean privileged_slave)
+{
+  if (!privileged_slave)
+    {
+      GList *bridges = cockpit_packages_get_bridges (packages);
+      cockpit_router_set_bridges (router, bridges);
+      g_list_free (bridges);
+    }
+}
+
+static CockpitRouter *
+setup_router (CockpitTransport *transport,
+              gboolean privileged_slave)
+{
+  CockpitRouter *router = NULL;
+
+  packages = cockpit_packages_new ();
+
+  router = cockpit_router_new (transport, payload_types, NULL);
+  add_router_channels (router);
+
+  /* This has to happen after add_router_channels as the
+   * packages based bridges should have priority.
+   */
+  update_router (router, privileged_slave);
+
+  return router;
+}
+
+struct CallUpdateRouterData {
+  CockpitRouter *router;
+  gboolean privileged_slave;
+};
+
+static void
+call_update_router (gconstpointer user_data)
+{
+  const struct CallUpdateRouterData *data = user_data;
+  update_router (data->router, data->privileged_slave);
+}
+
 static int
 run_bridge (const gchar *interactive,
             gboolean privileged_slave)
 {
   CockpitTransport *transport;
-  CockpitBridge *bridge;
+  CockpitRouter *router;
   gboolean terminated = FALSE;
   gboolean interupted = FALSE;
   gboolean closed = FALSE;
-  gboolean init_received = FALSE;
-  CockpitPortal *super = NULL;
-  CockpitPortal *pcp = NULL;
   gpointer polkit_agent = NULL;
   const gchar *directory;
   struct passwd *pwd;
@@ -375,21 +470,9 @@ run_bridge (const gchar *interactive,
   guint sig_int;
   int outfd;
   uid_t uid;
+  struct CallUpdateRouterData call_update_router_data;
 
   cockpit_set_journal_logging (G_LOG_DOMAIN, !isatty (2));
-
-  /*
-   * The bridge always runs from within $XDG_RUNTIME_DIR
-   * This makes it easy to create user sockets and/or files.
-   */
-  if (!privileged_slave)
-    {
-      directory = g_get_user_runtime_dir ();
-      if (g_mkdir_with_parents (directory, 0700) < 0)
-        g_warning ("couldn't create runtime dir: %s: %s", directory, g_strerror (errno));
-      else if (g_chdir (directory) < 0)
-        g_warning ("couldn't change to runtime dir: %s: %s", directory, g_strerror (errno));
-    }
 
   /* Always set environment variables early */
   uid = geteuid();
@@ -405,6 +488,22 @@ run_bridge (const gchar *interactive,
       g_setenv ("SHELL", pwd->pw_shell, TRUE);
     }
 
+  /* Set a path if nothing is set */
+  g_setenv ("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 0);
+
+  /*
+   * The bridge always runs from within $XDG_RUNTIME_DIR
+   * This makes it easy to create user sockets and/or files.
+   */
+  if (!privileged_slave)
+    {
+      directory = g_get_user_runtime_dir ();
+      if (g_mkdir_with_parents (directory, 0700) < 0)
+        g_warning ("couldn't create runtime dir: %s: %s", directory, g_strerror (errno));
+      else if (g_chdir (directory) < 0)
+        g_warning ("couldn't change to runtime dir: %s: %s", directory, g_strerror (errno));
+    }
+
   /* Reset the umask, typically this is done in .bashrc for a login shell */
   umask (022);
 
@@ -418,6 +517,8 @@ run_bridge (const gchar *interactive,
   if (outfd < 0 || dup2 (2, 1) < 1)
     {
       g_warning ("bridge couldn't redirect stdout to stderr");
+      if (outfd > -1)
+        close (outfd);
       outfd = 1;
     }
 
@@ -435,13 +536,11 @@ run_bridge (const gchar *interactive,
         agent_pid = start_ssh_agent ();
     }
 
-  packages = cockpit_packages_new ();
   cockpit_dbus_internal_startup (interactive != NULL);
 
   if (interactive)
     {
       /* Allow skipping the init message when interactive */
-      init_received = TRUE;
       transport = cockpit_interact_transport_new (0, outfd, interactive);
     }
   else
@@ -453,40 +552,51 @@ run_bridge (const gchar *interactive,
     {
       if (!interactive)
         polkit_agent = cockpit_polkit_agent_register (transport, NULL);
-      super = cockpit_portal_new_superuser (transport);
     }
 
   g_resources_register (cockpitassets_get_resource ());
   cockpit_web_failure_resource = "/org/cockpit-project/Cockpit/fail.html";
 
-  pcp = cockpit_portal_new_pcp (transport);
+  if (privileged_slave)
+    {
+      /*
+       * When in privileged mode, exit right away when we get any sort of logout
+       * This enforces the fact that the user no longer has privileges.
+       */
+      g_signal_connect (transport, "control", G_CALLBACK (on_logout_set_flag), &closed);
+    }
 
-  bridge = cockpit_bridge_new (transport, payload_types, init_received);
+  router = setup_router (transport, privileged_slave);
+
   cockpit_dbus_user_startup (pwd);
   cockpit_dbus_setup_startup ();
-  cockpit_dbus_environment_startup ();
+  cockpit_dbus_process_startup ();
+  cockpit_dbus_machines_startup ();
+  cockpit_packages_dbus_startup (packages);
+
+  call_update_router_data.router = router;
+  call_update_router_data.privileged_slave = privileged_slave;
+  cockpit_packages_on_change (packages, call_update_router, &call_update_router_data);
 
   g_free (pwd);
   pwd = NULL;
 
   g_signal_connect (transport, "closed", G_CALLBACK (on_closed_set_flag), &closed);
-  send_init_command (transport);
+  send_init_command (transport, interactive ? TRUE : FALSE);
 
   while (!terminated && !closed && !interupted)
     g_main_context_iteration (NULL, TRUE);
 
   if (polkit_agent)
     cockpit_polkit_agent_unregister (polkit_agent);
-  if (super)
-    g_object_unref (super);
 
-  g_object_unref (pcp);
-  g_object_unref (bridge);
+  g_object_unref (router);
   g_object_unref (transport);
 
+  cockpit_packages_on_change (packages, NULL, NULL);
+
+  cockpit_dbus_machines_cleanup ();
   cockpit_dbus_internal_cleanup ();
-  cockpit_packages_free (packages);
-  packages = NULL;
 
   if (daemon_pid)
     kill (daemon_pid, SIGTERM);
@@ -501,6 +611,20 @@ run_bridge (const gchar *interactive,
     raise (SIGTERM);
 
   return 0;
+}
+
+static void
+print_rules (gboolean opt_privileged)
+{
+  CockpitRouter *router = NULL;
+  CockpitTransport *transport = cockpit_interact_transport_new (0, 1, "--");
+
+  router = setup_router (transport, opt_privileged);
+
+  cockpit_router_dump_rules (router);
+
+  g_object_unref (router);
+  g_object_unref (transport);
 }
 
 static void
@@ -545,6 +669,7 @@ main (int argc,
   int ret;
 
   static gboolean opt_packages = FALSE;
+  static gboolean opt_rules = FALSE;
   static gboolean opt_privileged = FALSE;
   static gboolean opt_version = FALSE;
   static gchar *opt_interactive = NULL;
@@ -553,6 +678,7 @@ main (int argc,
     { "interact", 0, 0, G_OPTION_ARG_STRING, &opt_interactive, "Interact with the raw protocol", "boundary" },
     { "privileged", 0, 0, G_OPTION_ARG_NONE, &opt_privileged, "Privileged copy of bridge", NULL },
     { "packages", 0, 0, G_OPTION_ARG_NONE, &opt_packages, "Show Cockpit package information", NULL },
+    { "rules", 0, 0, G_OPTION_ARG_NONE, &opt_rules, "Show Cockpit bridge rules", NULL },
     { "version", 0, 0, G_OPTION_ARG_NONE, &opt_version, "Show Cockpit version information", NULL },
     { NULL }
   };
@@ -560,10 +686,8 @@ main (int argc,
   signal (SIGPIPE, SIG_IGN);
 
   /* Debugging issues during testing */
-#if WITH_DEBUG
   signal (SIGABRT, cockpit_test_signal_backtrace);
   signal (SIGSEGV, cockpit_test_signal_backtrace);
-#endif
 
   /*
    * We have to tell GLib about an alternate default location for XDG_DATA_DIRS
@@ -599,6 +723,11 @@ main (int argc,
       cockpit_packages_dump ();
       return 0;
     }
+  else if (opt_rules)
+    {
+      print_rules (opt_privileged);
+      return 0;
+    }
   else if (opt_version)
     {
       print_version ();
@@ -612,6 +741,9 @@ main (int argc,
     }
 
   ret = run_bridge (opt_interactive, opt_privileged);
+
+  if (packages)
+    cockpit_packages_free (packages);
 
   g_free (opt_interactive);
   return ret;

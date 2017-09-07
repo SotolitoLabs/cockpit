@@ -1,5 +1,10 @@
 @import "variables.less";
-@import "angular-csp.less";
+@import (less) "../../../node_modules/angular/angular-csp.css";
+
+@import (less) "../../lib/page.css";
+@import "/listing.less";
+@import (less) "../../lib/console.css";
+@import (less) "../../lib/table.css";
 
 @icon-sidebar-width: 100px;
 
@@ -8,7 +13,6 @@
 @import "dashboard.less";
 
 @import "images.less";
-@import "layers.less";
 @import "projects.less";
 @import "tags.less";
 
@@ -36,6 +40,14 @@
 }
 
 .dashboard-images {
+    .card-pf-heading {
+        position: relative;
+
+        .card-pf-title {
+            max-width: 80%;
+        }
+    }
+
     .card-pf-body {
         min-height: 220px;
         padding-bottom: 0px;
@@ -53,8 +65,9 @@
             background: linear-gradient(90deg, transparent 20px, @tag-border 20px, @tag-border 22px, transparent 22px);
             background-size: 100% 20px;
             background-repeat: no-repeat;
-            padding: 10px 0px 0px 20px;
+            padding: 3px 0px 0px 20px;
             margin-bottom: 0px;
+            line-height: 30px;
 
             li {
                 background: linear-gradient(180deg, transparent 8px, @tag-border 8px, @tag-border 10px, transparent 10px);
@@ -79,13 +92,17 @@
         margin-top: -3px;
     }
 
+    .namespace-filter button {
+        margin-bottom: 0px;
+    }
+
     .all-images {
         display: block;
         float: right;
         margin-bottom: 10px;
     }
 
-    .imagestream-lock {
+    .registry-imagestream-lock {
         display: block;
         float: right;
         margin: 9px;
@@ -218,4 +235,14 @@
             }
         }
     }
+}
+
+/* overide since registry-image-widget sets
+   the last column to be aligned right
+   but we don't want that when we are
+   using colspan
+ */
+table.listing-ct > thead td[colspan]:last-child,
+table.listing-ct > thead th[colspan]:last-child {
+    text-align: left;
 }

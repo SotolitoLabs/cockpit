@@ -17,12 +17,15 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "system/service"
-], function($, cockpit, mustache, service) {
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var mustache = require("mustache");
+    var service = require("service");
+
     var _ = cockpit.gettext;
     var C_ = cockpit.gettext;
 
@@ -31,7 +34,26 @@ define([
 
     var utils = { };
 
-    var hostnamed = cockpit.dbus("org.freedesktop.hostname1").proxy();
+    utils.compare_versions = function compare_versions(a, b) {
+        function to_ints(str) {
+            return str.split(".").map(function (s) { return s ? parseInt(s, 10) : 0; });
+        }
+
+        var a_ints = to_ints(a);
+        var b_ints = to_ints(b);
+        var len = Math.min(a_ints.length, b_ints.length);
+        var i;
+
+        for (i = 0; i < len; i++) {
+            if (a_ints[i] == b_ints[i])
+                continue;
+            return a_ints[i] - b_ints[i];
+        }
+
+        return a_ints.length - b_ints.length;
+    };
+
+    utils.hostnamed = cockpit.dbus("org.freedesktop.hostname1").proxy();
 
     utils.array_find = function array_find(array, pred) {
         for (var i = 0; i < array.length; i++)
@@ -102,17 +124,21 @@ define([
         return s;
     };
 
+    utils.format_size_and_text = function format_size_and_text(size, text) {
+        return cockpit.format(_("${size} ${desc}"), { size: utils.fmt_size(size), desc: text});
+    };
+
     utils.validate_lvm2_name = function validate_lvm2_name(name) {
         if (name === "")
-            return _("Name can not be empty.");
+            return _("Name cannot be empty.");
         if (name.length > 127)
-            return _("Name can not be longer than 127 characters.");
+            return _("Name cannot be longer than 127 characters.");
         var m = name.match(/[^a-zA-Z0-9+._-]/);
         if (m) {
             if (m[0].search(/\s+/) === -1)
-                return cockpit.format(_("Name can not contain the character '$0'."), m[0]);
+                return cockpit.format(_("Name cannot contain the character '$0'."), m[0]);
             else
-                    return cockpit.format(_("Name can not contain whitespace."), m[0]);
+                    return cockpit.format(_("Name cannot contain whitespace."), m[0]);
         }
     };
 
@@ -129,7 +155,10 @@ define([
         if (parts.length != 2)
             return mdraid.Name;
 
-        if (parts[0] == hostnamed.StaticHostname)
+        /* if we call hostnamed too early, before the dbus.proxy() promise is fulfilled,
+         * it will not be valid yet; it's too inconvenient to make this
+         * function asynchronous, so just don't show the host name in this case */
+        if (utils.hostnamed.StaticHostname === undefined || parts[0] == utils.hostnamed.StaticHostname)
             return parts[1];
         else
             return cockpit.format(_("$name (from $host)"),
@@ -232,7 +261,80 @@ define([
         };
     };
 
-    utils.get_free_blockdevs = function get_free_blockdevs(client) {
+    utils.get_partitions = function get_partitions(client, block) {
+        var partitions = client.blocks_partitions[block.path];
+
+        function process_level(level, container_start, container_size) {
+            var n;
+            var last_end = container_start;
+            var total_end = container_start + container_size;
+            var block, start, size, is_container, is_contained;
+
+            var result = [ ];
+
+            function append_free_space(start, size) {
+                // There is a lot of rounding and aligning going on in
+                // the storage stack.  All of udisks2, libblockdev,
+                // and libparted seem to contribute their own ideas of
+                // where a partition really should start.
+                //
+                // The start of partitions are aggressively rounded
+                // up, sometimes twice, but the end is not aligned in
+                // the same way.  This means that a few megabytes of
+                // free space will show up between partitions.
+                //
+                // We hide these small free spaces because they are
+                // unexpected and can't be used for anything anyway.
+                //
+                // "Small" is anything less than 3 MiB, which seems to
+                // work okay.  (The worst case is probably creating
+                // the first logical partition inside a extended
+                // partition with udisks+libblockdev.  It leads to a 2
+                // MiB gap.)
+
+                if (size >= 3*1024*1024) {
+                    result.push({ type: 'free', start: start, size: size });
+                }
+            }
+
+            for (n = 0; n < partitions.length; n++) {
+                block = client.blocks[partitions[n].path];
+                start = partitions[n].Offset;
+                size = partitions[n].Size;
+                is_container = partitions[n].IsContainer;
+                is_contained = partitions[n].IsContained;
+
+                if (block === null)
+                    continue;
+
+                if (level === 0 && is_contained)
+                    continue;
+
+                if (level == 1 && !is_contained)
+                    continue;
+
+                if (start < container_start || start+size > container_start+container_size)
+                    continue;
+
+                append_free_space(last_end, start - last_end);
+                if (is_container) {
+                    result.push({ type: 'container', block: block, size: size,
+                                  partitions: process_level(level+1, start, size) });
+                } else {
+                    result.push({ type: 'block', block: block });
+                }
+                last_end = start + size;
+            }
+
+            append_free_space(last_end, total_end - last_end);
+
+            return result;
+        }
+
+        return process_level(0, 0, block.Size);
+    };
+
+    utils.get_available_spaces = function get_available_spaces(client) {
         function is_free(path) {
             var block = client.blocks[path];
             var block_ptable = client.blocks_ptable[path];
@@ -276,15 +378,49 @@ define([
             var block = client.blocks[path];
             var link = utils.get_block_link_target(client, path);
             var text = $('<div>').html(link.html).text();
-
-            return {
-                path: path,
-                Name: utils.block_name(block),
-                Description: utils.fmt_size(block.Size) + " " + text
-            };
+            return { type: 'block', block: block, size: block.Size, desc: text };
         }
 
-        return Object.keys(client.blocks).filter(is_free).sort(utils.make_block_path_cmp(client)).map(make);
+        var spaces = Object.keys(client.blocks).filter(is_free).sort(utils.make_block_path_cmp(client)).map(make);
+
+        function add_free_spaces(block) {
+            var parts = utils.get_partitions(client, block);
+            var i, p, link, text;
+            for (i in parts) {
+                p = parts[i];
+                if (p.type == 'free') {
+                    link = utils.get_block_link_target(client, block.path);
+                    text = $('<div>').html(link.html).text();
+                    spaces.push({ type: 'free', block: block, start: p.start, size: p.size,
+                                  desc: cockpit.format(_("unpartitioned space on $0"), text) });
+                }
+            }
+        }
+
+        for (var p in client.blocks_ptable)
+            add_free_spaces(client.blocks[p]);
+
+        return spaces;
+    };
+
+    utils.available_space_to_option = function available_space_to_option(spc) {
+        return {
+            value: spc,
+            Title: utils.format_size_and_text(spc.size, spc.desc),
+            Label: utils.block_name(spc.block)
+        };
+    };
+
+    utils.prepare_available_spaces = function prepare_available_spaces(client, spcs) {
+        function prepare(spc) {
+            if (spc.type == 'block')
+                return cockpit.resolve(spc.block.path);
+            else if (spc.type == 'free') {
+                var block_ptable = client.blocks_ptable[spc.block.path];
+                return block_ptable.CreatePartition(spc.start, spc.size, "", "", { });
+            }
+        }
+        return cockpit.all(spcs.map(prepare));
     };
 
     /* Comparison function for sorting lists of block devices.
@@ -330,6 +466,193 @@ define([
         var $arm_btn = $zone.find('.arm-button');
         $arm_btn.removeClass('active');
         $zone.removeClass('armed');
+    };
+
+
+    function get_children(client, path) {
+        var children = [ ];
+
+        if (client.blocks_cleartext[path]) {
+            children.push(client.blocks_cleartext[path].path);
+        }
+
+        if (client.blocks_ptable[path]) {
+            client.blocks_partitions[path].forEach(function (part) {
+                if (!part.IsContainer)
+                    children.push(part.path);
+            });
+        }
+
+        if (client.blocks_part[path] && client.blocks_part[path].IsContainer) {
+            var ptable_path = client.blocks_part[path].Table;
+            client.blocks_partitions[ptable_path].forEach(function (part) {
+                if (part.IsContained)
+                    children.push(part.path);
+            });
+        }
+
+        if (client.vgroups[path]) {
+            client.vgroups_lvols[path].forEach(function (lvol) {
+                if (client.lvols_block[lvol.path])
+                    children.push(client.lvols_block[lvol.path].path);
+            });
+        }
+
+        return children;
+    }
+
+    utils.get_active_usage = function get_active_usage(client, path) {
+
+        function get_usage(path) {
+            var block = client.blocks[path];
+            var fsys = client.blocks_fsys[path];
+            var mdraid = block && client.mdraids[block.MDRaidMember];
+            var pvol = client.blocks_pvol[path];
+            var vgroup = pvol && client.vgroups[pvol.VolumeGroup];
+
+            var usage = utils.flatten(get_children(client, path).map(get_usage));
+
+            if (fsys && fsys.MountPoints.length > 0)
+                usage.push({ usage: 'mounted',
+                             block: block,
+                             fsys: fsys
+                           });
+
+            if (mdraid)
+                usage.push({ usage: 'mdraid-member',
+                             block: block,
+                             mdraid: mdraid
+                           });
+
+            if (vgroup)
+                usage.push({ usage: 'pvol',
+                             block: block,
+                             pvol: pvol,
+                             vgroup: vgroup
+                           });
+
+            return usage;
+        }
+
+        // Prepare the result for Mustache
+
+        var usage = get_usage(path);
+
+        var res = {
+            raw: usage,
+            Teardown: {
+                Mounts: [ ],
+                MDRaidMembers: [ ],
+                PhysicalVolumes: [ ]
+            },
+            Blocking: {
+                Mounts: [ ],
+                MDRaidMembers: [ ],
+                PhysicalVolumes: [ ]
+            }
+        };
+
+        usage.forEach(function (use) {
+            var entry, active_state;
+
+            if (use.usage == 'mounted') {
+                res.Teardown.Mounts.push({
+                    Name: utils.block_name(use.block),
+                    MountPoint: utils.decode_filename(use.fsys.MountPoints[0])
+                });
+            } else if (use.usage == 'mdraid-member') {
+                entry = {
+                    Name: utils.block_name(use.block),
+                    MDRaid: utils.mdraid_name(use.mdraid)
+                };
+                active_state = utils.array_find(use.mdraid.ActiveDevices, function (as) {
+                    return as[0] == use.block.path;
+                });
+                if (active_state && active_state[1] < 0)
+                    res.Teardown.MDRaidMembers.push(entry);
+                else
+                    res.Blocking.MDRaidMembers.push(entry);
+            } else if (use.usage == 'pvol') {
+                entry = {
+                    Name: utils.block_name(use.block),
+                    VGroup: use.vgroup.Name
+                };
+                if (use.pvol.FreeSize == use.pvol.Size) {
+                    res.Teardown.PhysicalVolumes.push(entry);
+                } else {
+                    res.Blocking.PhysicalVolumes.push(entry);
+                }
+            }
+        });
+
+        res.Teardown.HasMounts = res.Teardown.Mounts.length > 0;
+        res.Teardown.HasMDRaidMembers = res.Teardown.MDRaidMembers.length > 0;
+        res.Teardown.HasPhysicalVolumes = res.Teardown.PhysicalVolumes.length > 0;
+
+        res.Blocking.HasMounts = res.Blocking.Mounts.length > 0;
+        res.Blocking.HasMDRaidMembers = res.Blocking.MDRaidMembers.length > 0;
+        res.Blocking.HasPhysicalVolumes = res.Blocking.PhysicalVolumes.length > 0;
+
+        if (!res.Blocking.HasMounts && !res.Blocking.HasMDRaidMembers && !res.Blocking.HasPhysicalVolumes)
+            res.Blocking = null;
+
+        return res;
+    };
+
+    utils.teardown_active_usage = function teardown_active_usage(client, usage) {
+
+        // The code below is complicated by the fact that the last
+        // physical volume of a volume group can not be removed
+        // directly (even if it is completely empty).  We want to
+        // remove the whole volume group instead in this case.
+        //
+        // However, we might be removing the last two (or more)
+        // physical volumes here, and it is easiest to catch this
+        // condition upfront by reshuffling the data structures.
+
+        function unmount(mounteds) {
+            return cockpit.all(mounteds.map(function (m) {
+                return m.fsys.Unmount({});
+            }));
+        }
+
+        function mdraid_remove(members) {
+            return cockpit.all(members.map(function (m) {
+                return m.mdraid.RemoveDevice(m.block.path, { wipe: { t: 'b', v: true } });
+            }));
+        }
+
+        function pvol_remove(pvols) {
+            var by_vgroup = { }, p;
+            pvols.forEach(function (p) {
+                if (!by_vgroup[p.vgroup.path])
+                    by_vgroup[p.vgroup.path] = [ ];
+                by_vgroup[p.vgroup.path].push(p.block);
+            });
+
+            function handle_vg(p) {
+                var vg = client.vgroups[p];
+                var pvs = by_vgroup[p];
+                // If we would remove all physical volumes of a volume
+                // group, remove the whole volume group instead.
+                if (pvs.length == client.vgroups_pvols[p].length) {
+                    return vg.Delete({ 'tear-down': { t: 'b', v: true }
+                                     });
+                } else {
+                    return cockpit.all(pvs.map(function (pv) {
+                        return vg.RemoveDevice(pv.path, true, {});
+                    }));
+                }
+            }
+
+            for (p in by_vgroup)
+                handle_vg(p);
+        }
+
+        return cockpit.all([ unmount(usage.raw.filter(function(use) { return use.usage == "mounted"; })),
+                             mdraid_remove(usage.raw.filter(function(use) { return use.usage == "mdraid-member"; })),
+                             pvol_remove(usage.raw.filter(function(use) { return use.usage == "pvol"; }))
+                           ]);
     };
 
     /* jQuery.amend function. This will be removed as we move towards React */
@@ -407,5 +730,27 @@ define([
         return this;
     };
 
-    return utils;
-});
+    /* Prevent flicker due to the marriage of jQuery and React here */
+    utils.hide = function hide(selector) {
+        var element = document.querySelector("#storage-detail");
+        element.setAttribute("hidden", "");
+    };
+
+    utils.show_soon = function show_soon(selector, ready) {
+        var element = document.querySelector(selector);
+        if (!element.hasAttribute("hidden"))
+            return;
+        var val = element.getAttribute("hidden");
+        if (ready) {
+            element.removeAttribute("hidden");
+            window.clearTimeout(parseInt(val, 10));
+        } else if (!val) {
+            val = window.setTimeout(function() {
+                show_soon(selector, true);
+            }, 2000);
+            element.setAttribute("hidden", String(val));
+        }
+    };
+
+    module.exports = utils;
+}());

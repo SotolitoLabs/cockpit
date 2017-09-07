@@ -28,7 +28,7 @@ Cockpit will use the OpenShift OAuth server to authenticate users. You need to p
 
 ```
 oc process -f containers/openshift-cockpit.template
-    -v COCKPIT_KUBE_URL=https://ip-or-domain,OPENSHIFT_OAUTH_PROVIDER_URL=https://ip-or-domain:port | oc create -f -
+    -v COCKPIT_KUBE_URL=https://ip-or-domain -v OPENSHIFT_OAUTH_PROVIDER_URL=https://ip-or-domain:port | oc create -f -
 ```
 
 This will create an OAuth Client and a openshift-cockpit service replication controller and pod.
@@ -55,7 +55,9 @@ Web Certificates
 
 Cockpit looks at ```/etc/cockpit/ws-certs.d/``` to find its SSL certificate. You should create a Kubernetes secret API object to place your PEM encoded certificates and key in a ```.cert``` file in that location.
 
-If there are no certificates present in that location cockpit will generate and use a self-signed certificate. However the CN will be based on the container name so this option should be avoided for most deployments.
+Alternatively if you have a seperate certificate and key file, and you are unable to combine them in advance. You may mount them as ```/var/run/secrets/ws-certs.d/tls.crt``` and ```/var/run/secrets/ws-certs.d/tls.key```. If these are present and valid cockpit will use them.
+
+Otherwise if no certificates could be found cockpit will generate and use a self-signed certificate. However the CN will be based on the container name so this option should be avoided for most deployments.
 
 You can also choose to serve cockpit without SSL by setting the ```COCKPIT_KUBE_INSECURE``` environment variable to ```true```.
 
@@ -63,7 +65,7 @@ You can also choose to serve cockpit without SSL by setting the ```COCKPIT_KUBE_
 Container Contents
 ==================
 
-This container installs cockpit-ws, cockpit-shell and cockpit-kubernetes rpms. If you include these rpms in this directory they will be installed, otherwise the version specified in the Dockerfile will be fetched from koji.
+This container installs cockpit-ws, cockpit-system and cockpit-kubernetes rpms. If you include these rpms in this directory they will be installed, otherwise the version specified in the Dockerfile will be fetched from koji.
 
 The following commands are used in the container:
 

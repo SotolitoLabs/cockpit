@@ -1,10 +1,9 @@
-define([
-    "jquery",
-    "base1/cockpit",
-    "shell/controls",
-    "data!./operation.html",
-], function(jQuery, cockpit, controls, html) {
-    var module = { };
+(function() {
+    "use strict";
+
+    var jQuery = require("jquery");
+    var cockpit = require("cockpit");
+    require("patterns");
 
     var _ = cockpit.gettext;
 
@@ -16,7 +15,7 @@ define([
     var REALM = "org.freedesktop.realmd.Realm";
 
     function instance(realmd, mode, realm, button) {
-        var dialog = jQuery.parseHTML(html)[0];
+        var dialog = jQuery.parseHTML(require("raw!./operation.html"))[0];
 
         /* Scope the jQuery selector to our dialog */
         var $ = function(selector, context) {
@@ -91,16 +90,26 @@ define([
             auth_changed($(this));
         });
 
-        var title, label;
+        var title, label, text;
         if (mode == 'join') {
-            title = _("page-title", "Join a Domain");
+            title = _("page-title", _("Join a Domain"));
             label = _("Join");
             $(".realms-op-join-only-row").show();
+            $(".realms-op-leave-only-row").hide();
             check("");
         } else {
-            title = _("page-title", "Leave Domain");
+            title = _("page-title", _("Leave Domain"));
             label = _("Leave");
+            text = _("Are you sure you want to leave this domain?");
+            if (realm && realm.Name) {
+                text = cockpit.format(_("Are you sure you want to leave the '$0' domain?"), realm.Name);
+            }
+
+            text = cockpit.format(_("$0 Only users with local credentials will be able to log into this machine. This may also effect other services as DNS resolution settings and the list of trusted CAs may change."), text);
+
+            $(".realms-op-leave-only-row").text(text);
             $(".realms-op-join-only-row").hide();
+            $(".realms-op-leave-only-row").show();
         }
 
         $(".realms-op-title").text(title);
@@ -133,7 +142,7 @@ define([
                     var error, result = [], path;
                     if (this.state() == "rejected") {
                         error = arguments[0];
-                        $(".realms-op-error")
+                        $(".realms-op-message")
                             .empty()
                             .text(error.message);
                         dfd.reject(error);
@@ -206,7 +215,6 @@ define([
 
 
         function update() {
-            var have_one = 0;
             var message;
 
             $(".realms-op-spinner").toggle(!!operation);
@@ -236,13 +244,13 @@ define([
             $(".realm-active-directory-only").toggle(!server || server == "active-directory");
 
             if (realm && realm.Name && !$(".realms-op-address")[0].placeholder) {
-                $(".realms-op-address")[0].placeholder = cockpit.format(_('e.g. "$0"'), realm.Name);
+                $(".realms-op-address")[0].placeholder = cockpit.format(_("e.g. \"$0\""), realm.Name);
             }
 
             var placeholder = "";
             if (kerberos) {
                 if (kerberos.SuggestedAdministrator)
-                    placeholder = cockpit.format(_('e.g. "$0"'), kerberos.SuggestedAdministrator);
+                    placeholder = cockpit.format(_("e.g. \"$0\""), kerberos.SuggestedAdministrator);
             }
             $(".realms-op-admin")[0].placeholder = placeholder;
 
@@ -271,10 +279,10 @@ define([
             }
 
             list.empty();
-            add_choice('administrator', "password", _('Administrator Password'));
-            add_choice('user', "password", _('User Password'));
-            add_choice(null, "secret", _('One Time Password'));
-            add_choice(null, "automatic", _('Automatic'));
+            add_choice('administrator', "password", _("Administrator Password"));
+            add_choice('user', "password", _("User Password"));
+            add_choice(null, "secret", _("One Time Password"));
+            add_choice(null, "automatic", _("Automatic"));
             $(".realms-authentification-row").toggle(count > 1);
             list.prop('disabled', !!operation).val(!first);
         }
@@ -318,6 +326,7 @@ define([
             var id = "cockpit-" + unique;
             unique += 1;
             busy(id);
+            $(".realms-op-error").hide();
 
             ensure()
                 .fail(function() {
@@ -326,7 +335,7 @@ define([
                 .done(function(realm) {
                     var options = { operation: cockpit.variant('s', id) };
 
-                    $(".realms-op-error").empty().show();
+                    $(".realms-op-message").empty();
                     $(".realms-op-diagnostics").empty().hide();
 
                     var diagnostics = "";
@@ -345,7 +354,8 @@ define([
                             call = kerberos.call("Join", [ credentials(), options ]);
                         } else {
                             busy(null);
-                            $(".realms-op-error").empty().text(_("Joining this domain is not supported")).show();
+                            $(".realms-op-message").empty().text(_("Joining this domain is not supported"));
+                            $(".realms-op-error").show();
                         }
                     } else if (mode == 'leave') {
                         call = realm.Deconfigure(options);
@@ -359,11 +369,14 @@ define([
                     call
                         .fail(function(ex) {
                             busy(null);
-                            if (ex.name != "com.redhat.Cockpit.Error.Cancelled") {
+                            if (ex.name == "org.freedesktop.realmd.Error.Cancelled") {
+                                $(dialog).modal("hide");
+                            } else {
                                 console.log("Failed to join domain: " + realm.Name + ": " + ex);
-                                $(".realms-op-error").empty().text(ex + " ").show();
+                                $(".realms-op-message").empty().text(ex + " ");
+                                $(".realms-op-error").show();
                                 if (diagnostics) {
-                                    $(".realms-op-error")
+                                    $(".realms-op-message")
                                         .append('<a class="realms-op-more-diagnostics">' + _("More") + '</a>');
                                     $(".realms-op-diagnostics").text(diagnostics);
                                 }
@@ -386,7 +399,7 @@ define([
 
         function cancel() {
             if (operation) {
-                realmd.call(SERVICE, MANAGER, "Cancel", [ operation ]);
+                realmd.call(MANAGER, SERVICE, "Cancel", [ operation ]);
                 busy(null);
                 return true;
             }
@@ -397,8 +410,10 @@ define([
         return dialog;
     }
 
-    module.button = function button() {
+    function setup() {
         var $ = jQuery;
+
+        var element = $("<a>");
 
         var realmd = cockpit.dbus("org.freedesktop.realmd");
         realmd.watch(MANAGER);
@@ -409,10 +424,6 @@ define([
         var joined = null;
 
         var permission = null;
-
-        var element = $("<button>")
-            .addClass("btn btn-default")
-            .attr("id", "system_information_realms_button");
 
         $(realmd).on("close", function(ev, options) {
             var message;
@@ -435,7 +446,7 @@ define([
             permission = cockpit.permission({ admin: true });
 
             function update_realm_privileged() {
-                controls.update_privileged_ui(permission, element,
+                $(element).update_privileged(permission,
                         cockpit.format(_("The user <b>$0</b> is not permitted to modify realms"),
                             permission.user ? permission.user.name : ''));
             }
@@ -476,6 +487,7 @@ define([
                 .attr("id", "realms-op")
                 .appendTo("body")
                 .modal('show');
+            cockpit.translate();
         });
 
         element.close = function close() {
@@ -489,7 +501,16 @@ define([
         };
 
         return element;
-    };
+    }
+
+    /* Hook this in when loaded */
+    jQuery(function() {
+        var placeholder = jQuery("#system-info-domain");
+        if (placeholder.length) {
+            placeholder.find(".button-location").append(setup());
+            placeholder.removeAttr('hidden');
+        }
+    });
 
     return module;
-});
+}());

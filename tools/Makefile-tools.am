@@ -1,11 +1,4 @@
 
-update-lib:: update-bower
-	$(srcdir)/tools/jsmodule -o $(srcdir)/tools/qunit.js \
-	    $(BOWER)/jquery/dist/jquery.js \
-	    $(BOWER)/qunit/qunit/qunit.js \
-	    $(BOWER)/qunit-tap/lib/qunit-tap.js \
-	    $(srcdir)/tools/qunit-config.js
-
 if WITH_COVERAGE
 coverage:
 	mkdir -p tools/coverage
@@ -28,3 +21,7 @@ coverage:
 		tools/coverage.info
 	@echo "file://$(abs_top_builddir)/tools/coverage/index.html"
 endif
+
+TESTS += \
+	tools/test-static-code \
+	tools/test-bots

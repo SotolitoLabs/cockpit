@@ -18,7 +18,6 @@
  */
 #include "config.h"
 
-#include "cockpitbridge.h"
 #include "cockpitchannel.h"
 #include "cockpitdbusinternal.h"
 #include "cockpitdbusjson.h"
@@ -27,6 +26,7 @@
 #include "cockpithttpstream.h"
 #include "cockpitnullchannel.h"
 #include "cockpitpackages.h"
+#include "cockpitrouter.h"
 #include "cockpitwebsocketstream.h"
 
 #include "common/cockpittransport.h"
@@ -46,13 +46,13 @@
 #include <glib-unix.h>
 #include <glib/gstdio.h>
 
-/* This program is is meant to be used in place of cockpit-bridge
+/* This program is meant to be used in place of cockpit-bridge
  * in non-system setting. As such only payloads that make no changes
  * to the system or support their own forms of authentication (ei: http)
  * should be included here.
  */
 
-static CockpitPackages *packages;
+static CockpitPackages *packages = NULL;
 
 extern gboolean cockpit_dbus_json_allow_external;
 
@@ -76,7 +76,8 @@ on_closed_set_flag (CockpitTransport *transport,
 }
 
 static void
-send_init_command (CockpitTransport *transport)
+send_init_command (CockpitTransport *transport,
+                   gboolean interactive)
 {
   const gchar *checksum;
   JsonObject *object;
@@ -86,14 +87,28 @@ send_init_command (CockpitTransport *transport)
   json_object_set_string_member (object, "command", "init");
   json_object_set_int_member (object, "version", 1);
 
-  checksum = cockpit_packages_get_checksum (packages);
-  if (checksum)
-    json_object_set_string_member (object, "checksum", checksum);
+  /*
+   * When in interactive mode pretend we received an init
+   * message, and don't print one out.
+   */
+  if (interactive)
+    {
+      json_object_set_string_member (object, "host", "localhost");
+    }
+  else
+    {
+      checksum = cockpit_packages_get_checksum (packages);
+      if (checksum)
+        json_object_set_string_member (object, "checksum", checksum);
+    }
 
   bytes = cockpit_json_write_bytes (object);
   json_object_unref (object);
 
-  cockpit_transport_send (transport, NULL, bytes);
+  if (interactive)
+    cockpit_transport_emit_recv (transport, NULL, bytes);
+  else
+    cockpit_transport_send (transport, NULL, bytes);
   g_bytes_unref (bytes);
 }
 
@@ -105,15 +120,27 @@ on_signal_done (gpointer data)
   return TRUE;
 }
 
+static CockpitRouter *
+setup_router (CockpitTransport *transport)
+{
+  CockpitRouter *router = NULL;
+  GList *bridges = NULL;
+
+  packages = cockpit_packages_new ();
+  bridges = cockpit_packages_get_bridges (packages);
+  router = cockpit_router_new (transport, payload_types, bridges);
+  g_list_free (bridges);
+  return router;
+}
+
 static int
 run_bridge (const gchar *interactive)
 {
   CockpitTransport *transport;
-  CockpitBridge *bridge;
+  CockpitRouter *router;
   gboolean terminated = FALSE;
   gboolean interupted = FALSE;
   gboolean closed = FALSE;
-  gboolean init_received = FALSE;
   guint sig_term;
   guint sig_int;
   int outfd;
@@ -130,6 +157,8 @@ run_bridge (const gchar *interactive)
   if (outfd < 0 || dup2 (2, 1) < 1)
     {
       g_warning ("bridge couldn't redirect stdout to stderr");
+      if (outfd > -1)
+        close (outfd);
       outfd = 1;
     }
 
@@ -140,13 +169,10 @@ run_bridge (const gchar *interactive)
 
   cockpit_dbus_json_allow_external = FALSE;
 
-  packages = cockpit_packages_new ();
   cockpit_dbus_internal_startup (interactive != NULL);
 
   if (interactive)
     {
-      /* Allow skipping the init message when interactive */
-      init_received = TRUE;
       transport = cockpit_interact_transport_new (0, outfd, interactive);
     }
   else
@@ -157,19 +183,20 @@ run_bridge (const gchar *interactive)
   g_resources_register (cockpitassets_get_resource ());
   cockpit_web_failure_resource = "/org/cockpit-project/Cockpit/fail.html";
 
-  bridge = cockpit_bridge_new (transport, payload_types, init_received);
-  cockpit_dbus_environment_startup ();
+  /* Set a path if nothing is set */
+  g_setenv ("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 0);
+
+  router = setup_router (transport);
+  cockpit_dbus_process_startup ();
 
   g_signal_connect (transport, "closed", G_CALLBACK (on_closed_set_flag), &closed);
-  send_init_command (transport);
+  send_init_command (transport, interactive ? TRUE : FALSE);
 
   while (!terminated && !closed && !interupted)
     g_main_context_iteration (NULL, TRUE);
 
-  g_object_unref (bridge);
+  g_object_unref (router);
   g_object_unref (transport);
-  cockpit_packages_free (packages);
-  packages = NULL;
 
   g_source_remove (sig_term);
   g_source_remove (sig_int);
@@ -179,6 +206,20 @@ run_bridge (const gchar *interactive)
     raise (SIGTERM);
 
   return 0;
+}
+
+static void
+print_rules (void)
+{
+  CockpitRouter *router = NULL;
+  CockpitTransport *transport = cockpit_interact_transport_new (0, 1, "--");
+
+  router = setup_router (transport);
+
+  cockpit_router_dump_rules (router);
+
+  g_object_unref (router);
+  g_object_unref (transport);
 }
 
 static void
@@ -220,12 +261,14 @@ main (int argc,
   int ret;
 
   static gboolean opt_packages = FALSE;
+  static gboolean opt_rules = FALSE;
   static gboolean opt_version = FALSE;
   static gchar *opt_interactive = NULL;
 
   static GOptionEntry entries[] = {
     { "interact", 0, 0, G_OPTION_ARG_STRING, &opt_interactive, "Interact with the raw protocol", "boundary" },
     { "packages", 0, 0, G_OPTION_ARG_NONE, &opt_packages, "Show Cockpit package information", NULL },
+    { "rules", 0, 0, G_OPTION_ARG_NONE, &opt_rules, "Show Cockpit bridge rules", NULL },
     { "version", 0, 0, G_OPTION_ARG_NONE, &opt_version, "Show Cockpit version information", NULL },
     { NULL }
   };
@@ -277,6 +320,11 @@ main (int argc,
       cockpit_packages_dump ();
       return 0;
     }
+  else if (opt_rules)
+    {
+      print_rules ();
+      return 0;
+    }
   else if (opt_version)
     {
       print_version ();
@@ -290,6 +338,9 @@ main (int argc,
     }
 
   ret = run_bridge (opt_interactive);
+
+  if (packages)
+    cockpit_packages_free (packages);
 
   g_free (opt_interactive);
   return ret;

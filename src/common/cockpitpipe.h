@@ -65,6 +65,9 @@ CockpitPipe *      cockpit_pipe_new          (const gchar *name,
                                               gint in_fd,
                                               gint out_fd);
 
+CockpitPipe *      cockpit_pipe_new_user_fd  (const gchar *name,
+                                              gint fd);
+
 CockpitPipe *      cockpit_pipe_spawn        (const gchar **argv,
                                               const gchar **env,
                                               const gchar *directory,
@@ -72,7 +75,9 @@ CockpitPipe *      cockpit_pipe_spawn        (const gchar **argv,
 
 CockpitPipe *      cockpit_pipe_pty          (const gchar **argv,
                                               const gchar **env,
-                                              const gchar *directory);
+                                              const gchar *directory,
+                                              guint16 window_rows,
+                                              guint16 window_cols);
 
 CockpitPipe *      cockpit_pipe_connect      (const gchar *name,
                                               GSocketAddress *address);
@@ -106,6 +111,9 @@ GBytes *           cockpit_pipe_consume      (GByteArray *buffer,
                                               gsize before,
                                               gsize length,
                                               gsize after);
+
+gchar **           cockpit_pipe_get_environ  (const gchar **set,
+                                              const gchar *directory);
 
 G_END_DECLS
 

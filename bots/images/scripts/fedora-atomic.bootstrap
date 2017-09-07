@@ -1,0 +1,13 @@
+#! /bin/bash
+# -*- coding: utf-8 -*-
+
+set -e
+
+url="https://download.fedoraproject.org/pub/alt/atomic/stable/"
+
+BASE=$(dirname $0)
+
+# The Fedora URLs have the version twice in the name. for example:
+# https://dl.fedoraproject.org/pub/alt/atomic/stable/Fedora-Atomic-25-20160921.0/CloudImages/x86_64/images/Fedora-Cloud-Base-25-20160921.0.x86_64.qcow2
+$BASE/atomic.bootstrap "$1" "$url" \
+    "Fedora-Atomic-[-0-9\.]+" "CloudImages" "x86_64" "images" "Fedora-Atomic-[-0-9\.]+.x86_64.qcow2"

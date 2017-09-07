@@ -20,6 +20,55 @@
 (function() {
     "use strict";
 
+    var angular = require('angular');
+    require('object-describer/dist/object-describer.js');
+    require('kubernetes-object-describer/dist/object-describer.js');
+    require('angular-dialog.js');
+
+    require('./containers');
+    require('./date');
+    require('./kube-client');
+    require('./listing');
+    require('./utils');
+    require('./volumes');
+
+    require('../views/details-page.html');
+    require('../views/pod-container.html');
+    require('../views/details-page.html');
+    require('../views/item-delete.html');
+    require('../views/route-modify.html');
+    require('../views/replicationcontroller-modify.html');
+    require('../views/service-modify.html');
+    require('../views/deploymentconfig-body.html');
+    require('../views/replicationcontroller-pods.html');
+    require('../views/replicationcontroller-body.html');
+    require('../views/route-body.html');
+    require('../views/service-body.html');
+    require('../views/service-endpoint.html');
+
+    require('../views/pod-page.html');
+    require('../views/image-page.html');
+    require('../views/registry-dashboard-page.html');
+    require('../views/details-page.html');
+    require('../views/project-page.html');
+    require('../views/topology-page.html');
+    require('../views/node-page.html');
+    require('../views/dashboard-page.html');
+    require('../views/nodes-page.html');
+    require('../views/deploymentconfig-page.html');
+    require('../views/pv-page.html');
+    require('../views/container-page.html');
+    require('../views/service-page.html');
+    require('../views/group-page.html');
+    require('../views/containers-page.html');
+    require('../views/projects-page.html');
+    require('../views/user-page.html');
+    require('../views/images-page.html');
+    require('../views/replicationcontroller-page.html');
+    require('../views/route-page.html');
+    require('../views/imagestream-page.html');
+    require('../views/volumes-page.html');
+
     function validItem(item, type) {
         var valid = (item && (!type || item.kind === type) &&
                      item.spec && item.metadata);
@@ -138,16 +187,16 @@
         "kubeLoader",
         "KubeDiscoverSettings",
         function (loader, settings) {
-            return function() {
-                loader.watch("Pod");
-                loader.watch("Service");
-                loader.watch("ReplicationController");
-                loader.watch("Endpoints");
-                loader.watch("PersistentVolumeClaim");
+            return function(until) {
+                loader.watch("Pod", until);
+                loader.watch("Service", until);
+                loader.watch("ReplicationController", until);
+                loader.watch("Endpoints", until);
+                loader.watch("PersistentVolumeClaim", until);
                 settings().then(function(settings) {
                     if (settings.flavor === "openshift") {
-                        loader.watch("DeploymentConfig");
-                        loader.watch("Route");
+                        loader.watch("DeploymentConfig", until);
+                        loader.watch("Route", until);
                     }
                 });
             };
@@ -163,21 +212,21 @@
             var _ = translate.gettext;
             var names = {
                 'services': {
-                    'name' : _('Services')
+                    'name' : _("Services")
                 },
                 'routes': {
-                    'name' : _('Routes'),
+                    'name' : _("Routes"),
                     'flavor': "openshift"
                 },
                 'deploymentconfigs': {
-                    'name': _('Deployment Configs'),
+                    'name': _("Deployment Configs"),
                     'flavor': "openshift"
                 },
                 'replicationcontrollers': {
-                     'name' : _('Replication Controllers')
+                     'name' : _("Replication Controllers")
                 },
                 'pods': {
-                    'name' : _('Pods')
+                    'name' : _("Pods")
                 }
             };
 
@@ -242,19 +291,15 @@
         function($scope, loader, select, discoverSettings, ListingState,
                  $location, actions, detailsData, detailsWatch) {
 
-            var c = loader.listen(function() {
+            loader.listen(function() {
                 $scope.pods = select().kind("Pod");
                 $scope.services = select().kind("Service");
                 $scope.replicationcontrollers = select().kind("ReplicationController");
                 $scope.deploymentconfigs = select().kind("DeploymentConfig");
                 $scope.routes = select().kind("Route");
-            });
+            }, $scope);
 
-            $scope.$on("$destroy", function() {
-                c.cancel();
-            });
-
-            detailsWatch();
+            detailsWatch($scope);
             $scope.listing = new ListingState($scope);
             $scope.showAll = true;
 
@@ -287,7 +332,7 @@
             $scope.target = target;
             $scope.name = detailsData.names[kindData.type].name;
 
-            var c = loader.listen(function() {
+            loader.listen(function() {
                 if (kindData.type)
                     $scope[kindData.type] = select().kind(kindData.kind);
 
@@ -297,13 +342,9 @@
                                           .name(target)
                                           .one();
                 }
-            });
+            }, $scope);
 
-            $scope.$on("$destroy", function() {
-                c.cancel();
-            });
-
-            detailsWatch();
+            detailsWatch($scope);
             $scope.listing = new ListingState($scope);
             $scope.listing.inline = true;
 
@@ -420,7 +461,10 @@
             angular.extend($scope, dialogData);
 
             $scope.performDelete = function performDelete() {
-                return methods.delete($scope.item);
+                return methods.delete($scope.item).catch(function(ex) {
+                    /* HACK: While debugging delete issues */
+                    console.log(JSON.stringify(ex));
+                });
             };
         }
     ])
@@ -601,7 +645,6 @@
 
             $scope.performModify = function performModify() {
                 var defer = $q.defer();
-                var link;
                 var req;
 
                 validate().then(function (objects) {

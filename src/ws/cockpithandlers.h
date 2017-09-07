@@ -29,19 +29,25 @@ extern const gchar *cockpit_ws_shell_component;
 
 typedef struct {
   CockpitAuth *auth;
-  const gchar **static_roots;
+  const gchar *login_html;
+  const gchar *login_po_html;
+  const gchar **branding_roots;
   GHashTable *os_release;
 } CockpitHandlerData;
 
 gboolean       cockpit_handler_socket            (CockpitWebServer *server,
+                                                  const gchar *original_path,
                                                   const gchar *path,
+                                                  const gchar *method,
                                                   GIOStream *io_stream,
                                                   GHashTable *headers,
                                                   GByteArray *input,
                                                   CockpitHandlerData *data);
 
 gboolean       cockpit_handler_external          (CockpitWebServer *server,
+                                                  const gchar *original_path,
                                                   const gchar *path,
+                                                  const gchar *method,
                                                   GIOStream *io_stream,
                                                   GHashTable *headers,
                                                   GByteArray *input,

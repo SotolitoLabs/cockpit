@@ -20,8 +20,9 @@
 #include "config.h"
 
 #include "cockpitchannel.h"
+#include "cockpitinternalmetrics.h"
 #include "cockpitpcpmetrics.h"
-#include "cockpitbridge.h"
+#include "cockpitrouter.h"
 
 #include "common/cockpitjson.h"
 #include "common/cockpitlog.h"
@@ -36,11 +37,6 @@
 
 #include <glib-unix.h>
 
-static CockpitPayloadType payload_types[] = {
-  { "metrics1", cockpit_pcp_metrics_get_type },
-  { NULL },
-};
-
 /* This program is run on each managed server, with the credentials
    of the user that is logged into the Server Console.
 */
@@ -52,6 +48,23 @@ send_init_command (CockpitTransport *transport)
   GBytes *bytes = g_bytes_new_static (response, strlen (response));
   cockpit_transport_send (transport, NULL, bytes);
   g_bytes_unref (bytes);
+}
+
+static void
+add_router_channels (CockpitRouter *router)
+{
+  JsonObject *match;
+
+  match = json_object_new ();
+  json_object_set_string_member (match, "payload", "metrics1");
+  cockpit_router_add_channel (router, match, cockpit_pcp_metrics_get_type);
+  json_object_unref (match);
+
+  match = json_object_new ();
+  json_object_set_string_member (match, "payload", "metrics1");
+  json_object_set_string_member (match, "source", "internal");
+  cockpit_router_add_channel (router, match, cockpit_internal_metrics_get_type);
+  json_object_unref (match);
 }
 
 static gboolean
@@ -76,7 +89,7 @@ main (int argc,
       char **argv)
 {
   CockpitTransport *transport;
-  CockpitBridge *bridge;
+  CockpitRouter *router;
   gboolean terminated = FALSE;
   gboolean closed = FALSE;
   GOptionContext *context;
@@ -135,14 +148,15 @@ main (int argc,
 
   transport = cockpit_pipe_transport_new_fds ("stdio", 0, outfd);
 
-  bridge = cockpit_bridge_new (transport, payload_types, FALSE);
+  router = cockpit_router_new (transport, NULL, NULL);
+  add_router_channels (router);
   g_signal_connect (transport, "closed", G_CALLBACK (on_closed_set_flag), &closed);
   send_init_command (transport);
 
   while (!closed && !terminated)
     g_main_context_iteration (NULL, TRUE);
 
-  g_object_unref (bridge);
+  g_object_unref (router);
   g_object_unref (transport);
 
   g_source_remove (sig_term);

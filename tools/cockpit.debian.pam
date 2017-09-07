@@ -1,9 +1,9 @@
 #%PAM-1.0
 auth	   required	pam_sepermit.so
 auth       substack     common-auth
-auth       optional     pam_reauthorize.so prepare
 auth       optional     pam_ssh_add.so
 account    required     pam_nologin.so
+account    required     pam_shells.so
 account    include      common-account
 password   include      common-password
 # pam_selinux.so close should be the first session rule
@@ -12,7 +12,6 @@ session    required     pam_loginuid.so
 # pam_selinux.so open should only be followed by sessions to be executed in the user context
 session    required     pam_selinux.so open env_params
 session    optional     pam_keyinit.so force revoke
-session    optional     pam_reauthorize.so prepare
 session    optional     pam_ssh_add.so
 session    include      common-session
 

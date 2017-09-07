@@ -63,6 +63,8 @@ class SeleniumTest(Test):
         else:
             selenium_hub = os.environ["HUB"] if os.environ.has_key("HUB") else "localhost"
             browser = os.environ["BROWSER"] if os.environ.has_key("BROWSER") else "firefox"
+            if browser == "explorer":
+                browser = "internet explorer"
             guest_machine = os.environ["GUEST"]
             @Retry(attempts = 3, timeout = 30, error = Exception('Timeout: Unable to attach remote Browser on hub'))
             def connectbrowser():
@@ -159,18 +161,22 @@ This function is only for internal purposes:
             self.driver.execute_script('var ev = document.createEvent("Event"); ev.initEvent("change", true, false); arguments[0].dispatchEvent(ev);', element)
             self.driver.execute_script('var ev = document.createEvent("Event"); ev.initEvent("keydown", true, false); arguments[0].dispatchEvent(ev);', element)
 
+    def check_box(self, element, checked=True):
+        if element.get_attribute('checked') != checked:
+            element.click()
+
     def wait(self, method, text, baseelement, overridetry, fatal, cond, jscheck):
         """
 This function is low level, tests should prefer to use the wait_* functions:
     This function stores caller function for this element to an internal dictionary, in case that
     element is lost and has to be renewed (-> self.element_wait_functions)
 parameters:
-    method - used selenim method method
+    method - used selenium method
     text - what are you searching for
     baseelement - use some element as root of tree, not self.driver
     overridetry - change value of repeats
     fatal - boolean if search is fatal or notice
-    cond - use selenim conditions (aliases are defined above class)
+    cond - use selenium conditions (aliases are defined above class)
     jscheck - use javascipt to wait for element has attribute-data loaded, it is safer, but slower
         """
         if not baseelement:
@@ -194,7 +200,6 @@ parameters:
                 # sample screenshot name is: screenshot-test20Login.png
                 # it stores super caller method to name via inspection code stack
                 screenshot_file = "screenshot%s.png" % str(inspect.stack()[2][3])
-                additional_text = ""
                 try:
                     self.driver.save_screenshot(os.path.join(actualpath,screenshot_file))
                     self.error = False
@@ -247,6 +252,7 @@ parameters:
     def login(self, tmpuser=user, tmppasswd=passwd):
         self.send_keys(self.wait_id('login-user-input'), tmpuser)
         self.send_keys(self.wait_id('login-password-input'), tmppasswd)
+        self.check_box(self.wait_id('authorized-input'))
         self.click(self.wait_id("login-button", cond=clickable))
 
     def logout(self):

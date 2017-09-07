@@ -24,38 +24,45 @@ CLEANFILES += $(COCKPIT_ASSETS)
 
 EXTRA_DIST += \
 	src/common/mock-content \
+	src/common/mock_known_hosts \
+	src/common/mock-stderr \
 	src/common/com.redhat.Cockpit.DBusTests.xml \
 	src/common/cockpitassets.gresource.xml \
 	src/common/fail.html \
+	$(test_locale_PO) \
 	$(NULL)
 
 noinst_LIBRARIES += libcockpit-common.a
 
 libcockpit_common_a_SOURCES = \
-	src/common/cockpitcertificate.c \
-	src/common/cockpitcertificate.h \
-	src/common/cockpitconnect.c \
-	src/common/cockpitconnect.h \
-	src/common/cockpitenums.h \
+	src/common/cockpitauthorize.c \
+	src/common/cockpitauthorize.h \
+	src/common/cockpitbase64.c \
+	src/common/cockpitbase64.h \
 	src/common/cockpiterror.h src/common/cockpiterror.c \
+	src/common/cockpitframe.c \
+	src/common/cockpitframe.h \
 	src/common/cockpithash.c \
 	src/common/cockpithash.h \
 	src/common/cockpithex.c \
 	src/common/cockpithex.h \
 	src/common/cockpitjson.c \
 	src/common/cockpitjson.h \
+	src/common/cockpitknownhosts.c \
+	src/common/cockpitknownhosts.h \
 	src/common/cockpitlog.h src/common/cockpitlog.c \
+	src/common/cockpitlocale.c \
+	src/common/cockpitlocale.h \
 	src/common/cockpitloopback.c \
 	src/common/cockpitloopback.h \
+	src/common/cockpitmachinesjson.c \
+	src/common/cockpitmachinesjson.h \
 	src/common/cockpitmemory.c \
 	src/common/cockpitmemory.h \
-	src/common/cockpittypes.h \
 	src/common/cockpitpipe.c \
 	src/common/cockpitpipe.h \
 	src/common/cockpitpipetransport.c \
 	src/common/cockpitpipetransport.h \
-	src/common/cockpitstream.c \
-	src/common/cockpitstream.h \
 	src/common/cockpitsystem.c \
 	src/common/cockpitsystem.h \
 	src/common/cockpittemplate.c \
@@ -70,6 +77,8 @@ libcockpit_common_a_SOURCES = \
 	src/common/cockpitunixfd.h \
 	src/common/cockpitunixsignal.c \
 	src/common/cockpitunixsignal.h \
+	src/common/cockpitversion.c \
+	src/common/cockpitversion.h \
 	src/common/cockpitwebfilter.h \
 	src/common/cockpitwebfilter.c \
 	src/common/cockpitwebinject.h \
@@ -105,9 +114,9 @@ COCKPIT_CHECKS = \
 	test-hash \
 	test-hex \
 	test-json \
+	test-locale \
+	test-knownhosts \
 	test-pipe \
-	test-connect \
-	test-stream \
 	test-transport \
 	test-unixsignal \
 	test-template \
@@ -115,12 +124,31 @@ COCKPIT_CHECKS = \
 	test-webserver \
 	test-config \
 	test-unicode \
+	test-version \
+	test-system \
+	test-base64 \
+	test-authorize \
 	$(NULL)
 
+test_authorize_CFLAGS = $(libcockpit_common_a_CFLAGS)
+test_authorize_SOURCES = \
+	src/common/cockpitauthorize.c \
+	src/common/cockpitauthorize.h \
+	src/common/cockpitbase64.c \
+	src/common/cockpitbase64.h \
+	src/common/cockpitmemory.c \
+	src/common/cockpitmemory.h \
+	src/common/test-authorize.c \
+	$(NULL)
+test_authorize_LDADD = libretest.a
 
-test_connect_CFLAGS = $(libcockpit_common_a_CFLAGS)
-test_connect_SOURCES = src/common/test-connect.c
-test_connect_LDADD = $(libcockpit_common_a_LIBS)
+test_base64_CFLAGS = $(COCKPIT_SESSION_CFLAGS)
+test_base64_SOURCES = \
+	src/common/test-base64.c \
+	src/common/cockpitbase64.h \
+	src/common/cockpitbase64.c \
+	$(NULL)
+test_base64_LDADD = libretest.a
 
 test_hash_CFLAGS = $(libcockpit_common_a_CFLAGS)
 test_hash_SOURCES = src/common/test-hash.c
@@ -128,20 +156,37 @@ test_hash_LDADD = $(libcockpit_common_a_LIBS)
 
 test_hex_CFLAGS = $(libcockpit_common_a_CFLAGS)
 test_hex_SOURCES = src/common/test-hex.c
-test_hex_LDADD = $(libcockpit_common_a_LIBS)
+test_hex_LDADD = libretest.a $(libcockpit_common_a_LIBS)
 
 test_json_CFLAGS = $(libcockpit_common_a_CFLAGS)
 test_json_SOURCES = src/common/test-json.c
 test_json_LDADD = $(libcockpit_common_a_LIBS)
 
+test_locale_PO = \
+	src/common/mock-locale/de_DE/LC_MESSAGES/test.po \
+	src/common/mock-locale/zh_CN/LC_MESSAGES/test.po \
+	$(NULL)
+
+test_locale_MO = $(test_locale_PO:.po=.mo)
+
+test_locale_CFLAGS = $(libcockpit_common_a_CFLAGS)
+test_locale_SOURCES = src/common/test-locale.c
+test_locale_LDADD = $(libcockpit_common_a_LIBS)
+
+# Tell make that we depend on these files being built here
+src/common/test-locale.c: $(test_locale_MO)
+
+test_knownhosts_CFLAGS = $(libcockpit_common_a_CFLAGS)
+test_knownhosts_SOURCES = src/common/test-knownhosts.c
+test_knownhosts_LDADD = $(libcockpit_common_a_LIBS)
+
 test_pipe_CFLAGS = $(libcockpit_common_a_CFLAGS)
 test_pipe_SOURCES = src/common/test-pipe.c
 test_pipe_LDADD = $(libcockpit_common_a_LIBS)
 
-test_stream_CFLAGS = $(libcockpit_common_a_CFLAGS)
-test_stream_SOURCES = src/common/test-stream.c \
-	src/common/mock-io-stream.c src/common/mock-io-stream.h
-test_stream_LDADD = $(libcockpit_common_a_LIBS)
+test_system_CFLAGS = $(libcockpit_common_a_CFLAGS)
+test_system_SOURCES = src/common/test-system.c
+test_system_LDADD = $(libcockpit_common_a_LIBS)
 
 test_template_CFLAGS = $(libcockpit_common_a_CFLAGS)
 test_template_SOURCES = src/common/test-template.c
@@ -158,6 +203,10 @@ test_unicode_LDADD = $(libcockpit_common_a_LIBS)
 test_unixsignal_CFLAGS = $(libcockpit_common_a_CFLAGS)
 test_unixsignal_SOURCES = src/common/test-unixsignal.c
 test_unixsignal_LDADD = $(libcockpit_common_a_LIBS)
+
+test_version_CFLAGS = $(libcockpit_common_a_CFLAGS)
+test_version_SOURCES = src/common/test-version.c
+test_version_LDADD = $(libcockpit_common_a_LIBS)
 
 test_webresponse_SOURCES = \
 	src/common/test-webresponse.c \
@@ -178,6 +227,12 @@ test_config_LDADD = $(libcockpit_common_a_LIBS)
 noinst_PROGRAMS += $(COCKPIT_CHECKS)
 TESTS += $(COCKPIT_CHECKS)
 
-EXTRA_DIST += \
-	src/common/mock-stderr \
+# For the test-locale test
+nodist_noinst_SCRIPTS += \
+	src/common/mock-locale/de_DE/LC_MESSAGES/test.mo \
+	src/common/mock-locale/zh_CN/LC_MESSAGES/test.mo \
+	$(NULL)
+
+CLEANFILES += \
+	$(test_locale_MO) \
 	$(NULL)

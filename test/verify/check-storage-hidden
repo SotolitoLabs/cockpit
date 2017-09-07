@@ -19,16 +19,17 @@
 # along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
 
 import parent
+
 from testlib import *
 from storagelib import *
 
+@skipImage("UDisks doesn't have support for LVM", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable")
 class TestStorage(StorageCase):
     def testHiddenLuks(self):
         m = self.machine
         b = self.browser
 
         mount_point_1 = "/run/mount1"
-        mount_point_2 = "/run/mount2"
 
         self.login_and_go("/storage")
 
@@ -51,13 +52,13 @@ class TestStorage(StorageCase):
 
         b.click('#vgroups tr:contains("TEST")')
         b.wait_visible('#storage-detail')
-        self.content_single_action(1, "Create Logical Volume")
+        b.click("a:contains(Create new Logical Volume)")
         self.dialog({ 'purpose': "block",
                       'name': "lvol",
                       'size': 48 })
-        b.wait_in_text("#content", "Logical Volume \"lvol\"")
+        self.content_row_wait_in_col(1, 2, "/dev/TEST/lvol")
 
-        self.content_default_action(1, "Format")
+        self.content_tab_action(1, 2, "Format")
         self.dialog({ "type": "luks+ext4",
                       "name": "FS",
                       "passphrase": "einszweidrei",
@@ -65,16 +66,16 @@ class TestStorage(StorageCase):
                       "mounting": "custom",
                       "mount_point": mount_point_1,
                       "crypto_options": "my-crypto-tag" })
-        b.wait_in_text("#content", "FS")
+        self.content_row_wait_in_col(2, 1, "46 MiB ext4 File System")
         self.wait_in_storaged_configuration(mount_point_1)
         self.wait_in_storaged_configuration("my-crypto-tag")
 
         # Now doubly hide the clear text block device by locking the
         # crypto backing device and deactivating /dev/TEST/lvol
-        self.content_action(1, "Lock")
-        b.wait_not_in_text("#content", "FS")
-        self.content_action(1, "Deactivate")
-        b.wait_in_text("#content", "(inactive)")
+        self.content_head_action(1, "Lock")
+        b.wait_not_in_text("#detail-content", "Filesystem")
+        self.content_head_action(1, "Deactivate")
+        self.content_row_wait_in_col(1, 1, "48 MiB Inactive volume")
 
         # HACK - https://github.com/storaged-project/storaged/issues/17
         #
@@ -86,9 +87,7 @@ class TestStorage(StorageCase):
         # the Lock/Deactivate activities, so we explicitly wait for
         # that to have happened.
         #
-        # HACK - sometimes we have to use "storagedctl" and sometimes "storagectl".
-        #
-        wait(lambda: "my-crypto-tag" in m.execute("/usr/bin/storage*ctl dump | grep ChildConfiguration"))
+        wait(lambda: "my-crypto-tag" in m.execute("%s dump | grep ChildConfiguration" % self.storagectl_cmd))
 
         # Deleting the volume group should still remove the fstab entry
         b.click_action_btn('.panel-heading:contains("Volume Group") .btn-group', "Delete")
@@ -101,7 +100,6 @@ class TestStorage(StorageCase):
         m = self.machine
         b = self.browser
 
-        mount_point_1 = "/run/mount1"
         mount_point_2 = "/run/mount2"
 
         self.login_and_go("/storage")
@@ -123,12 +121,12 @@ class TestStorage(StorageCase):
 
         b.click('#mdraids tr:contains("ARR")')
         b.wait_visible('#storage-detail')
-        self.content_default_action(1, "Format")
+        self.content_tab_action(1, 1, "Format")
         self.dialog({ "type": "ext4",
                       "name": "FS2",
                       "mounting": "custom",
                       "mount_point": mount_point_2 })
-        b.wait_in_text("#content", "FS2")
+        self.content_row_wait_in_col(1, 1, "ext4 File System")
         self.wait_in_storaged_configuration(mount_point_2)
 
         self.browser.click_action_btn ('.panel-heading:contains("RAID Device") .btn-group', "Delete")

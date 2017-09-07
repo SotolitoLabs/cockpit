@@ -1,18 +1,11 @@
-require([
-    'jquery',
-    'base1/cockpit',
-    'playground/po'
-], function($, cockpit, po) {
-    cockpit.locale(po);
-    var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
+(function() {
+    "use strict";
 
-    $(function () {
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
 
+    $(function() {
         $("#hammer").on("click", function () { $(this).hide(); });
-
-        $("#translation").text(_("Translation"));
-        $("#reverse").text(C_("reverse", "Translation"));
 
         $(".cockpit-internal-reauthorize .btn").on("click", function() {
             $(".cockpit-internal-reauthorize span").text("checking...");
@@ -119,5 +112,12 @@ require([
         });
 
         $("body").show();
+
+        function show_hidden() {
+            $("#hidden").text(cockpit.hidden ? "hidden" : "visible");
+        }
+
+        $(cockpit).on("visibilitychange", show_hidden);
+        show_hidden();
     });
-});
+}());

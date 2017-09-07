@@ -17,32 +17,27 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "system/service",
-    "data!./button.html",
-    "performance/dialog-view",
-    "performance/change-profile",
-    "base1/react",
-], function($, cockpit, mustache, service, button_html, dialog_view, change_profile_template, React) {
+(function() {
     "use strict";
 
-    var module = { };
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var dialog_view = require("cockpit-components-dialog.jsx");
+    var service = require("service");
+    var React = require("react");
+
+    var change_profile = require("./change-profile.jsx");
 
     var _ = cockpit.gettext;
 
-    function debug() {
-        if (window.debugging == "all" || window.debugging == "tuned")
-            console.debug.apply(console, arguments);
-    }
+    function setup() {
 
-    module.button = function button() {
         var tuned_service = service.proxy('tuned.service');
-        var element = $(button_html);
 
-        var button = element.find("button");
+        var element = $(require("raw!./link.html"));
+
+        var button = element.find(".action-trigger");
         var popover = element.find("[data-toggle=popover]");
 
         /* Tuned doesn't implement the DBus.Properties interface, so
@@ -53,7 +48,7 @@ define([
          */
 
         function poll(tuned) {
-            var dfd = $.Deferred();
+            var dfd = cockpit.defer();
 
             cockpit.all(tuned.call('/Tuned', 'com.redhat.tuned.control', 'is_running', []),
                         tuned.call('/Tuned', 'com.redhat.tuned.control', 'active_profile', []),
@@ -106,14 +101,16 @@ define([
                     else
                         status = _("This system is using a custom profile");
 
-                    button.text(state == "running"? active : "none");
+                    button.text(state == "running"? active : _("none"));
                     button.prop('disabled', state == "not-installed");
+                    button.toggleClass('disabled', state == "not-installed");
                     set_status(status);
                 })
                 .fail(function (ex) {
                     console.warn("failed to poll tuned", ex);
                     button.text("error");
                     button.prop('disabled', true);
+                    button.toggleClass('disabled', true);
                     set_status(_("Communication with tuned has failed"));
                 });
         }
@@ -125,31 +122,61 @@ define([
             function set_profile() {
                 // no need to check input here, all states are valid
                 var profile = dialog_selected;
+                var promise;
+
                 if (profile == "none") {
-                    return tuned.call('/Tuned', 'com.redhat.tuned.control', 'stop', [])
-                        .then(function() {
+                    promise = tuned.call("/Tuned", 'com.redhat.tuned.control', 'disable', [])
+                        .then(function(results) {
+                            /* Yup this is how tuned returns failures */
+                            if (!results[0]) {
+                                console.warn("Failed to disable tuned profile:", results);
+                                return cockpit.reject(_("Failed to disable tuned profile"));
+                            }
+
                             update_button();
-                            return null;
                         });
                 } else {
-                    return tuned.call('/Tuned', 'com.redhat.tuned.control', 'switch_profile', [ profile ])
+                    promise = tuned.call('/Tuned', 'com.redhat.tuned.control', 'switch_profile', [ profile ])
                         .then(function(results) {
+
+                            /* Yup this is how tuned returns failures */
                             if (!results[0][0]) {
+                                console.warn("Failed to switch profile:", results);
                                 return cockpit.reject(results[0][1] || _("Failed to switch profile"));
-                            } else {
-                                return tuned.call('/Tuned', 'com.redhat.tuned.control', 'start', [])
-                                    .then(function(results) {
-                                        if (!results[0]) {
-                                            console.warn("tuned set_profile failed: " + JSON.stringify(results));
-                                            return cockpit.reject(results[1] || _("Failed to activate profile"));
-                                        } else {
-                                            update_button();
-                                            return null;
-                                        }
-                                    });
                             }
+
+                            update_button();
                         });
                 }
+
+                return promise.then(set_service);
+            }
+
+            function set_service() {
+                /* When the profile is none we disable tuned */
+                var enable = (dialog_selected != "none");
+                var action = enable ? "start" : "stop";
+                return tuned.call('/Tuned', 'com.redhat.tuned.control', action, [])
+                    .then(function(results) {
+                        /* Yup this is how tuned returns failures */
+                        if (!results[0]) {
+                            console.warn("Failed to " + action + " tuned:", results);
+                            if (results[1])
+                                return cockpit.reject(results[1]);
+                            else if (enable)
+                                return cockpit.reject(cockpit.format(_("Failed to enable tuned")));
+                            else
+                                return cockpit.reject(cockpit.format(_("Failed to disable tuned")));
+                        }
+
+                        /* Now tell systemd about this change */
+                        if (enable && !tuned_service.enabled)
+                            return tuned_service.enable();
+                        else if (!enable && tuned_service.enabled)
+                            return tuned_service.disable();
+                        else
+                            return null;
+                    });
             }
 
             function update_selected_item(selected) {
@@ -160,7 +187,7 @@ define([
                 dialog_selected = active_profile;
                 var dialog_props = {
                     'title': _("Change Performance Profile"),
-                    'body': React.createElement(change_profile_template, {
+                    'body': React.createElement(change_profile.dialog, {
                             'active_profile': active_profile,
                             'change_selected': update_selected_item,
                             'profiles': profiles,
@@ -247,9 +274,6 @@ define([
                     with_tuned();
                 })
                 .fail(show_error);
-
-            if (!tuned_service.enabled)
-                tuned_service.enable();
         }
 
         button.on('click', open_dialog);
@@ -257,8 +281,16 @@ define([
         popover.popover().on('click', update_button);
         update_button();
 
-        return element;
-    };
+        return element[0];
+    }
 
-    return module;
-});
+    /* Hook this in when loaded */
+    $(function() {
+        var placeholder = $("#system-info-performance");
+        if (placeholder.length) {
+            placeholder.find(".button-location").append(setup());
+            placeholder.removeAttr('hidden');
+        }
+    });
+
+}());

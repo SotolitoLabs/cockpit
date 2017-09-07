@@ -19,10 +19,8 @@
 # along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import re
 from testlib import *
-
-def content_action_btn(index):
-    return "#content .list-group li:nth-child(%d) .btn-group" % index
 
 class StorageCase(MachineCase):
     def setUp(self):
@@ -31,28 +29,144 @@ class StorageCase(MachineCase):
             self.skipTest("No storage on Atomic")
 
         MachineCase.setUp(self)
+        self.storagectl_cmd = self.machine.execute("for cmd in storagedctl storagectl udisksctl; do if which $cmd 2>/dev/null; then break; fi; done").strip()
+
+        if "udisksctl" in self.storagectl_cmd:
+            ver = self.machine.execute("busctl --system get-property org.freedesktop.UDisks2 /org/freedesktop/UDisks2/Manager org.freedesktop.UDisks2.Manager Version || true")
+        else:
+            ver = self.machine.execute("busctl --system get-property org.storaged.Storaged /org/storaged/Storaged/Manager org.storaged.Storaged.Manager Version || true")
+        m = re.match('s "(.*)"', ver)
+        if m:
+            self.storaged_version = map(int, m.group(1).split("."))
+        else:
+            self.storaged_version = [ 0 ]
+
+        self.storaged_is_old_udisks = ("udisksctl" in self.storagectl_cmd and self.storaged_version < [2, 6, 0])
+
+        if "debian" in self.machine.image or "ubuntu" in self.machine.image:
+            # Debian's udisks has a patch to use FHS /media directory
+            self.mount_root = "/media"
+        else:
+            self.mount_root = "/run/media"
 
     def inode(self, f):
         return self.machine.execute("stat -L '%s' -c %%i" % f)
 
-    # Action buttons
+    def retry(self, setup, check, teardown):
+        b = self.browser
+        b.arm_timeout()
+        while True:
+            if setup:
+                setup()
+            if check():
+                break
+            if teardown:
+                teardown()
+            b.wait_checkpoint()
+        b.disarm_timeout()
 
-    def content_action(self, index, action):
-        btn = content_action_btn(index)
-        self.browser.wait_present(btn)
-        self.browser.click_action_btn(btn, action)
+    # Content
 
-    def content_default_action(self, index, action):
-        btn = content_action_btn(index)
-        self.browser.wait_present(btn)
-        self.browser.wait_action_btn (btn, action)
-        self.browser.click_action_btn (btn)
+    def content_row_expand(self, index):
+        b = self.browser
+        tbody = "#detail-content tbody:nth-of-type(%d)" % index
+        b.wait_present(tbody)
+        if not "open" in b.attr(tbody, "class"):
+            b.click(tbody + " tr.listing-ct-item")
+            b.wait_present(tbody + ".open")
 
-    def content_single_action(self, index, action):
-        btn = "#content .list-group li:nth-child(%d) button" % index
+    def content_row_action(self, index, title):
+        btn = "#detail-content tbody:nth-of-type(%d) .listing-ct-item .listing-ct-actions button:contains(%s)" % (index, title)
         self.browser.wait_present(btn)
-        self.browser.wait_text (btn, action)
-        self.browser.click (btn)
+        self.browser.click(btn)
+
+    # The row might come and go a couple of times until it has the
+    # expected content.  However, wait_in_text can not deal with a
+    # temporarily disappearing element, so we use self.retry.
+
+    def content_row_wait_in_col(self, row_index, col_index, val):
+        col = "#detail-content tbody:nth-of-type(%d) .listing-ct-item :nth-child(%d)" % (row_index, col_index+1)
+        self.retry(None, lambda: self.browser.is_present(col) and val in self.browser.text(col), None)
+
+    def content_head_action(self, index, title):
+        self.content_row_expand(index)
+        btn = "#detail-content tbody:nth-of-type(%d) .listing-ct-head .listing-ct-actions button:contains(%s)" % (index, title)
+        self.browser.wait_present(btn)
+        self.browser.click(btn)
+
+    def content_tab_expand(self, row_index, tab_index):
+        tab_btn = "#detail-content tbody:nth-of-type(%d) .listing-ct-head li:nth-child(%d) a" % (row_index, tab_index)
+        tab = "#detail-content tbody:nth-of-type(%d) .listing-ct-body:nth-child(%d)" % (row_index, tab_index + 1)
+        self.content_row_expand(row_index)
+        self.browser.wait_present(tab_btn)
+        self.browser.click(tab_btn)
+        self.browser.wait_present(tab)
+        return tab
+
+    def content_tab_action(self, row_index, tab_index, title):
+        tab = self.content_tab_expand(row_index, tab_index)
+        btn = tab + " button:contains(%s)" % title
+        self.browser.wait_present(btn)
+        self.browser.wait_attr(btn, "disabled", None)
+        self.browser.click(btn)
+
+    # To check what's in a tab, we need to open the row and select the
+    # tab.
+    #
+    # However, sometimes we open the wrong row or the wrong tab
+    # because the right row or right tab still has to be created and
+    # take its right place.  If the right row or tab finally appears,
+    # it wont be open at that point and we will miss it if we only
+    # open a row/tab once.  So we just run the whole process in a big
+    # retry loop.
+    #
+    # XXX - Clicking a button in a tab has the same problem, but we
+    # ignore that for now.
+
+    def content_tab_wait_in_info(self, row_index, tab_index, title, val):
+        b = self.browser
+
+        def setup():
+            pass
+
+        def check():
+            row = "#detail-content tbody:nth-of-type(%d)" % row_index
+            row_item = row + " tr.listing-ct-item"
+            tab_btn = row + " .listing-ct-head li:nth-child(%d) a" % tab_index
+            tab = row + " .listing-ct-body:nth-child(%d)" % (tab_index + 1)
+            cell = tab + " table.info-table-ct tr:contains(%s) td:nth-child(2)" % title
+
+            if not b.is_present(row + ".open"):
+                if not b.is_present(row_item):
+                    return False
+                b.click(row_item)
+                if not b.is_present(row + ".open"):
+                    return False
+
+            if not b.is_present(tab):
+                if not b.is_present(tab_btn):
+                    return False
+                b.click(tab_btn)
+                if not b.is_present(tab):
+                    return False
+
+            if not b.is_present(cell):
+                return False
+            return val in b.text(cell)
+
+        def teardown():
+            pass
+        self.retry(setup, check, teardown)
+
+    def content_tab_info_row(self, row_index, tab_index, title):
+        tab = self.content_tab_expand(row_index, tab_index)
+        return tab + " table.info-table-ct tr:contains(%s)" % title
+
+    def content_tab_info_action(self, row_index, tab_index, title):
+        tab = self.content_tab_expand(row_index, tab_index)
+        link = tab + " table.info-table-ct tr:contains(%s) td:nth-child(2) a" % title
+        self.browser.wait_present(link)
+        self.browser.click(link)
 
     # Dialogs
 
@@ -106,6 +220,7 @@ class StorageCase(MachineCase):
 
     def dialog_wait_error(self, field, val):
         # XXX - allow for more than one error
+        self.browser.wait_present('#dialog .dialog-error')
         self.browser.wait_in_text('#dialog .dialog-error', val)
 
     def dialog_wait_not_visible(self, field):
@@ -172,17 +287,6 @@ class StorageCase(MachineCase):
     #   This is also done by repeatedly opening a dialog until all
     #   needed block devices are listed.
 
-    def retry(self, setup, check, teardown):
-        b = self.browser
-        b.arm_timeout()
-        while True:
-            setup()
-            if check():
-                break
-            teardown()
-            b.wait_checkpoint()
-        b.disarm_timeout()
-
     def dialog_with_retry(self, trigger, values, expect):
         def setup():
             trigger()
@@ -204,10 +308,8 @@ class StorageCase(MachineCase):
             self.dialog_cancel()
         self.dialog_wait_close()
 
-    # HACK - sometimes we have to use "storagedctl" and sometimes "storagectl".
-
     def wait_in_storaged_configuration(self, mount_point):
-        wait(lambda: mount_point in self.machine.execute("/usr/bin/storage*ctl dump | grep Configuration"))
+        wait(lambda: mount_point in self.machine.execute("%s dump | grep Configuration" % self.storagectl_cmd))
 
     def wait_not_in_storaged_configuration(self, mount_point):
-        wait(lambda: mount_point not in self.machine.execute("/usr/bin/storage*ctl dump | grep Configuration"))
+        wait(lambda: mount_point not in self.machine.execute("%s dump | grep Configuration" % self.storagectl_cmd))

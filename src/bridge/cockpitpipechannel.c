@@ -29,7 +29,9 @@
 #include <gio/gunixsocketaddress.h>
 
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <string.h>
+#include <errno.h>
 
 /**
  * CockpitPipeChannel:
@@ -58,6 +60,7 @@ typedef struct {
   gint64 batch;
   gint64 latency;
   guint timeout;
+  gboolean pty;
 } CockpitPipeChannel;
 
 typedef struct {
@@ -65,6 +68,29 @@ typedef struct {
 } CockpitPipeChannelClass;
 
 G_DEFINE_TYPE (CockpitPipeChannel, cockpit_pipe_channel, COCKPIT_TYPE_CHANNEL);
+
+GHashTable *internal_fds;
+
+static gboolean
+steal_internal_fd (const gchar *name,
+                   gint *fdp)
+{
+  gpointer key;
+  gpointer value;
+
+  if (!internal_fds)
+    return FALSE;
+
+  if (!g_hash_table_lookup_extended (internal_fds, name, &key, &value))
+    return FALSE;
+
+  g_hash_table_steal (internal_fds, key);
+  g_free (key);
+
+  *fdp = GPOINTER_TO_INT (value);
+
+  return TRUE;
+}
 
 static void
 cockpit_pipe_channel_recv (CockpitChannel *channel,
@@ -105,32 +131,88 @@ process_pipe_buffer (CockpitPipeChannel *self,
 }
 
 static gboolean
+cockpit_pipe_channel_read_window_size_options (JsonObject *options,
+                                               gushort default_rows,
+                                               gushort default_cols,
+                                               gushort *rowsp,
+                                               gushort *colsp)
+{
+  gint64 rows, cols;
+  JsonObject *window;
+
+  if (!cockpit_json_get_object (options, "window", NULL, &window))
+    return FALSE;
+
+  if (window == NULL)
+    {
+      *rowsp = default_rows;
+      *colsp = default_cols;
+      return TRUE;
+    }
+
+  if (cockpit_json_get_int (window, "rows", default_rows, &rows) &&
+      cockpit_json_get_int (window, "cols", default_cols, &cols))
+    {
+      *rowsp = (gushort) CLAMP (rows, 0, G_MAXUINT16);
+      *colsp = (gushort) CLAMP (cols, 0, G_MAXUINT16);
+      return TRUE;
+    }
+
+  return FALSE;
+}
+
+static gboolean
 cockpit_pipe_channel_control (CockpitChannel *channel,
                               const gchar *command,
                               JsonObject *message)
 {
   CockpitPipeChannel *self = COCKPIT_PIPE_CHANNEL (channel);
-  const gchar *problem = NULL;
   gboolean ret = TRUE;
 
   /* New set of options for channel */
   if (g_str_equal (command, "options"))
     {
-      problem = "protocol-error";
       if (!cockpit_json_get_int (message, "batch", self->batch, &self->batch))
         {
-          g_warning ("invalid \"batch\" option for stream channel");
+          cockpit_channel_fail (channel, "protocol-error",
+                                "invalid \"batch\" option for stream channel");
           goto out;
         }
 
       if (!cockpit_json_get_int (message, "latency", self->latency, &self->latency) ||
           self->latency < 0 || self->latency >= G_MAXUINT)
         {
-          g_warning ("invalid \"latency\" option for stream channel");
+          cockpit_channel_fail (channel, "protocol-error",
+                                "invalid \"latency\" option for stream channel");
           goto out;
         }
 
-      problem = NULL;
+      /* ignore size options if this channel is not a pty or we are in prepare() */
+      if (self->pty && self->pipe)
+        {
+          gushort rows, cols;
+
+          if (!cockpit_pipe_channel_read_window_size_options (message, 0, 0, &rows, &cols))
+            {
+              g_warning ("%s: invalid \"window.rows\" or \"window.cols\" option for stream channel", self->name);
+              goto out;
+            }
+
+          if (rows > 0 && cols > 0)
+            {
+              gint fd;
+
+              g_object_get (self->pipe, "in-fd", &fd, NULL);
+              if (fd >= 0)
+                {
+                  struct winsize size = { rows, cols, 0, 0 };
+
+                  if (ioctl (fd, TIOCSWINSZ, &size) < 0)
+                    g_warning ("cannot set terminal size for stream channel: %s", g_strerror (errno));
+                }
+            }
+        }
+
       process_pipe_buffer (self, NULL);
     }
 
@@ -154,8 +236,6 @@ cockpit_pipe_channel_control (CockpitChannel *channel,
     }
 
 out:
-  if (problem)
-    cockpit_channel_close (channel, problem);
   return ret;
 }
 
@@ -301,75 +381,21 @@ cockpit_pipe_channel_init (CockpitPipeChannel *self)
   self->latency = 75;
 }
 
-static gint
-environ_find (gchar **env,
-              const gchar *variable)
-{
-  gint len, x;
-  gchar *pos;
-
-  pos = strchr (variable, '=');
-  if (pos == NULL)
-    len = strlen (variable);
-  else
-    len = pos - variable;
-
-  for (x = 0; env && env[x]; x++)
-    {
-      if (strncmp (env[x], variable, len) == 0 &&
-          env[x][len] == '=')
-        return x;
-    }
-
-  return -1;
-}
-
 static gchar **
-parse_environ (JsonObject *options,
+parse_environ (CockpitChannel *channel,
+               JsonObject *options,
                const gchar *directory)
 {
   gchar **envset = NULL;
-  gboolean had_pwd = FALSE;
-  gsize length;
   gchar **env;
-  gint i, x;
 
   if (!cockpit_json_get_strv (options, "environ", NULL, &envset))
     {
-      g_warning ("invalid \"environ\" option for stream channel");
+      cockpit_channel_fail (channel, "protocol-error", "invalid \"environ\" option for stream channel");
       return NULL;
     }
 
-  env = g_get_environ ();
-  length = g_strv_length (env);
-
-  for (i = 0; envset && envset[i] != NULL; i++)
-    {
-      if (g_str_equal (envset[i], "PWD"))
-        had_pwd = TRUE;
-      x = environ_find (env, envset[i]);
-      if (x != -1)
-        {
-          g_free (env[x]);
-          env[x] = g_strdup (envset[i]);
-        }
-      else
-        {
-          env = g_renew (gchar *, env, length + 2);
-          env[length] = g_strdup (envset[i]);
-          env[length + 1] = NULL;
-          length++;
-        }
-    }
-
-  /*
-   * The kernel only knows about the inode of the current directory.
-   * So when we spawn a shell, it won't know the directory it's
-   * meant to display. Pass it the path we care about in $PWD
-   */
-  if (!had_pwd && directory)
-    env = g_environ_setenv (env, "PWD", directory, TRUE);
-
+  env = cockpit_pipe_get_environ ((const gchar **)envset, directory);
   g_free (envset);
   return env;
 }
@@ -378,15 +404,15 @@ static void
 cockpit_pipe_channel_prepare (CockpitChannel *channel)
 {
   CockpitPipeChannel *self = COCKPIT_PIPE_CHANNEL (channel);
-  const gchar *problem = "protocol-error";
   GSocketAddress *address;
   CockpitPipeFlags flags;
   JsonObject *options;
   gchar **argv = NULL;
   gchar **env = NULL;
-  gboolean pty;
+  const gchar *internal = NULL;
   const gchar *dir;
   const gchar *error;
+  gint fd;
 
   COCKPIT_CHANNEL_CLASS (cockpit_pipe_channel_parent_class)->prepare (channel);
 
@@ -394,7 +420,14 @@ cockpit_pipe_channel_prepare (CockpitChannel *channel)
 
   if (!cockpit_json_get_strv (options, "spawn", NULL, &argv))
     {
-      g_warning ("invalid \"spawn\" option for stream channel");
+      cockpit_channel_fail (channel, "protocol-error",
+                            "invalid \"spawn\" option for stream channel");
+      goto out;
+    }
+  if (!cockpit_json_get_string (options, "internal", NULL, &internal))
+    {
+      cockpit_channel_fail (channel, "protocol-error",
+                            "invalid \"internal\" option for stream channel");
       goto out;
     }
 
@@ -407,7 +440,8 @@ cockpit_pipe_channel_prepare (CockpitChannel *channel)
     {
       if (!cockpit_json_get_string (options, "err", NULL, &error))
         {
-          g_warning ("invalid \"err\" options for stream channel");
+          cockpit_channel_fail (channel, "protocol-error",
+                                "invalid \"err\" options for stream channel");
           goto out;
         }
 
@@ -422,25 +456,42 @@ cockpit_pipe_channel_prepare (CockpitChannel *channel)
       self->name = g_strdup (argv[0]);
       if (!cockpit_json_get_string (options, "directory", NULL, &dir))
         {
-          g_warning ("invalid \"directory\" option for stream channel");
+          cockpit_channel_fail (channel, "protocol-error",
+                                "invalid \"directory\" option for stream channel");
           goto out;
         }
-      if (!cockpit_json_get_bool (options, "pty", FALSE, &pty))
+      if (!cockpit_json_get_bool (options, "pty", FALSE, &self->pty))
         {
-          g_warning ("invalid \"pty\" option for stream channel");
+          cockpit_channel_fail (channel, "protocol-error",
+                                "invalid \"pty\" option for stream channel");
           goto out;
         }
-      env = parse_environ (options, dir);
+      env = parse_environ (channel, options, dir);
       if (!env)
         goto out;
-      if (pty)
-        self->pipe = cockpit_pipe_pty ((const gchar **)argv, (const gchar **)env, dir);
+      if (self->pty)
+        {
+          gushort rows, cols;
+
+          if (!cockpit_pipe_channel_read_window_size_options (options, 24, 80, &rows, &cols))
+            {
+              g_warning ("%s: invalid \"window.rows\" or \"window.cols\" option for stream channel", self->name);
+              goto out;
+            }
+
+          self->pipe = cockpit_pipe_pty ((const gchar **)argv, (const gchar **)env, dir, rows, cols);
+        }
       else
-        self->pipe = cockpit_pipe_spawn ((const gchar **)argv, (const gchar **)env, dir, flags);
+        {
+          self->pipe = cockpit_pipe_spawn ((const gchar **)argv, (const gchar **)env, dir, flags);
+        }
+    }
+  else if (internal && steal_internal_fd (internal, &fd))
+    {
+      self->pipe = cockpit_pipe_new_user_fd (internal, fd);
     }
   else
     {
-      problem = NULL; /* closing handled elsewhere */
       address = cockpit_channel_parse_address (channel, &self->name);
       if (!address)
         goto out;
@@ -451,14 +502,11 @@ cockpit_pipe_channel_prepare (CockpitChannel *channel)
   self->sig_read = g_signal_connect (self->pipe, "read", G_CALLBACK (on_pipe_read), self);
   self->sig_close = g_signal_connect (self->pipe, "close", G_CALLBACK (on_pipe_close), self);
   self->open = TRUE;
-  cockpit_channel_ready (channel);
-  problem = NULL;
+  cockpit_channel_ready (channel, NULL);
 
 out:
   g_free (argv);
   g_strfreev (env);
-  if (problem)
-    cockpit_channel_close (channel, problem);
 }
 
 static void
@@ -540,4 +588,44 @@ cockpit_pipe_channel_open (CockpitTransport *transport,
 
   json_object_unref (options);
   return channel;
+}
+
+static void
+internal_fd_free (gpointer data)
+{
+  gint fd = GPOINTER_TO_INT (data);
+
+  close (fd);
+}
+
+const gchar *
+cockpit_pipe_channel_add_internal_fd (gint fd)
+{
+  /* We are not multi-threaded. Also don't make this look like normal fd numbers */
+  static guint64 unique = 911111;
+  gboolean inserted;
+
+  gchar *id;
+
+  if (!internal_fds)
+    internal_fds = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, internal_fd_free);
+
+  id = g_strdup_printf ("internal-stream-%" G_GUINT64_FORMAT, unique++);
+  inserted = g_hash_table_replace (internal_fds, id, GINT_TO_POINTER (fd));
+
+  g_assert (inserted);
+
+  return id;
+}
+
+gboolean
+cockpit_pipe_channel_remove_internal_fd (const gchar *id)
+{
+  if (internal_fds == NULL)
+    return FALSE;
+
+  if (!g_hash_table_remove (internal_fds, id))
+    return FALSE;
+
+  return TRUE;
 }

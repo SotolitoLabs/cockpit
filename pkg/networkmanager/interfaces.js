@@ -17,22 +17,28 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-require([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "shell/controls",
-    "shell/shell",
-    "system/server",
-    "shell/plot",
-    "base1/patterns",
-], function($, cockpit, Mustache, controls, shell, server) {
-"use strict";
+var $ = require('jquery');
+var cockpit = require('cockpit');
+
+var utils = require('./utils');
+
+var Mustache = require('mustache');
+var plot = require('plot');
+var journal = require('journal');
+
+/* jQuery extensions */
+require('patterns');
+
+require("page.css");
+require("table.css");
+require("plot.css");
+require("journal.css");
+require("./networking.css");
 
 var _ = cockpit.gettext;
 var C_ = cockpit.gettext;
 
-function nm_debug() {
+function nm_debug() { // jshint ignore:line
     if (window.debugging == "all" || window.debugging == "nm")
         console.debug.apply(console, arguments);
 }
@@ -45,12 +51,14 @@ function generate_uuid() {
 }
 
 function show_unexpected_error(error) {
-    $("#error-popup-message").text(error.message || error || "???");
+    var msg = error.message || error || "???";
+    console.warn(msg);
+    $("#error-popup-message").text(msg);
     $('.modal[role="dialog"]').modal('hide');
     $('#error-popup').modal('show');
 }
 
-function select_btn(func, spec) {
+function select_btn(func, spec, klass) {
     var choice = spec[0].choice;
 
     function option_mapper(opt) {
@@ -84,6 +92,9 @@ function select_btn(func, spec) {
 
     select(choice);
     $.data(btn[0], 'cockpit-select-btn-funcs', { select: select, selected: selected });
+    if (klass)
+        btn.addClass(klass);
+
     return btn;
 }
 
@@ -93,6 +104,20 @@ function select_btn_select(btn, choice) {
 
 function select_btn_selected(btn) {
     return $.data(btn[0], 'cockpit-select-btn-funcs').selected();
+}
+
+function connection_settings(c) {
+    if (c && c.Settings && c.Settings.connection) {
+        return c.Settings.connection;
+    } else {
+        // It is a programming error if we ever access a Connection
+        // object that doesn't have it's settings yet, and we expect
+        // each Connection object to have "connection" settings.
+        console.warn("Incomplete 'Connection' object accessed", c);
+        // HACK - phantomjs console.trace() prints nothing
+        try { throw new Error(); } catch (e) { console.log(e.stack); }
+        return { };
+    }
 }
 
 /* NetworkManagerModel
@@ -132,17 +157,6 @@ function select_btn_selected(btn) {
  *
  *    manager.Devices[0].disconnect();
  *    manager.Devices[0].ActiveConnection.deactivate();
- *
- * Editing connection settings is supported directly:
- *
- *    connection = manager.Devices[0].AvailableConnections[0];
- *    connection.freeze();
- *    connection.Settings.connection.autoconnect = false;
- *    connection.apply().fail(show_error);
- *
- * Freezing a connection object will prevent external, asynchronous
- * updates to the Settings.  Calling 'apply' will unfreeze the object
- * when it succeeds.
  *
  * TODO - document the details of the data structure.
  */
@@ -185,9 +199,16 @@ function NetworkManagerModel() {
      */
 
     var self = this;
-    var byteorder = null;
 
-    var client = cockpit.dbus("org.freedesktop.NetworkManager");
+    /* HACK: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=808162 */
+    var hacks = { };
+    if (cockpit.manifests["network"] && cockpit.manifests["network"]["hacks"])
+        hacks = cockpit.manifests["network"]["hacks"];
+    var options = { };
+    if (hacks.with_networkmanager_needs_root)
+        options["superuser"] = "try";
+
+    var client = cockpit.dbus("org.freedesktop.NetworkManager", options);
 
     self.client = client;
 
@@ -309,6 +330,8 @@ function NetworkManagerModel() {
     }
 
     var interface_types = { };
+    var max_export_phases = 0;
+    var export_pending;
 
     function set_object_types(all_types) {
         all_types.forEach(function (type) {
@@ -346,8 +369,7 @@ function NetworkManagerModel() {
         drop_object(path);
     }
 
-    var max_export_phases = 0;
-    var export_pending;
+    var export_model_deferred = null;
 
     function export_model() {
         function doit() {
@@ -362,6 +384,10 @@ function NetworkManagerModel() {
             }
 
             $(self).trigger('changed');
+            if (export_model_deferred) {
+                export_model_deferred.resolve();
+                export_model_deferred = null;
+            }
         }
 
         if (!export_pending) {
@@ -370,6 +396,16 @@ function NetworkManagerModel() {
         }
     }
 
+    self.synchronize = function synchronize() {
+        if (outstanding_refreshes === 0) {
+            return cockpit.resolve();
+        } else {
+            if (!export_model_deferred)
+                export_model_deferred = cockpit.defer();
+            return export_model_deferred.promise();
+        }
+    };
+
     client.call("/org/freedesktop/NetworkManager",
                 "org.freedesktop.DBus.Properties", "Get",
                 ["org.freedesktop.NetworkManager", "State"], { flags: "" }).
@@ -377,9 +413,9 @@ function NetworkManagerModel() {
         done(function(reply, options) {
             if (options.flags) {
                 if (options.flags.indexOf(">") !== -1)
-                    byteorder = "be";
+                    utils.set_byteorder("be");
                 else if (options.flags.indexOf("<") !== -1)
-                    byteorder = "le";
+                    utils.set_byteorder("le");
             }
         });
 
@@ -406,156 +442,62 @@ function NetworkManagerModel() {
     /* NetworkManager specific data conversions and utility functions.
      */
 
-    function toDec(n) {
-        return n.toString(10);
-    }
-
-    function bytes_from_nm32(num) {
-        var bytes = [], i;
-        if (byteorder == "be") {
-            for (i = 3; i >= 0; i--) {
-                bytes[i] = num & 0xFF;
-                num = num >>> 8;
-            }
-        } else {
-            for (i = 0; i < 4; i++) {
-                bytes[i] = num & 0xFF;
-                num = num >>> 8;
-            }
-        }
-        return bytes;
-    }
-
-    function bytes_to_nm32(bytes) {
-        var num = 0, i;
-        if (byteorder == "be") {
-            for (i = 0; i < 4; i++) {
-                num = 256*num + bytes[i];
-            }
-        } else {
-            for (i = 3; i >= 0; i--) {
-                num = 256*num + bytes[i];
-            }
-        }
-        return num;
-    }
-
-    function ip4_to_text(num) {
-        return bytes_from_nm32(num).map(toDec).join('.');
-    }
-
-    function ip4_from_text(text) {
-        var parts = text.split('.');
-        if (parts.length == 4)
-            return bytes_to_nm32(parts.map(function(s) { return parseInt(s, 10); }));
-        else // XXX - error
-            return 0;
-    }
-
-    var text_to_prefix_bits = {
-        "255": 8, "254": 7, "252": 6, "248": 5, "240": 4, "224": 3, "192": 2, "128": 1, "0": 0
-    };
-
-    function ip4_prefix_from_text(text) {
-        if (/^[0-9]+$/.test(text.trim()))
-            return parseInt(text, 10);
-        var parts = text.split('.');
-        if (parts.length != 4)
-            return -1;
-        var prefix = 0;
-        var i;
-        for (i = 0; i < 4; i++) {
-            var p = text_to_prefix_bits[parts[i].trim()];
-            if (p !== undefined) {
-                prefix += p;
-                if (p < 8)
-                    break;
-            } else
-                return -1;
-        }
-        for (i += 1; i < 4; i++) {
-            if (/^0+$/.test(parts[i].trim()) === false)
-                return -1;
-        }
-        return prefix;
-    }
-
     function ip4_address_from_nm(addr) {
-        return [ ip4_to_text(addr[0]),
-                 addr[1].toString(),
-                 ip4_to_text(addr[2])
+        return [ utils.ip4_to_text(addr[0]),
+                 utils.ip_prefix_to_text(addr[1]),
+                 utils.ip4_to_text(addr[2], true)
                ];
     }
 
     function ip4_address_to_nm(addr) {
-        return [ ip4_from_text(addr[0]),
-                 ip4_prefix_from_text(addr[1]),
-                 ip4_from_text(addr[2])
+        return [ utils.ip4_from_text(addr[0]),
+                 utils.ip4_prefix_from_text(addr[1]),
+                 utils.ip4_from_text(addr[2], true)
                ];
     }
 
     function ip4_route_from_nm(addr) {
-        return [ ip4_to_text(addr[0]),
-                 addr[1].toString(),
-                 ip4_to_text(addr[2]),
-                 addr[3].toString()
+        return [ utils.ip4_to_text(addr[0]),
+                 utils.ip_prefix_to_text(addr[1]),
+                 utils.ip4_to_text(addr[2], true),
+                 utils.ip_metric_to_text(addr[3])
                ];
     }
 
     function ip4_route_to_nm(addr) {
-        return [ ip4_from_text(addr[0]),
-                 ip4_prefix_from_text(addr[1]),
-                 ip4_from_text(addr[2]),
-                 parseInt(addr[3], 10) || 0
+        return [ utils.ip4_from_text(addr[0]),
+                 utils.ip4_prefix_from_text(addr[1]),
+                 utils.ip4_from_text(addr[2], true),
+                 utils.ip_metric_from_text(addr[3])
                ];
     }
-
-    function ip6_from_text(text) {
-        var parts = text.split(':');
-        var bytes = [];
-        for (var i = 0; i < 8; i++) {
-            var num = parseInt(parts[i], 16) || 0;
-            bytes[2*i] = num >> 8;
-            bytes[2*i+1] = num & 255;
-        }
-        return cockpit.base64_encode(bytes);
-    }
-
-    function ip6_to_text(data) {
-        var parts = [];
-        var bytes = cockpit.base64_decode(data);
-        for (var i = 0; i < 8; i++)
-            parts[i] = ((bytes[2*i] << 8) + bytes[2*i+1]).toString(16);
-        return parts.join(':');
-    }
-
     function ip6_address_from_nm(addr) {
-        return [ ip6_to_text(addr[0]),
-                 addr[1].toString(),
-                 ip6_to_text(addr[2])
+        return [ utils.ip6_to_text(addr[0]),
+                 utils.ip_prefix_to_text(addr[1]),
+                 utils.ip6_to_text(addr[2], true)
                ];
     }
 
     function ip6_address_to_nm(addr) {
-        return [ ip6_from_text(addr[0]),
+        return [ utils.ip6_from_text(addr[0]),
                  parseInt(addr[1], 10) || 64,
-                 ip6_from_text(addr[2])
+                 utils.ip6_from_text(addr[2], true)
                ];
     }
 
     function ip6_route_from_nm(addr) {
-        return [ ip6_to_text(addr[0]),
-                 addr[1].toString(),
-                 ip6_to_text(addr[2]),
-                 addr[3].toString()
+        return [ utils.ip6_to_text(addr[0]),
+                 utils.ip_prefix_to_text(addr[1]),
+                 utils.ip6_to_text(addr[2], true),
+                 utils.ip_metric_to_text(addr[1]),
                ];
     }
 
     function ip6_route_to_nm(addr) {
-        return [ ip6_from_text(addr[0]),
-                 parseInt(addr[1], 10) || 64,
-                 ip6_from_text(addr[2]),
-                 parseInt(addr[3], 10) || 0
+        return [ utils.ip6_from_text(addr[0]),
+                 utils.ip_prefix_from_text(addr[1]),
+                 utils.ip6_from_text(addr[2], true),
+                 utils.ip_metric_from_text(addr[3])
                ];
     }
 
@@ -588,14 +530,22 @@ function NetworkManagerModel() {
                 timestamp:      get("connection", "timestamp", 0),
                 id:             get("connection", "id", _("Unknown")),
                 autoconnect:    get("connection", "autoconnect", true),
+                autoconnect_slaves:
+                                get("connection", "autoconnect-slaves", -1),
                 slave_type:     get("connection", "slave-type"),
                 master:         get("connection", "master")
             }
         };
 
         if (!settings.connection.master) {
-            result.ipv4 = get_ip("ipv4", ip4_address_from_nm, ip4_route_from_nm, ip4_to_text);
-            result.ipv6 = get_ip("ipv6", ip6_address_from_nm, ip6_route_from_nm, ip6_to_text);
+            result.ipv4 = get_ip("ipv4", ip4_address_from_nm, ip4_route_from_nm, utils.ip4_to_text);
+            result.ipv6 = get_ip("ipv6", ip6_address_from_nm, ip6_route_from_nm, utils.ip6_to_text);
+        }
+
+        if (settings["802-3-ethernet"]) {
+            result.ethernet = { mtu: get("802-3-ethernet", "mtu"),
+                                assigned_mac_address: get("802-3-ethernet", "assigned-mac-address")
+                              };
         }
 
         if (settings.bond) {
@@ -605,6 +555,26 @@ function NetworkManagerModel() {
             result.bond = { options:        $.extend({}, get("bond", "options", { })),
                             interface_name: get("bond", "interface-name")
                           };
+        }
+
+        function JSON_parse_carefully(str) {
+            try {
+                return JSON.parse(str);
+            }
+            catch (e) {
+                return null;
+            }
+        }
+
+        if (settings.team) {
+            result.team = { config:         JSON_parse_carefully(get("team", "config", "{}")),
+                            interface_name: get("team", "interface-name")
+                          };
+        }
+
+        if (settings["team-port"] || result.connection.slave_type == "team") {
+            result.team_port = { config:       JSON_parse_carefully(get("team-port", "config", "{}")),
+                               };
         }
 
         if (settings.bridge) {
@@ -653,10 +623,19 @@ function NetworkManagerModel() {
             set(first, "method", 's', settings[first].method);
             set(first, "ignore-auto-dns", 'b', settings[first].ignore_auto_dns);
             set(first, "ignore-auto-routes", 'b', settings[first].ignore_auto_routes);
-            set(first, "addresses", addrs_sig, settings[first].addresses.map(addr_to_nm));
-            set(first, "dns", ips_sig, settings[first].dns.map(ip_from_text));
+
+            var addresses = settings[first].addresses;
+            if (addresses)
+                set(first, "addresses", addrs_sig, addresses.map(addr_to_nm));
+
+            var dns = settings[first].dns;
+            if (dns)
+                set(first, "dns", ips_sig, dns.map(ip_from_text));
             set(first, "dns-search", 'as', settings[first].dns_search);
-            set(first, "routes", routes_sig, settings[first].routes.map(route_to_nm));
+
+            var routes = settings[first].routes;
+            if (routes)
+                set(first, "routes", routes_sig, routes.map(route_to_nm));
 
             // Never pass "address-labels" back to NetworkManager.  It
             // is documented as "internal only", but needs to somehow
@@ -668,27 +647,41 @@ function NetworkManagerModel() {
 
         set("connection", "id", 's', settings.connection.id);
         set("connection", "autoconnect", 'b', settings.connection.autoconnect);
+        set("connection", "autoconnect-slaves", 'i', settings.connection.autoconnect_slaves);
         set("connection", "uuid", 's', settings.connection.uuid);
         set("connection", "interface-name", 's', settings.connection.interface_name);
         set("connection", "type", 's', settings.connection.type);
         set("connection", "slave-type", 's', settings.connection.slave_type);
         set("connection", "master", 's', settings.connection.master);
 
-        delete result.ipv4;
         if (settings.ipv4)
-            set_ip("ipv4", 'aau', ip4_address_to_nm, 'aau', ip4_route_to_nm, 'au', ip4_from_text);
+            set_ip("ipv4", 'aau', ip4_address_to_nm, 'aau', ip4_route_to_nm, 'au', utils.ip4_from_text);
+        else
+            delete result.ipv4;
 
-        delete result.ipv6;
         if (settings.ipv6)
-            set_ip("ipv6", 'a(ayuay)', ip6_address_to_nm, 'a(ayuayu)', ip6_route_to_nm, 'aay', ip6_from_text);
+            set_ip("ipv6", 'a(ayuay)', ip6_address_to_nm, 'a(ayuayu)', ip6_route_to_nm, 'aay', utils.ip6_from_text);
+        else
+            delete result.ipv6;
 
-        delete result.bond;
         if (settings.bond) {
             set("bond", "options", 'a{ss}', settings.bond.options);
             set("bond", "interface-name", 's', settings.bond.interface_name);
-        }
+        } else
+            delete result.bond;
 
-        delete result.bridge;
+        if (settings.team) {
+            set("team", "config", 's', JSON.stringify(settings.team.config));
+            set("team", "interface-name", 's', settings.team.interface_name);
+        } else
+            delete result.team;
+
+        if (settings.team_port)
+            set("team-port", "config", 's', JSON.stringify(settings.team_port.config));
+        else
+            delete result["team-port"];
+
+
         if (settings.bridge) {
             set("bridge", "interface-name", 's', settings.bridge.interface_name);
             set("bridge", "stp", 'b', settings.bridge.stp);
@@ -697,39 +690,47 @@ function NetworkManagerModel() {
             set("bridge", "hello-time", 'u', settings.bridge.hello_time);
             set("bridge", "max-age", 'u', settings.bridge.max_age);
             set("bridge", "ageing-time", 'u', settings.bridge.ageing_time);
-        }
+        } else
+            delete result.bridge;
 
-        delete result["bridge-port"];
         if (settings.bridge_port) {
             set("bridge-port", "priority", 'u', settings.bridge_port.priority);
             set("bridge-port", "path-cost", 'u', settings.bridge_port.path_cost);
             set("bridge-port", "hairpin-mode", 'b', settings.bridge_port.hairpin_mode);
-        }
+        } else
+            delete result["bridge-port"];
 
-        delete result.vlan;
         if (settings.vlan) {
             set("vlan", "parent",         's', settings.vlan.parent);
             set("vlan", "id",             'u', settings.vlan.id);
             set("vlan", "interface-name", 's', settings.vlan.interface_name);
-        }
+            // '1' is the default, but we need to set it explicitly anyway.
+            set("vlan", "flags",          'u', 1);
+        } else
+            delete result.vlan;
 
-        if (settings["802-3-ethernet"]) {
-            if (!result["802-3-ethernet"])
-                result["802-3-ethernet"] = { };
-        }
+        if (settings.ethernet) {
+            set("802-3-ethernet", "mtu", 'u', settings.ethernet.mtu);
+            set("802-3-ethernet", "assigned-mac-address", 's', settings.ethernet.assigned_mac_address);
+            // Delete cloned-mac-address so that assigned-mac-address gets used.
+            delete result["802-3-ethernet"]["cloned-mac-address"];
+        } else
+            delete result["802-3-ethernet"];
 
         return result;
     }
 
     function device_type_to_symbol(type) {
+        // This returns a string that is suitable for the connection.type field of
+        // Connection.Settings, except for "ethernet".
         switch (type) {
         case 0:  return 'unknown';
-        case 1:  return 'ethernet';
-        case 2:  return 'wifi';
+        case 1:  return 'ethernet';  // 802-3-ethernet
+        case 2:  return '802-11-wireless';
         case 3:  return 'unused1';
         case 4:  return 'unused2';
-        case 5:  return 'bt';
-        case 6:  return 'olpc_mesh';
+        case 5:  return 'bluetooth';
+        case 6:  return '802-11-olpc-mesh';
         case 7:  return 'wimax';
         case 8:  return 'modem';
         case 9:  return 'infiniband';
@@ -737,6 +738,13 @@ function NetworkManagerModel() {
         case 11: return 'vlan';
         case 12: return 'adsl';
         case 13: return 'bridge';
+        case 14: return 'loopback';
+        case 15: return 'team';
+        case 16: return 'tun';
+        case 17: return 'ip_tunnel';
+        case 18: return 'macvlan';
+        case 19: return 'vxlan';
+        case 20: return 'veth';
         default: return '';
         }
     }
@@ -779,8 +787,8 @@ function NetworkManagerModel() {
         if (obj.Settings && obj.Settings.connection && obj.Settings.connection.uuid)
             delete connections_by_uuid[obj.Settings.connection.uuid];
         obj.Settings = settings;
-        if (obj.Settings && obj.Settings.connection && obj.Settings.connection.uuid)
-            connections_by_uuid[obj.Settings.connection.uuid] = obj;
+        if (settings && settings.connection && settings.connection.uuid)
+            connections_by_uuid[settings.connection.uuid] = obj;
     }
 
     function refresh_settings(obj) {
@@ -792,9 +800,7 @@ function NetworkManagerModel() {
                 var result = reply[0];
                 if (result) {
                     priv(obj).orig = result;
-                    if (!priv(obj).frozen) {
-                        set_settings(obj, settings_from_nm(result));
-                    }
+                    set_settings(obj, settings_from_nm(result));
                 }
             });
     }
@@ -837,6 +843,8 @@ function NetworkManagerModel() {
      * code and using the data conversion functions.
      */
 
+    var type_Manager;
+
     var type_Ipv4Config = {
         interfaces: [
             "org.freedesktop.NetworkManager.IP4Config"
@@ -877,24 +885,23 @@ function NetworkManagerModel() {
         },
 
         prototype: {
-            freeze: function () {
-                priv(this).frozen = true;
+            copy_settings: function () {
+                return $.extend(true, { }, this.Settings);
             },
 
-            apply: function() {
+            apply_settings: function (settings) {
                 var self = this;
-                return call_object_method(this,
-                                          "org.freedesktop.NetworkManager.Settings.Connection", "Update",
-                                          settings_to_nm(this.Settings, priv(this).orig)).
-                    done(function () {
-                        priv(self).frozen = false;
-                    });
-            },
-
-            reset:  function () {
-                set_settings (this, settings_from_nm(priv(this).orig));
-                priv(this).frozen = false;
-                export_model();
+                try {
+                    return call_object_method(self,
+                                              "org.freedesktop.NetworkManager.Settings.Connection", "Update",
+                                              settings_to_nm(settings, priv(self).orig)).
+                        done(function () {
+                            set_settings(self, settings);
+                        });
+                }
+                catch (e) {
+                    return cockpit.reject(e);
+                }
             },
 
             activate: function (dev, specific_object) {
@@ -910,14 +917,16 @@ function NetworkManagerModel() {
 
         exporters: [
             function (obj) {
+                obj.Masters = [ ];
                 obj.Slaves = [ ];
                 obj.Interfaces = [ ];
             },
 
             null,
 
-            // Needs: type_Interface.Device
-            //        type_Interface.Connections
+            null,
+
+            // Needs: type_Interface.Connections
             //
             // Sets:  type_Connection.Slaves
             //        type_Connection.Masters
@@ -933,26 +942,24 @@ function NetworkManagerModel() {
                 // TODO - Nail down how NM really handles this.
 
                 function check_con(con) {
-                    if (con.Settings.connection.type == obj.Settings.connection.slave_type) {
+                    var master_settings = connection_settings(con);
+                    var my_settings = connection_settings(obj);
+                    if (master_settings.type == my_settings.slave_type) {
                         obj.Masters.push(con);
                         con.Slaves.push(obj);
                     }
                 }
 
-                obj.Masters = [ ];
-                if (obj.Settings && obj.Settings.connection && obj.Settings.connection.slave_type) {
-                    master = connections_by_uuid[obj.Settings.connection.master];
+                var cs = connection_settings(obj);
+                if (cs.slave_type) {
+                    master = connections_by_uuid[cs.master];
                     if (master) {
                         obj.Masters.push(master);
                         master.Slaves.push(obj);
                     } else {
-
-                        iface = peek_interface(obj.Settings.connection.master);
+                        iface = peek_interface(cs.master);
                         if (iface) {
-                            if (iface.Device)
-                                iface.Device.AvailableConnections.forEach(check_con);
-                            else
-                                iface.Connections.forEach(check_con);
+                            iface.Connections.forEach(check_con);
                         }
                     }
                 }
@@ -987,6 +994,7 @@ function NetworkManagerModel() {
             "org.freedesktop.NetworkManager.Device",
             "org.freedesktop.NetworkManager.Device.Wired",
             "org.freedesktop.NetworkManager.Device.Bond",
+            "org.freedesktop.NetworkManager.Device.Team",
             "org.freedesktop.NetworkManager.Device.Bridge",
             "org.freedesktop.NetworkManager.Device.Vlan"
         ],
@@ -999,12 +1007,15 @@ function NetworkManagerModel() {
             HwAddress:            { },
             AvailableConnections: { conv: conv_Array(conv_Object(type_Connection)),   def: [] },
             ActiveConnection:     { conv: conv_Object(type_ActiveConnection) },
+            Ip4Config:            { conv: conv_Object(type_Ipv4Config) },
+            Ip6Config:            { conv: conv_Object(type_Ipv6Config) },
             Udi:                  { trigger: refresh_udev },
             IdVendor:             { def: "" },
             IdModel:              { def: "" },
             Driver:               { def: "" },
             Carrier:              { def: true },
-            Speed:                { }
+            Speed:                { },
+            Managed:              { def: false },
             // See below for "Slaves"
         },
 
@@ -1013,6 +1024,17 @@ function NetworkManagerModel() {
                 return call_object_method(get_object("/org/freedesktop/NetworkManager", type_Manager),
                                           "org.freedesktop.NetworkManager", "ActivateConnection",
                                           objpath(connection), objpath(this), objpath(specific_object));
+            },
+
+            activate_with_settings: function(settings, specific_object) {
+                try {
+                    return call_object_method(get_object("/org/freedesktop/NetworkManager", type_Manager),
+                                              "org.freedesktop.NetworkManager", "AddAndActivateConnection",
+                                              settings_to_nm(settings), objpath(this), objpath(specific_object));
+                }
+                catch (e) {
+                    return cockpit.reject(e);
+                }
             },
 
             disconnect: function () {
@@ -1035,30 +1057,55 @@ function NetworkManagerModel() {
         exporters: [
             function (obj) {
                 obj.Device = null;
+                obj._NonDeviceConnections = [ ];
                 obj.Connections = [ ];
+                obj.MainConnection = null;
             },
 
             null,
 
             // Needs: type_Interface.Device
-            //        type_Interface.Connections
+            //        type_Interface._NonDeviceConnections
             //
             // Sets:  type_Connection.Interfaces
-            //
+            //        type_Interface.Connections
+            //        type_Interface.MainConnection
+
             function (obj) {
-                if (!obj.Device && obj.Connections.length === 0) {
+                if (!obj.Device && obj._NonDeviceConnections.length === 0) {
                     drop_object(priv(obj).path);
                     return;
                 }
 
+                function consider_for_main(con) {
+                    if (!obj.MainConnection ||
+                        connection_settings(obj.MainConnection).timestamp < connection_settings(con).timestamp) {
+                        obj.MainConnection = con;
+                    }
+                }
+
+                obj.Connections = obj._NonDeviceConnections;
+
                 if (obj.Device) {
                     obj.Device.AvailableConnections.forEach(function (con) {
-                        con.Interfaces.push(obj);
+                        if (obj.Connections.indexOf(con) == -1)
+                            obj.Connections.push(con);
                     });
-                } else {
-                    obj.Connections.forEach(function (con) {
-                        con.Interfaces.push(obj);
-                    });
+                }
+
+                obj.Connections.forEach(function (con) {
+                    consider_for_main(con);
+                    con.Interfaces.push(obj);
+                });
+
+                // Explicitly prefer the active connection.  The
+                // active connection should have the most recent
+                // timestamp, but only when the activation was
+                // successful.  Also, there don't seem to be change
+                // notifications when the timestamp changes.
+
+                if (obj.Device && obj.Device.ActiveConnection && obj.Device.ActiveConnection.Connection) {
+                    obj.MainConnection = obj.Device.ActiveConnection.Connection;
                 }
             }
         ]
@@ -1087,16 +1134,21 @@ function NetworkManagerModel() {
         prototype: {
             add_connection: function (conf) {
                 var dfd = $.Deferred();
-                call_object_method(this,
-                                   'org.freedesktop.NetworkManager.Settings',
-                                   'AddConnection',
-                                   settings_to_nm(conf, { })).
-                    done(function (path) {
-                        dfd.resolve(get_object(path, type_Connection));
-                    }).
-                    fail(function (error) {
-                        dfd.reject(error);
-                    });
+                try {
+                    call_object_method(this,
+                                       'org.freedesktop.NetworkManager.Settings',
+                                       'AddConnection',
+                                       settings_to_nm(conf, { })).
+                        done(function (path) {
+                            dfd.resolve(get_object(path, type_Connection));
+                        }).
+                        fail(function (error) {
+                            dfd.reject(error);
+                        });
+                }
+                catch (e) {
+                    dfd.reject(e);
+                }
                 return dfd.promise();
             }
         },
@@ -1104,18 +1156,26 @@ function NetworkManagerModel() {
         exporters: [
             null,
 
-            // Sets: type_Interface.Connections
+            // Sets: type_Interface._NonDeviceConnections
             //
             function (obj) {
                 if (obj.Connections) {
                     obj.Connections.forEach(function (con) {
                         function add_to_interface(name) {
-                            get_interface(name).Connections.push(con);
+                            if (name) {
+                                var cons = get_interface(name)._NonDeviceConnections;
+                                if (cons.indexOf(con) == -1)
+                                    cons.push(con);
+                            }
                         }
 
                         if (con.Settings) {
+                            if (con.Settings.connection)
+                                add_to_interface(con.Settings.connection.interface_name);
                             if (con.Settings.bond)
                                 add_to_interface(con.Settings.bond.interface_name);
+                            if (con.Settings.team)
+                                add_to_interface(con.Settings.team.interface_name);
                             if (con.Settings.bridge)
                                 add_to_interface(con.Settings.bridge.interface_name);
                             if (con.Settings.vlan)
@@ -1127,14 +1187,59 @@ function NetworkManagerModel() {
         ]
     };
 
-    var type_Manager = {
+    type_Manager = {
         interfaces: [
             "org.freedesktop.NetworkManager"
         ],
 
         props: {
-            Devices:            { conv: conv_Array(conv_Object(type_Device)),           def: [] },
+            Version:  { },
+            Devices: {
+                conv: conv_Array(conv_Object(type_Device)),
+                def: []
+            },
             ActiveConnections:  { conv: conv_Array(conv_Object(type_ActiveConnection)), def: [] }
+        },
+
+        prototype: {
+            checkpoint_create: function (devices, timeout) {
+                var dfd = $.Deferred();
+                call_object_method(this,
+                                   'org.freedesktop.NetworkManager',
+                                   'CheckpointCreate',
+                                   devices.map(objpath),
+                                   timeout,
+                                   0).
+                    done(function (path) {
+                        dfd.resolve(path);
+                    }).
+                    fail(function (error) {
+                        if (error.name != "org.freedesktop.DBus.Error.UnknownMethod")
+                            console.warn(error.message || error);
+                        dfd.resolve(null);
+                    });
+                return dfd.promise();
+            },
+
+            checkpoint_destroy: function (checkpoint) {
+                if (checkpoint) {
+                    return call_object_method(this,
+                                              'org.freedesktop.NetworkManager',
+                                              'CheckpointDestroy',
+                                              checkpoint);
+                } else
+                    return $.when();
+            },
+
+            checkpoint_rollback: function (checkpoint) {
+                if (checkpoint) {
+                    return call_object_method(this,
+                                              'org.freedesktop.NetworkManager',
+                                              'CheckpointRollback',
+                                              checkpoint);
+                } else
+                    return $.when();
+            }
         },
 
         exporters: [
@@ -1184,6 +1289,29 @@ function NetworkManagerModel() {
                           type_Settings);
     };
 
+    function compare_versions(a, b) {
+        function to_ints(str) {
+            return str.split(".").map(function (s) { return s ? parseInt(s, 10) : 0; });
+        }
+
+        var a_ints = to_ints(a);
+        var b_ints = to_ints(b);
+        var len = Math.min(a_ints.length, b_ints.length);
+        var i;
+
+        for (i = 0; i < len; i++) {
+            if (a_ints[i] == b_ints[i])
+                continue;
+            return a_ints[i] - b_ints[i];
+        }
+
+        return a_ints.length - b_ints.length;
+    }
+
+    self.at_least_version = function at_least_version (version) {
+        return compare_versions (self.get_manager().Version, version) >= 0;
+    };
+
     /* Initialization.
      */
 
@@ -1201,6 +1329,21 @@ function NetworkManagerModel() {
     return self;
 }
 
+// Add a "syn_click" method to jQuery.  This will invoke the event
+// handler with the additional guarantee that the model is consistent.
+
+$.fn.extend({
+    syn_click: function(model, fun) {
+        return this.click(function() {
+            var self = this;
+            var self_args = arguments;
+            model.synchronize().then(function() {
+                fun.apply(self, self_args);
+            });
+        });
+    }
+});
+
 function render_interface_link(iface) {
     return $('<a>').
                text(iface).
@@ -1214,6 +1357,12 @@ function device_state_text(dev) {
         return _("Inactive");
     if (dev.State == 100 && dev.Carrier === false)
         return _("No carrier");
+    if (!dev.Managed) {
+        if (!dev.ActiveConnection &&
+            (!dev.Ip4Config || dev.Ip4Config.Addresses.length === 0) &&
+            (!dev.Ip6Config || dev.Ip6Config.Addresses.length === 0))
+            return _("Inactive");
+    }
     return dev.StateText;
 }
 
@@ -1257,8 +1406,9 @@ function render_active_connection(dev, with_link, hide_link_local) {
                    (with_link? render_interface_link(con.Master.Interface) : con.Master.Interface));
     }
 
-    if (con && con.Ip4Config) {
-        con.Ip4Config.Addresses.forEach(function (a) {
+    var ip4config = con? con.Ip4Config : dev.Ip4Config;
+    if (ip4config) {
+        ip4config.Addresses.forEach(function (a) {
             parts.push(a[0] + "/" + a[1]);
         });
     }
@@ -1270,8 +1420,9 @@ function render_active_connection(dev, with_link, hide_link_local) {
                 addr.indexOf("feb") === 0);
     }
 
-    if (con && con.Ip6Config) {
-        con.Ip6Config.Addresses.forEach(function (a) {
+    var ip6config = con? con.Ip6Config : dev.Ip6Config;
+    if (ip6config) {
+        ip6config.Addresses.forEach(function (a) {
             if (!(hide_link_local && is_ipv6_link_local(a[0])))
                 parts.push(a[0] + "/" + a[1]);
         });
@@ -1281,15 +1432,15 @@ function render_active_connection(dev, with_link, hide_link_local) {
 }
 
 function make_network_plot_setup_hook(unit) {
-    return function (plot) {
-        var axes = plot.getAxes();
+    return function (pl) {
+        var axes = pl.getAxes();
         if (axes.yaxis.datamax < 100000)
             axes.yaxis.options.max = 100000;
         else
             axes.yaxis.options.max = null;
         axes.yaxis.options.min = 0;
 
-        $(unit).text(shell.bits_per_sec_tick_unit(axes.yaxis));
+        $(unit).text(plot.bits_per_sec_tick_unit(axes.yaxis));
     };
 }
 
@@ -1297,9 +1448,8 @@ var permission = cockpit.permission({ admin: true });
 $(permission).on("changed", update_network_privileged);
 
 function update_network_privileged() {
-    controls.update_privileged_ui(
-        permission, ".network-privileged",
-        cockpit.format(
+    $(".network-privileged").update_privileged(
+        permission, cockpit.format(
             _("The user <b>$0</b> is not permitted to modify network settings"),
             permission.user ? permission.user.name : '')
     );
@@ -1354,6 +1504,54 @@ function add_usage_monitor(iface) {
                            ];
 }
 
+function complete_settings(settings, device) {
+    if (!device) {
+        console.warn("No device to complete settings", JSON.stringify(settings));
+        return;
+    }
+
+    settings.connection.id = device.Interface;
+    settings.connection.uuid = generate_uuid();
+
+    if (device.DeviceType == 'ethernet') {
+        settings.connection.type = '802-3-ethernet';
+        settings.ethernet = { };
+    } else {
+        // The remaining types are identical between Device and Settings, see
+        // device_type_to_symbol.
+        settings.connection.type = device.DeviceType;
+    }
+}
+
+function settings_applier(model, device, connection) {
+    /* If we have a connection, we can just update it.
+     * Otherwise if the settings has TYPE set, we can add
+     * them as a stand-alone object.  Otherwise, we
+     * activate the device with the settings which causes
+     * NM to fill in the type and other details.
+     *
+     * HACK - The activation is a hack, we would rather
+     * just have NM fill in the details and not activate
+     * the connection.  See complete_settings above that
+     * can do some of this completion.
+     *
+     * https://bugzilla.gnome.org/show_bug.cgi?id=775226
+     */
+
+    return function (settings) {
+        if (connection) {
+            return connection.apply_settings(settings);
+        } else if (settings.connection.type) {
+            return model.get_settings().add_connection(settings);
+        } else if (device) {
+            return device.activate_with_settings(settings);
+        } else {
+            cockpit.warn("No way to apply settings", connection, settings);
+            return cockpit.resolve();
+        }
+    };
+}
+
 PageNetworking.prototype = {
     _init: function (model) {
         this.id = "networking";
@@ -1368,9 +1566,27 @@ PageNetworking.prototype = {
         var self = this;
 
         update_network_privileged();
-        $("#networking-add-bond").click($.proxy(this, "add_bond"));
-        $("#networking-add-bridge").click($.proxy(this, "add_bridge"));
-        $("#networking-add-vlan").click($.proxy(this, "add_vlan"));
+        $("#networking-add-bond").syn_click(self.model, $.proxy(this, "add_bond"));
+        $("#networking-add-team").syn_click(self.model, $.proxy(this, "add_team"));
+        $("#networking-add-bridge").syn_click(self.model, $.proxy(this, "add_bridge"));
+        $("#networking-add-vlan").syn_click(self.model, $.proxy(this, "add_vlan"));
+
+        /* HACK - hide "Add Team" if it doesn't work due to missing bits
+         * https://bugzilla.redhat.com/show_bug.cgi?id=1375967
+         */
+
+        $("#networking-add-team").hide();
+        // We need both the plugin and teamd
+        cockpit.script("test -f /usr/bin/teamd && " +
+                       "( test -f /usr/lib*/NetworkManager/libnm-device-plugin-team.so || " +
+                       "  test -f /usr/lib/*-linux-gnu/NetworkManager/libnm-device-plugin-team.so)",
+                       { err: "ignore" }).
+            done(function () {
+                $("#networking-add-team").show();
+            }).
+            always(function () {
+                $("#networking-add-team").attr("data-test-stable", "yes");
+            });
 
         function highlight_netdev_row(event, id) {
             $('#networking-interfaces tr').removeClass('highlight-ct');
@@ -1387,14 +1603,14 @@ PageNetworking.prototype = {
             threshold: 200
         };
 
-        var rx_plot_options = shell.plot_simple_template();
-        $.extend(rx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
+        var rx_plot_options = plot.plot_simple_template();
+        $.extend(rx_plot_options.yaxis, { tickFormatter: plot.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(rx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
         rx_plot_options.setup_hook = make_network_plot_setup_hook("#networking-rx-unit");
-        this.rx_plot = shell.plot($("#networking-rx-graph"), 300);
+        this.rx_plot = plot.plot($("#networking-rx-graph"), 300);
         this.rx_plot.set_options(rx_plot_options);
         this.rx_series = this.rx_plot.add_metrics_stacked_instances_series(rx_plot_data, { });
         this.rx_plot.start_walking();
@@ -1408,14 +1624,14 @@ PageNetworking.prototype = {
             threshold: 200
         };
 
-        var tx_plot_options = shell.plot_simple_template();
-        $.extend(tx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
+        var tx_plot_options = plot.plot_simple_template();
+        $.extend(tx_plot_options.yaxis, { tickFormatter: plot.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(tx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
         tx_plot_options.setup_hook = make_network_plot_setup_hook("#networking-tx-unit");
-        this.tx_plot = shell.plot($("#networking-tx-graph"), 300);
+        this.tx_plot = plot.plot($("#networking-tx-graph"), 300);
         this.tx_plot.set_options(tx_plot_options);
         this.tx_series = this.tx_plot.add_metrics_stacked_instances_series(tx_plot_data, { });
         this.tx_plot.start_walking();
@@ -1426,7 +1642,7 @@ PageNetworking.prototype = {
             self.tx_plot.resize();
         });
 
-        var plot_controls = shell.setup_plot_controls($('#networking'), $('#networking-graph-toolbar'));
+        var plot_controls = plot.setup_plot_controls($('#networking'), $('#networking-graph-toolbar'));
         plot_controls.reset([ this.rx_plot, this.tx_plot ]);
 
         ensure_usage_monitor();
@@ -1455,9 +1671,7 @@ PageNetworking.prototype = {
     },
 
     enter: function () {
-        var self = this;
-
-        this.log_box = server.logbox([ "_SYSTEMD_UNIT=NetworkManager.service",
+        this.log_box = journal.logbox([ "_SYSTEMD_UNIT=NetworkManager.service",
                                        "_SYSTEMD_UNIT=firewalld.service" ], 10);
         $('#networking-log').empty().append(this.log_box);
 
@@ -1479,48 +1693,55 @@ PageNetworking.prototype = {
 
     update_devices: function() {
         var self = this;
-        var tbody;
+        var managed_tbody, unmanaged_tbody;
 
-        tbody = $('#networking-interfaces tbody');
-        tbody.empty();
+        managed_tbody = $('#networking-interfaces tbody');
+        managed_tbody.empty();
+
+        unmanaged_tbody = $('#networking-unmanaged-interfaces tbody');
+        unmanaged_tbody.empty();
+        $('#networking-unmanaged-interfaces').hide();
 
         self.model.list_interfaces().forEach(function (iface) {
 
             function has_master(iface) {
-                var connections =
-                    (iface.Device ? iface.Device.AvailableConnections : iface.Connections);
-                return connections.some(function (c) { return c.Masters && c.Masters.length > 0; });
+                return ((iface.Device && iface.Device.ActiveConnection && iface.Device.ActiveConnection.Master) ||
+                        (iface.MainConnection && iface.MainConnection.Masters.length > 0));
             }
+
+            // Skip loopback
+            if (iface.Device && iface.Device.DeviceType == 'loopback')
+                return;
 
             // Skip slaves
             if (has_master(iface))
                 return;
 
-            // Skip everything that is not ethernet, bond, or bridge
-            if (iface.Device && iface.Device.DeviceType != 'ethernet' &&
-                iface.Device.DeviceType != 'bond' &&
-                iface.Device.DeviceType != 'vlan' &&
-                iface.Device.DeviceType != 'bridge')
-                return;
-
             var dev = iface.Device;
-            var is_active = (dev && dev.State == 100 && dev.Carrier === true);
+            var show_traffic = (dev && (dev.State == 100 || dev.State == 10) && dev.Carrier === true);
 
             self.rx_series.add_instance(iface.Name);
             self.tx_series.add_instance(iface.Name);
             add_usage_monitor(iface.Name);
 
-            tbody.append($('<tr>', { "data-interface": encodeURIComponent(iface.Name),
-                                     "data-sample-id": is_active? encodeURIComponent(iface.Name) : null
+            var row = $('<tr>', { "data-interface": encodeURIComponent(iface.Name),
+                                     "data-sample-id": show_traffic? encodeURIComponent(iface.Name) : null
                                    }).
                          append($('<td>').text(iface.Name),
                                 $('<td>').html(render_active_connection(dev, false, true)),
-                                (is_active?
+                                (show_traffic?
                                  [ $('<td>').text(""), $('<td>').text("") ] :
-                                 $('<td colspan="2">').text(device_state_text(dev)))).
-                         click(function () {
-                             cockpit.location.go([ iface.Name ]);
-                         }));
+                                 $('<td colspan="2">').text(device_state_text(dev))));
+
+            if (!dev || dev.Managed) {
+                managed_tbody.append(row.click(function () {
+                    cockpit.location.go([ iface.Name ]);
+                }));
+            } else {
+                unmanaged_tbody.append(row);
+                $('#networking-unmanaged-interfaces').show();
+            }
+
         });
     },
 
@@ -1537,24 +1758,57 @@ PageNetworking.prototype = {
         PageNetworkBondSettings.model = this.model;
         PageNetworkBondSettings.done = null;
         PageNetworkBondSettings.connection = null;
-        PageNetworkBondSettings.settings =
+        PageNetworkBondSettings.apply_settings = settings_applier(this.model);
+        PageNetworkBondSettings.ghost_settings =
             {
                 connection: {
-                    id: uuid,
-                    autoconnect: false,
+                    id: iface,
+                    autoconnect: true,
                     type: "bond",
                     uuid: uuid,
                     interface_name: iface
                 },
                 bond: {
                     options: {
-                        mode: "balance-rr"
+                        mode: "active-backup"
                     },
                     interface_name: iface
                 }
             };
 
         $('#network-bond-settings-dialog').modal('show');
+    },
+
+    add_team: function () {
+        var iface, i, uuid;
+
+        uuid = generate_uuid();
+        for (i = 0; i < 100; i++) {
+            iface = "team" + i;
+            if (!this.model.find_interface(iface))
+                break;
+        }
+
+        PageNetworkTeamSettings.model = this.model;
+        PageNetworkTeamSettings.done = null;
+        PageNetworkTeamSettings.connection = null;
+        PageNetworkTeamSettings.apply_settings = settings_applier(this.model);
+        PageNetworkTeamSettings.ghost_settings =
+            {
+                connection: {
+                    id: iface,
+                    autoconnect: true,
+                    type: "team",
+                    uuid: uuid,
+                    interface_name: iface
+                },
+                team: {
+                    config: { },
+                    interface_name: iface
+                }
+            };
+
+        $('#network-team-settings-dialog').modal('show');
     },
 
     add_bridge: function () {
@@ -1570,11 +1824,12 @@ PageNetworking.prototype = {
         PageNetworkBridgeSettings.model = this.model;
         PageNetworkBridgeSettings.done = null;
         PageNetworkBridgeSettings.connection = null;
-        PageNetworkBridgeSettings.settings =
+        PageNetworkBridgeSettings.apply_settings = settings_applier(this.model);
+        PageNetworkBridgeSettings.ghost_settings =
             {
                 connection: {
-                    id: uuid,
-                    autoconnect: false,
+                    id: iface,
+                    autoconnect: true,
                     type: "bridge",
                     uuid: uuid,
                     interface_name: iface
@@ -1594,18 +1849,19 @@ PageNetworking.prototype = {
     },
 
     add_vlan: function () {
-        var iface, i, uuid;
+        var uuid;
 
         uuid = generate_uuid();
 
         PageNetworkVlanSettings.model = this.model;
         PageNetworkVlanSettings.done = null;
         PageNetworkVlanSettings.connection = null;
-        PageNetworkVlanSettings.settings =
+        PageNetworkVlanSettings.apply_settings = settings_applier(this.model);
+        PageNetworkVlanSettings.ghost_settings =
             {
                 connection: {
-                    id: uuid,
-                    autoconnect: false,
+                    id: "",
+                    autoconnect: true,
                     type: "vlan",
                     uuid: uuid,
                     interface_name: ""
@@ -1660,12 +1916,210 @@ var bond_monitoring_choices =
         { choice: 'arp',    title: _("ARP") }
     ];
 
+var team_runner_choices =
+    [
+        { choice: 'roundrobin',    title: _("Round Robin") },
+        { choice: 'activebackup',  title: _("Active Backup") },
+        { choice: 'loadbalance',   title: _("Load Balancing") },
+        { choice: 'broadcast',     title: _("Broadcast") },
+        { choice: 'lacp',          title: _("802.3ad LACP") },
+    ];
+
+var team_balancer_choices =
+    [
+        { choice: 'none',    title: _("Passive") },
+        { choice: 'basic',   title: _("Active") }
+    ];
+
+var team_watch_choices =
+    [
+        { choice: 'ethtool',       title: _("Ethtool") },
+        { choice: 'arp-ping',      title: _("ARP Ping") },
+        { choice: 'nsna-ping',     title: _("NSNA Ping") }
+    ];
+
 function choice_title(choices, choice, def) {
     for (var i = 0; i < choices.length; i++) {
         if (choices[i].choice == choice)
             return choices[i].title;
     }
     return def;
+}
+
+/* Support for automatically rolling back changes that break the
+ * connection to the server.
+ *
+ * The basic idea is to perform the following steps:
+ *
+ * 1) Create a checkpoint with automatic rollback
+ * 2) Make the change
+ * 3) Destroy the checkpoint
+ *
+ * If step 2 breaks the connection, step 3 wont happen and the
+ * checkpoint will roll back after some time.  This is supposed to
+ * restore connectivity, so steps 2 and 3 will complete at that time,
+ * and step 3 will fail because the checkpoint doesn't exist anymore.
+ *
+ * The failure of step 3 is our indication that the connection was
+ * temporarily broken, and we inform the user about that.
+ *
+ * Usually, step 2 completes successfully also for a change that
+ * breaks the connection, and connectivity is only lost after some
+ * delay.  Thus, we also delay step 3 by a short amount (settle_time,
+ * below).
+ *
+ * For a change that _doesn't_ break connectivity, this whole process
+ * is inherently a race: Steps 2 and 3 need to complete before the
+ * checkpoint created in step 1 reaches its timeout.
+ *
+ * It is better to wait a bit longer for salvation after making a
+ * mistake than to have many of your legitimate changes be cancelled
+ * by an impatient nanny mechanism.  Thus, we use a rather long
+ * checkpoint rollback timeout (rollback_time, below).
+ *
+ * For a good change, all three steps usually happen quickly, and the
+ * time we wait between steps 2 and 3 doesn't need to be very long
+ * either, apparently.  Thus, we delay any indication that something
+ * might be wrong by a short delay (curtain_time, below), and most
+ * changes can thus be made without the "Testing connection" curtain
+ * coming up.
+ *
+ * Some changes will be rolled back although the user really wants to
+ * make them.  For example, the user might want to change the IP
+ * address of the machine, and although this will disconnect Cockpit,
+ * the user can connect again on the new address.
+ *
+ * In order to give the user the option to avoid this unwanted
+ * rollback, we let him/her do the same change without a checkpoint
+ * directly from the dialog that explains the problem.
+ */
+
+/* To avoid interference, we switch off the global transport health
+ * check while a checkpoint exists.  For example, if the rollback
+ * takes a really long time, Cockpit would otherwise disconnect itself
+ * forcefully and the user would not get to see the dialog with the
+ * "Do it anyway" button.  This dialog is the only way to make certain
+ * changes, and it is thus important to show it if at all possible.
+ */
+
+/* Considerations for chosing the times below
+ *
+ * curtain_time too short:  Curtain comes up too often for good changes.
+ *
+ * curtain_time too long:   User is left with a broken UI for a
+ *                          significant time in the case of a mistake.
+ *
+ * settle_time too short:   Some bad changes that take time to have any
+ *                          effect will be let through.
+ *
+ * settle_time too high:    All operations take a long time, and the
+ *                          curtain needs to come up to prevent the
+ *                          user form interacting with the page.  Thus settle_time
+ *                          should be shorter than curtain_time.
+ *
+ * rollback_time too short: Good changes that take a long time to complete
+ *                          (on a loaded machine, say) are cancelled spuriously.
+ *
+ * rollback_time too long:  The user has to wait a long time before
+ *                          his/her mistake is corrected and might
+ *                          consider Cockpit to be dead already.
+ */
+
+var curtain_time  =  0.5;
+var settle_time   =  0.3;
+var rollback_time = 15.0;
+
+function with_checkpoint(model, modify, options) {
+    var manager = model.get_manager();
+    var curtain = $('#testing-connection-curtain');
+    var curtain_testing = $('#testing-connection-curtain-testing');
+    var curtain_restoring = $('#testing-connection-curtain-restoring');
+    var dialog = $('#confirm-breaking-change-popup');
+
+    var curtain_timeout;
+    var curtain_title_timeout;
+
+    function show_curtain() {
+        cockpit.hint("ignore_transport_health_check", { data: true });
+        curtain_timeout = window.setTimeout(function () {
+            curtain_timeout = null;
+            curtain_testing.show();
+            curtain_restoring.hide();
+            curtain.show();
+        }, curtain_time*1000);
+        curtain_title_timeout = window.setTimeout(function () {
+            curtain_title_timeout = null;
+            curtain_testing.hide();
+            curtain_restoring.show();
+        }, rollback_time*1000);
+    }
+
+    function hide_curtain() {
+        if (curtain_timeout)
+            window.clearTimeout(curtain_timeout);
+        curtain_timeout = null;
+        if (curtain_title_timeout)
+            window.clearTimeout(curtain_title_timeout);
+        curtain.hide();
+        cockpit.hint("ignore_transport_health_check", { data: false });
+    }
+
+    // HACK - Let's not use checkpoints for changes that involve
+    // adding or removing connections.
+    //
+    // https://bugzilla.redhat.com/show_bug.cgi?id=1378393
+    // https://bugzilla.redhat.com/show_bug.cgi?id=1398316
+
+    if (options.hack_does_add_or_remove) {
+        modify();
+        return;
+    }
+
+    manager.checkpoint_create(options.devices || [ ], rollback_time).
+        done(function (cp) {
+            if (!cp) {
+                modify();
+                return;
+            }
+
+            show_curtain ();
+            modify().
+                done(function () {
+                    window.setTimeout(function () {
+                        manager.checkpoint_destroy(cp).
+                            always(hide_curtain).
+                            fail(function (error) {
+                                dialog.find('#confirm-breaking-change-text').html(options.fail_text);
+                                dialog.find('.modal-footer .btn-danger').
+                                    off('click').
+                                    text(options.anyway_text).
+                                    syn_click(model, function () {
+                                        dialog.modal('hide');
+                                        modify();
+                                    });
+                                dialog.modal('show');
+                            });
+                    }, settle_time*1000);
+                }).
+                fail(function () {
+                    hide_curtain();
+
+                    // HACK
+                    //
+                    // We want to avoid rollbacks for operations that don't actually change anything when they
+                    // fail.  Rollback are always disruptive and always seem to reconnect all the included
+                    // devices, even if nothing has actually changed.  Thus, if you give invalid input to
+                    // NetworkManager and receive an error in a settings dialog, rolling back the checkpoint
+                    // would cause a temporary disconnection on the interface.
+                    //
+                    // https://bugzilla.redhat.com/show_bug.cgi?id=1427187
+
+                    if (options.rollback_on_failure)
+                        manager.checkpoint_rollback(cp);
+                    else
+                        manager.checkpoint_destroy(cp);
+                });
+        });
 }
 
 PageNetworkInterface.prototype = {
@@ -1685,9 +2139,9 @@ PageNetworkInterface.prototype = {
             cockpit.location.go('/');
         });
 
-        $('#network-interface-delete').click($.proxy(this, "delete_connections"));
+        $('#network-interface-delete').syn_click(self.model, $.proxy(this, "delete_connections"));
 
-        this.device_onoff = $("#network-interface-delete-switch")
+        this.device_onoff = $("#network-interface-delete-switch").onoff()
             .on("change", function() {
                 var val = $(this).onoff("value");
                 if (val)
@@ -1710,14 +2164,14 @@ PageNetworkInterface.prototype = {
             derive: "rate"
         };
 
-        var rx_plot_options = shell.plot_simple_template();
-        $.extend(rx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
+        var rx_plot_options = plot.plot_simple_template();
+        $.extend(rx_plot_options.yaxis, { tickFormatter: plot.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(rx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
         rx_plot_options.setup_hook = make_network_plot_setup_hook("#network-interface-rx-unit");
-        this.rx_plot = shell.plot($("#network-interface-rx-graph"), 300);
+        this.rx_plot = plot.plot($("#network-interface-rx-graph"), 300);
         this.rx_plot.set_options(rx_plot_options);
         this.rx_series = this.rx_plot.add_metrics_stacked_instances_series(rx_plot_data, { });
         this.rx_plot.start_walking();
@@ -1730,14 +2184,14 @@ PageNetworkInterface.prototype = {
             derive: "rate"
         };
 
-        var tx_plot_options = shell.plot_simple_template();
-        $.extend(tx_plot_options.yaxis, { tickFormatter: shell.format_bits_per_sec_tick_no_unit
+        var tx_plot_options = plot.plot_simple_template();
+        $.extend(tx_plot_options.yaxis, { tickFormatter: plot.format_bits_per_sec_tick_no_unit
                                         });
         $.extend(tx_plot_options.grid,  { hoverable: true,
                                           autoHighlight: false
                                         });
         tx_plot_options.setup_hook = make_network_plot_setup_hook("#network-interface-tx-unit");
-        this.tx_plot = shell.plot($("#network-interface-tx-graph"), 300);
+        this.tx_plot = plot.plot($("#network-interface-tx-graph"), 300);
         this.tx_plot.set_options(tx_plot_options);
         this.tx_series = this.tx_plot.add_metrics_stacked_instances_series(tx_plot_data, { });
         this.tx_plot.start_walking();
@@ -1748,7 +2202,7 @@ PageNetworkInterface.prototype = {
             self.tx_plot.resize();
         });
 
-        var plot_controls = shell.setup_plot_controls($('#network-interface'), $('#network-interface-graph-toolbar'));
+        var plot_controls = plot.setup_plot_controls($('#network-interface'), $('#network-interface-graph-toolbar'));
         plot_controls.reset([ this.rx_plot, this.tx_plot ]);
 
         ensure_usage_monitor();
@@ -1757,6 +2211,7 @@ PageNetworkInterface.prototype = {
         });
 
         function handle_usage_samples() {
+            // console.log(usage_samples);
             for (var iface in usage_samples) {
                 var samples = usage_samples[iface];
                 var rx = samples[0][0];
@@ -1802,6 +2257,36 @@ PageNetworkInterface.prototype = {
         this.dev = null;
     },
 
+    show_dialog: function(dialog, id) {
+        var self = this;
+        var con = self.main_connection;
+        var dev = self.dev;
+
+        function reactivate_connection() {
+            if (con && dev && dev.ActiveConnection && dev.ActiveConnection.Connection === con) {
+                if (con.Settings.connection.interface_name &&
+                    con.Settings.connection.interface_name != dev.Interface) {
+                    return dev.disconnect().then(function () { return con.activate(null, null); }).
+                        fail(show_unexpected_error);
+                } else {
+                    return con.activate(dev, null).
+                        fail(show_unexpected_error);
+                }
+            }
+        }
+
+        dialog.model = self.model;
+        dialog.connection = self.main_connection;
+        dialog.ghost_settings = self.ghost_settings;
+        dialog.apply_settings = settings_applier(self.model, self.dev, con);
+        dialog.done = reactivate_connection;
+        $(id).modal('show');
+    },
+
+    set_mac: function() {
+        this.show_dialog(PageNetworkMacSettings, "#network-mac-settings-dialog");
+    },
+
     delete_connections: function() {
         var self = this;
 
@@ -1817,86 +2302,120 @@ PageNetworkInterface.prototype = {
         }
 
         function delete_iface_connections(iface) {
-            if (iface.Device)
-                return delete_connections(iface.Device.AvailableConnections);
-            else
-                return delete_connections(iface.Connections);
+            return delete_connections(iface.Connections);
         }
 
-        if (this.iface) {
-            var location = cockpit.location;
-            delete_iface_connections(this.iface).
+        var location = cockpit.location;
+
+        function modify () {
+            return delete_iface_connections(self.iface).
                 done(function () {
                     location.go("/");
                 }).
                 fail(show_unexpected_error);
         }
+
+        if (self.iface) {
+            with_checkpoint(self.model, modify,
+                            {
+                                devices: self.dev? [ self.dev ] : [ ],
+                                fail_text: cockpit.format(_("Deleting <b>$0</b> will break the connection to the server, and will make the administration UI unavailable."), self.dev_name),
+                                anyway_text: cockpit.format(_("Delete $0"), self.dev_name),
+                                hack_does_add_or_remove: true,
+                                rollback_on_failure: true
+                            });
+        }
     },
 
     connect: function() {
         var self = this;
-        var settings_manager = self.model.get_settings();
+
+        if (!self.main_connection && !(self.dev && self.ghost_settings)) {
+            self.update();
+            return;
+        }
 
         function fail(error) {
             show_unexpected_error(error);
             self.update();
         }
 
-        function activate(con) {
-            con.activate(self.dev, null).
-                fail(fail);
+        function modify() {
+            if (self.main_connection) {
+                return self.main_connection.activate(self.dev, null).fail(fail);
+            } else {
+                return self.dev.activate_with_settings(self.ghost_settings, null).fail(fail);
+            }
         }
 
-        if (self.ghost_settings) {
-            settings_manager.add_connection(self.ghost_settings).
-                done(activate).
-                fail(fail);
-        } else if (self.main_connection) {
-            activate(self.main_connection);
-        } else
-            self.update();
+        with_checkpoint(self.model, modify,
+                        {
+                            devices: self.dev? [ self.dev ] : [ ],
+                            fail_text: cockpit.format(_("Switching on <b>$0</b> will break the connection to the server, and will make the administration UI unavailable."), self.dev_name),
+                            anyway_text: cockpit.format(_("Switch on $0"), self.dev_name)
+                        });
     },
 
     disconnect: function() {
         var self = this;
 
         if (!self.dev) {
+            console.log("Trying to switch off without a device?");
             self.update();
             return;
         }
 
-        self.dev.disconnect().fail(function (error) {
-            show_unexpected_error(error);
-            self.update();
-        });
+        function modify () {
+            return self.dev.disconnect().
+                fail(function (error) {
+                    show_unexpected_error(error);
+                    self.update();
+                });
+        }
+
+        with_checkpoint(self.model, modify,
+                        {
+                            devices: [ self.dev ],
+                            fail_text: cockpit.format(_("Switching off <b>$0</b>  will break the connection to the server, and will make the administration UI unavailable."), self.dev_name),
+                            anyway_text: cockpit.format(_("Switch off $0"), self.dev_name)
+                        });
     },
 
     update: function() {
         var self = this;
         var iface = self.model.find_interface(self.dev_name);
         var dev = iface && iface.Device;
+        var managed = iface && (!dev || dev.Managed);
 
         self.iface = iface;
         self.dev = dev;
 
-        var desc;
+        var desc, cs;
         if (dev) {
-            if (dev.DeviceType == 'ethernet') {
-                desc = cockpit.format("$IdVendor $IdModel $Driver)", dev);
+            if (dev.DeviceType == 'ethernet' || dev.IdVendor || dev.IdModel) {
+                desc = cockpit.format("$IdVendor $IdModel $Driver", dev);
             } else if (dev.DeviceType == 'bond') {
                 desc = _("Bond");
+            } else if (dev.DeviceType == 'team') {
+                desc = _("Team");
             } else if (dev.DeviceType == 'vlan') {
                 desc = _("VLAN");
             } else if (dev.DeviceType == 'bridge') {
                 desc = _("Bridge");
-            }
+            } else
+                desc = cockpit.format(_("Unknown \"$0\""), dev.DeviceType);
         } else if (iface) {
-            if (iface.Connections[0] && iface.Connections[0].Settings.connection.type == "bond")
+            cs = connection_settings(iface.Connections[0]);
+            if (cs.type == "bond")
                 desc = _("Bond");
-            else if (iface.Connections[0] && iface.Connections[0].Settings.connection.type == "vlan")
+            else if (cs.type == "team")
+                desc = _("Team");
+            else if (cs.type == "vlan")
                 desc = _("VLAN");
-            else if (iface.Connections[0] && iface.Connections[0].Settings.connection.type == "bridge")
+            else if (cs.type == "bridge")
                 desc = _("Bridge");
+            else if (cs.type)
+                desc = cockpit.format(_("Unknown \"$0\""), cs.type);
             else
                 desc = _("Unknown");
         } else
@@ -1904,15 +2423,49 @@ PageNetworkInterface.prototype = {
 
         $('#network-interface-name').text(self.dev_name);
         $('#network-interface-hw').text(desc);
-        $('#network-interface-mac').text(dev? dev.HwAddress : "");
 
-        this.device_onoff.prop('disabled', !dev);
+        var mac;
+        if (dev &&
+            dev.HwAddress) {
+            mac = dev.HwAddress;
+        } else if (iface &&
+                   iface.MainConnection &&
+                   iface.MainConnection.Settings &&
+                   iface.MainConnection.Settings.ethernet &&
+                   iface.MainConnection.Settings.ethernet.assigned_mac_address) {
+            mac = iface.MainConnection.Settings.ethernet.assigned_mac_address;
+        }
+
+        var can_edit_mac = (iface && iface.MainConnection &&
+                            ((connection_settings(iface.MainConnection).type == "802-3-ethernet" &&
+                              self.model.at_least_version("1.4")) ||
+                             (connection_settings(iface.MainConnection).type == "bond" &&
+                              self.model.at_least_version("1.6"))));
+
+        $('#network-interface-mac').empty();
+        if (can_edit_mac) {
+            $('#network-interface-mac').append(
+                $('<a>').
+                    text(mac).
+                    syn_click(self.model, function () {
+                        self.set_mac();
+                    }));
+        } else {
+            $('#network-interface-mac').text(mac);
+        }
+
+        /* Disable the On/Off button for interfaces that we don't know about at all,
+           and for devices that NM declares to be unavailable. Neither can be activated.
+         */
+        this.device_onoff.onoff("disabled", !!(!iface || (dev && dev.State == 20)));
         this.device_onoff.onoff("value", !!(dev && dev.ActiveConnection));
+        this.device_onoff.toggle(managed);
 
-        $('#network-interface-disconnect').prop('disabled', !dev || !dev.ActiveConnection);
-
-        var is_deletable = (iface && !dev) || (dev && (dev.DeviceType == 'bond' || dev.DeviceType == 'vlan' || dev.DeviceType == 'bridge'));
-        $('#network-interface-delete').toggle(!!is_deletable);
+        var is_deletable = (iface && !dev) || (dev && (dev.DeviceType == 'bond' ||
+                                                       dev.DeviceType == 'team' ||
+                                                       dev.DeviceType == 'vlan' ||
+                                                       dev.DeviceType == 'bridge'));
+        $('#network-interface-delete').toggle(is_deletable && managed);
 
         function render_carrier_status_row() {
             if (dev && dev.Carrier !== undefined) {
@@ -1934,7 +2487,7 @@ PageNetworkInterface.prototype = {
 
             if (!dev)
                 state = _("Inactive");
-            else if (dev.State != 100)
+            else if (managed && dev.State != 100)
                 state = dev.StateText;
             else
                 state = null;
@@ -1948,24 +2501,18 @@ PageNetworkInterface.prototype = {
         }
 
         function render_connection_settings_rows(con, settings) {
+            if (!managed) {
+                return $('<tr>').append(
+                    $('<td>'),
+                    $('<td>').text(_("This device cannot be managed here.")));
+            }
+
             if (!settings)
                 return [ ];
 
-            function apply() {
-                if (con)
-                    con.apply().fail(show_unexpected_error);
-                else {
-                    var settings_manager = self.model.get_settings();
-                    settings_manager.add_connection(settings).fail(show_unexpected_error);
-                }
-            }
-
-            function reactivate_connection() {
-                if (con && dev && dev.ActiveConnection && dev.ActiveConnection.Connection === con) {
-                    con.activate(dev, null).
-                        fail(show_unexpected_error);
-                }
-            }
+            var master_settings = null;
+            if (con && con.Masters.length > 0)
+                master_settings = con.Masters[0].Settings;
 
             function render_ip_settings(topic) {
                 var params = settings[topic];
@@ -1984,73 +2531,90 @@ PageNetworkInterface.prototype = {
                     addrs.push(addr);
                 });
                 if (addrs.length > 0)
-                    parts.push(cockpit.format(addr_is_extra ? "Additional address $val" : "Address $val",
+                    parts.push(cockpit.format(addr_is_extra ? _("Additional address $val") : _("Address $val"),
                                  { val: addrs.join(", ") }));
 
                 var dns_is_extra = (!params["ignore-auto-dns"] && params.method != "manual");
                 if (params.dns.length > 0)
-                    parts.push(cockpit.format(dns_is_extra ? "Additional DNS $val" : "DNS $val",
+                    parts.push(cockpit.format(dns_is_extra ? _("Additional DNS $val") : _("DNS $val"),
                                  { val: params.dns.join(", ") }));
                 if (params.dns_search.length > 0)
-                    parts.push(cockpit.format(dns_is_extra ? "Additional DNS Search Domains $val" : "DNS Search Domains $val",
+                    parts.push(cockpit.format(dns_is_extra ? _("Additional DNS Search Domains $val") : _("DNS Search Domains $val"),
                                  { val: params.dns_search.join(", ") }));
 
-                return parts.map(function (p) { return $('<div>').text(p); });
+                return parts;
             }
 
             function configure_ip_settings(topic) {
-                PageNetworkIpSettings.model = self.model;
-                PageNetworkIpSettings.connection = con;
-                PageNetworkIpSettings.settings = $.extend({ }, settings);
                 PageNetworkIpSettings.topic = topic;
-                PageNetworkIpSettings.done = reactivate_connection;
-                $('#network-ip-settings-dialog').modal('show');
+                self.show_dialog(PageNetworkIpSettings, '#network-ip-settings-dialog');
             }
 
             function configure_bond_settings() {
-                PageNetworkBondSettings.model = self.model;
-                PageNetworkBondSettings.connection = con;
-                PageNetworkBondSettings.settings = settings;
-                PageNetworkBondSettings.done = reactivate_connection;
-                $('#network-bond-settings-dialog').modal('show');
+                self.show_dialog(PageNetworkBondSettings, '#network-bond-settings-dialog');
+            }
+
+            function configure_team_settings() {
+                self.show_dialog(PageNetworkTeamSettings, '#network-team-settings-dialog');
+            }
+
+            function configure_team_port_settings() {
+                PageNetworkTeamPortSettings.master_settings = master_settings;
+                self.show_dialog(PageNetworkTeamPortSettings, '#network-teamport-settings-dialog');
             }
 
             function configure_bridge_settings() {
-                PageNetworkBridgeSettings.model = self.model;
-                PageNetworkBridgeSettings.connection = con;
-                PageNetworkBridgeSettings.settings = con.Settings;
-                PageNetworkBridgeSettings.done = reactivate_connection;
-                $('#network-bridge-settings-dialog').modal('show');
+                self.show_dialog(PageNetworkBridgeSettings, '#network-bridge-settings-dialog');
             }
 
             function configure_bridge_port_settings() {
-                PageNetworkBridgePortSettings.model = self.model;
-                PageNetworkBridgePortSettings.connection = con;
-                PageNetworkBridgePortSettings.settings = con.Settings;
-                PageNetworkBridgePortSettings.done = reactivate_connection;
-                $('#network-bridgeport-settings-dialog').modal('show');
+                self.show_dialog(PageNetworkBridgePortSettings, '#network-bridgeport-settings-dialog');
             }
 
             function configure_vlan_settings() {
-                PageNetworkVlanSettings.model = self.model;
-                PageNetworkVlanSettings.connection = con;
-                PageNetworkVlanSettings.settings = con.Settings;
-                PageNetworkVlanSettings.done = reactivate_connection;
-                $('#network-vlan-settings-dialog').modal('show');
+                self.show_dialog(PageNetworkVlanSettings, '#network-vlan-settings-dialog');
+            }
+
+            function configure_mtu_settings() {
+                self.show_dialog(PageNetworkMtuSettings, '#network-mtu-settings-dialog');
+            }
+
+            function render_autoconnect_row() {
+                if (settings.connection.autoconnect !== undefined) {
+                    return (
+                        $('<tr>').append(
+                            $('<td>').text(_("General")),
+                            $('<td class="networking-controls">').append(
+                                $('<label>').append(
+                                    $('<input type="checkbox">').
+                                        prop('checked', settings.connection.autoconnect).
+                                        change(function () {
+                                            settings.connection.autoconnect = $(this).prop('checked');
+                                            settings_applier(self.model, self.dev, con)(settings);
+                                        }),
+                                    $('<span>').text(_("Connect automatically")))))
+                    );
+                }
             }
 
             function render_settings_row(title, rows, configure) {
+                var link_text = [ ];
+                for (var i = 0; i < rows.length; i++) {
+                    link_text.push(rows[i]);
+                    if (i < rows.length -1)
+                        link_text.push($('<br>'));
+                }
+                if (link_text.length === 0)
+                    link_text.push(_("Configure"));
+
                 return $('<tr>').append(
                     $('<td>').
                         text(title).
                         css('vertical-align', rows.length > 1 ? "top" : "center"),
-                    $('<td>').append(rows),
-                    $('<td class="networking-configure">').append(
-                        $('<button class="btn btn-default network-privileged">').
-                            text(_("Configure")).
-                            click(function () {
-                                configure();
-                            })));
+                    $('<td>').append(
+                        $('<a class="network-privileged">').
+                            append(link_text).
+                            syn_click(self.model, function () { configure(); })));
             }
 
             function render_ip_settings_row(topic, title) {
@@ -2059,6 +2623,25 @@ PageNetworkInterface.prototype = {
 
                 return render_settings_row(title, render_ip_settings(topic),
                                            function () { configure_ip_settings(topic); });
+            }
+
+            function render_mtu_settings_row() {
+                var rows = [ ];
+                var options = settings.ethernet;
+
+                if (!options)
+                    return null;
+
+                function add_row(fmt, args) {
+                    rows.push(cockpit.format(fmt, args));
+                }
+
+                if (options.mtu)
+                    add_row(_("$mtu"), options);
+                else
+                    add_row(_("Automatic"), options);
+
+                return render_settings_row(_("MTU"), rows, configure_mtu_settings);
             }
 
             function render_master() {
@@ -2086,9 +2669,60 @@ PageNetworkInterface.prototype = {
                     parts.push(_("ARP Monitoring"));
 
                 if (parts.length > 0)
-                    rows.push($('<div>').text(parts.join (", ")));
+                    rows.push(parts.join (", "));
 
                 return render_settings_row(_("Bond"), rows, configure_bond_settings);
+            }
+
+            function render_team_settings_row() {
+                var parts = [ ];
+                var rows = [ ];
+
+                if (!settings.team)
+                    return null;
+
+                var config = settings.team.config;
+
+                if (config === null)
+                    parts.push(_("Broken configuration"));
+                else {
+                    if (config.runner)
+                        parts.push(choice_title(team_runner_choices, config.runner.name, config.runner.name));
+                    if (config.link_watch && config.link_watch.name != "ethtool")
+                        parts.push(choice_title(team_watch_choices, config.link_watch.name, config.link_watch.name));
+                }
+
+                if (parts.length > 0)
+                    rows.push(parts.join (", "));
+                return render_settings_row(_("Team"), rows, configure_team_settings);
+            }
+
+            function render_team_port_settings_row() {
+                var parts = [ ];
+                var rows = [ ];
+
+                if (!settings.team_port)
+                    return null;
+
+                /* Only "activebackup" and "lacp" team ports have
+                 * something to configure.
+                 */
+                if (!master_settings ||
+                    !master_settings.team ||
+                    !master_settings.team.config ||
+                    !master_settings.team.config.runner ||
+                    !(master_settings.team.config.runner.name == "activebackup" ||
+                      master_settings.team.config.runner.name == "lacp"))
+                    return null;
+
+                var config = settings.team_port.config;
+
+                if (config === null)
+                    parts.push(_("Broken configuration"));
+
+                if (parts.length > 0)
+                    rows.push(parts.join (", "));
+                return render_settings_row(_("Team Port"), rows, configure_team_port_settings);
             }
 
             function render_bridge_settings_row() {
@@ -2099,7 +2733,7 @@ PageNetworkInterface.prototype = {
                     return null;
 
                 function add_row(fmt, args) {
-                    rows.push($('<div>').text(cockpit.format(fmt, args)));
+                    rows.push(cockpit.format(fmt, args));
                 }
 
                 if (options.stp) {
@@ -2125,7 +2759,7 @@ PageNetworkInterface.prototype = {
                     return null;
 
                 function add_row(fmt, args) {
-                    rows.push($('<div>').text(cockpit.format(fmt, args)));
+                    rows.push(cockpit.format(fmt, args));
                 }
 
                 if (options.priority != 32)
@@ -2146,7 +2780,7 @@ PageNetworkInterface.prototype = {
                     return null;
 
                 function add_row(fmt, args) {
-                    rows.push($('<div>').text(cockpit.format(fmt, args)));
+                    rows.push(cockpit.format(fmt, args));
                 }
 
                 add_row(_("Parent $parent"), options);
@@ -2157,40 +2791,23 @@ PageNetworkInterface.prototype = {
             }
 
             return [ render_master(),
-                     $('<tr>').append(
-                         $('<td>').text(_("General")),
-                         $('<td class="networking-controls">').append(
-                             $('<label>').append(
-                                 $('<input type="checkbox">').
-                                     prop('checked', settings.connection.autoconnect).
-                                     change(function () {
-                                         settings.connection.autoconnect = $(this).prop('checked');
-                                         apply();
-                                     }),
-                                    $('<span>').text(_("Connect automatically"))
-                                 )
-                             )
-                         ),
+                     render_autoconnect_row(),
                      render_ip_settings_row("ipv4", _("IPv4")),
                      render_ip_settings_row("ipv6", _("IPv6")),
+                     render_mtu_settings_row(),
                      render_vlan_settings_row(),
                      render_bridge_settings_row(),
                      render_bridge_port_settings_row(),
-                     render_bond_settings_row()
+                     render_bond_settings_row(),
+                     render_team_settings_row(),
+                     render_team_port_settings_row()
                    ];
         }
 
         function create_ghost_connection_settings() {
-            var uuid = generate_uuid();
-            return {
+            var settings = {
                 connection: {
-                    id: uuid,
-                    uuid: uuid,
-                    autoconnect: false,
-                    type: "802-3-ethernet",
                     interface_name: iface.Name
-                },
-                "802-3-ethernet": {
                 },
                 ipv4: {
                     method: "auto",
@@ -2207,31 +2824,22 @@ PageNetworkInterface.prototype = {
                     routes: [ ]
                 }
             };
+            complete_settings(settings, dev);
+            return settings;
         }
 
         self.ghost_settings = null;
         self.main_connection = null;
         self.connection_settings = null;
 
-        function find_main_connection(cons) {
-            cons.forEach(function(c) {
-                if (!self.main_connection ||
-                    self.main_connection.Settings.connection.timestamp < c.Settings.connection.timestamp)
-                    self.main_connection = c;
-            });
+        if (iface) {
+            self.main_connection = iface.MainConnection;
             if (self.main_connection) {
                 self.connection_settings = self.main_connection.Settings;
             } else {
                 self.ghost_settings = create_ghost_connection_settings();
                 self.connection_settings = self.ghost_settings;
             }
-        }
-
-        if (iface) {
-            if (iface.Device)
-                find_main_connection(iface.Device.AvailableConnections);
-            else
-                find_main_connection(iface.Connections);
         }
 
         $('#network-interface-settings').
@@ -2247,25 +2855,36 @@ PageNetworkInterface.prototype = {
             var slave_ifaces = { };
 
             tbody.empty();
+            self.rx_series.clear_instances();
+            self.tx_series.clear_instances();
 
-            if (!con || (con.Settings.connection.type != "bond" &&
-                         con.Settings.connection.type != "bridge")) {
+            var cs = connection_settings(con);
+            if (!con || (cs.type != "bond" && cs.type != "team" && cs.type != "bridge")) {
                 self.rx_series.add_instance(self.dev_name);
                 self.tx_series.add_instance(self.dev_name);
-                $('#network-interface-slaves').hide();
                 return;
             }
 
             $('#network-interface-slaves thead th:first-child').
-                text(con.Settings.connection.type == "bond"? _("Members") : _("Ports"));
+                text(cs.type == "bond"? _("Members") : _("Ports"));
 
             con.Slaves.forEach(function (slave_con) {
                 slave_con.Interfaces.forEach(function(iface) {
+                    if (iface.MainConnection != slave_con)
+                        return;
+
                     var dev = iface.Device;
                     var is_active = (dev && dev.State == 100 && dev.Carrier === true);
 
+                    /* Unmanaged devices shouldn't show up as slaves
+                     * but let's not take any chances.
+                     */
+                    if (dev && !dev.Managed)
+                        return;
+
                     self.rx_series.add_instance(iface.Name);
                     self.tx_series.add_instance(iface.Name);
+                    add_usage_monitor(iface.Name);
                     slave_ifaces[iface.Name] = true;
 
                     rows[iface.Name] =
@@ -2277,23 +2896,55 @@ PageNetworkInterface.prototype = {
                                     [ $('<td>').text(""), $('<td>').text("") ] :
                                     $('<td colspan="2">').text(device_state_text(dev))),
                                    $('<td class="networking-row-configure">').append(
-                                       switchbox(is_active, function(val) {
+                                       switchbox(!!(dev && dev.ActiveConnection), function(val) {
                                            if (val) {
-                                               slave_con.activate(iface.Device).
-                                                   fail(show_unexpected_error);
+                                               with_checkpoint(
+                                                   self.model,
+                                                   function () {
+                                                       return slave_con.activate(dev).
+                                                           fail(show_unexpected_error);
+                                                   },
+                                                   {
+                                                       devices: dev? [ dev ] : [ ],
+                                                       fail_text: cockpit.format(_("Switching on <b>$0</b> will break the connection to the server, and will make the administration UI unavailable."), iface.Name),
+                                                       anyway_text: cockpit.format(_("Switch on $0"), iface.Name)
+                                                   });
                                            } else if (dev) {
-                                               dev.disconnect().
-                                                   fail(show_unexpected_error);
+                                               with_checkpoint(
+                                                   self.model,
+                                                   function () {
+                                                       return dev.disconnect().
+                                                           fail(show_unexpected_error);
+                                                   },
+                                                   {
+                                                       devices: [ dev ],
+                                                       fail_text: cockpit.format(_("Switching off <b>$0</b> will break the connection to the server, and will make the administration UI unavailable."), iface.Name),
+                                                       anyway_text: cockpit.format(_("Switch off $0"), iface.Name)
+                                                   });
                                            }
                                        }, "network-privileged")),
                                    $('<td width="28px">').append(
                                        $('<button class="btn btn-default btn-control-ct network-privileged fa fa-minus">').
-                                           click(function () {
-                                               slave_con.delete_().
-                                                   fail(show_unexpected_error);
+                                           syn_click(self.model, function () {
+                                               with_checkpoint(
+                                                   self.model,
+                                                   function () {
+                                                       return slave_con.delete_().
+                                                           fail(show_unexpected_error);
+                                                   },
+                                                   {
+                                                       devices: dev? [ dev ] : [ ],
+                                                       fail_text: cockpit.format(_("Removing <b>$0</b> will break the connection to the server, and will make the administration UI unavailable."), iface.Name),
+                                                       anyway_text: cockpit.format(_("Remove $0"), iface.Name),
+                                                       hack_does_add_or_remove: true
+                                                   });
                                                return false;
                                            }))).
-                        click(function () {
+                        click(function (event) {
+                            // Somehow the clicks on the switchbox
+                            // bubble up to here.  Let's catch them.
+                            if ($(event.target).hasClass("btn"))
+                                return;
                             cockpit.location.go([ iface.Name ]);
                         });
                 });
@@ -2319,11 +2970,21 @@ PageNetworkInterface.prototype = {
                                     return $('<li role="presentation">').append(
                                         $('<a role="menuitem" class="network-privileged">').
                                             text(iface.Name).
-                                            click(function () {
-                                                set_slave(self.model, con, con.Settings,
-                                                          con.Settings.connection.type, iface.Name,
-                                                          true).
-                                                    fail(show_unexpected_error);
+                                            syn_click(self.model, function () {
+                                                with_checkpoint(
+                                                    self.model,
+                                                    function () {
+                                                        var cs = connection_settings(con);
+                                                        return set_slave(self.model, con, con.Settings,
+                                                                         cs.type, iface.Name, true).
+                                                            fail(show_unexpected_error);
+                                                    },
+                                                    {
+                                                        devices: iface.Device? [ iface.Device ] : [ ],
+                                                        fail_text: cockpit.format(_("Adding <b>$0</b> will break the connection to the server, and will make the administration UI unavailable."), iface.Name),
+                                                        anyway_text: cockpit.format(_("Add $0"), iface.Name),
+                                                        hack_does_add_or_remove: true
+                                                    });
                                             }));
                                 }
                                 return null;
@@ -2335,7 +2996,9 @@ PageNetworkInterface.prototype = {
             update_network_privileged();
         }
 
-        update_connection_slaves(self.main_connection);
+        $('#network-interface-slaves').hide();
+        if (self.main_connection)
+            update_connection_slaves(self.main_connection);
     }
 
 };
@@ -2353,6 +3016,30 @@ function switchbox(val, callback) {
     return onoff;
 }
 
+function with_settings_checkpoint(model, modify, options) {
+    with_checkpoint(model, modify,
+                    $.extend(
+                        {
+                            fail_text: _("Changing the settings will break the connection to the server, and will make the administration UI unavailable."),
+                            anyway_text: _("Change the settings"),
+                        }, options));
+}
+
+function show_dialog_error(error_id, error) {
+    var msg = error.message || error.toString();
+    console.warn(msg);
+    $(error_id).show().find('span').text(msg);
+}
+
+function connection_devices(con) {
+    var devices = [ ];
+
+    if (con)
+        con.Interfaces.forEach(function (iface) { if (iface.Device) devices.push(iface.Device); });
+
+    return devices;
+}
+
 PageNetworkIpSettings.prototype = {
     _init: function () {
         this.id = "network-ip-settings-dialog";
@@ -2364,9 +3051,8 @@ PageNetworkIpSettings.prototype = {
     },
 
     enter: function () {
-        $('#network-ip-settings-error').text("");
-        if (PageNetworkIpSettings.connection)
-            PageNetworkIpSettings.connection.freeze();
+        $('#network-ip-settings-error').hide();
+        this.settings = PageNetworkIpSettings.ghost_settings || PageNetworkIpSettings.connection.copy_settings();
         this.update();
     },
 
@@ -2378,10 +3064,8 @@ PageNetworkIpSettings.prototype = {
 
     update: function() {
         var self = this;
-        var con = PageNetworkIpSettings.connection;
-        var settings = PageNetworkIpSettings.settings;
         var topic = PageNetworkIpSettings.topic;
-        var params = settings[topic];
+        var params = self.settings[topic];
 
         var method_btn, addresses_table;
         var auto_dns_btn, dns_table;
@@ -2559,30 +3243,26 @@ PageNetworkIpSettings.prototype = {
     },
 
     cancel: function() {
-        if (PageNetworkIpSettings.connection)
-            PageNetworkIpSettings.connection.reset();
         $('#network-ip-settings-dialog').modal('hide');
     },
 
     apply: function() {
-        function apply_or_create() {
-            if (PageNetworkIpSettings.connection)
-                return PageNetworkIpSettings.connection.apply();
-            else {
-                var settings_manager = PageNetworkIpSettings.model.get_settings();
-                return settings_manager.add_connection(PageNetworkIpSettings.settings);
-            }
+        var self = this;
+
+        function modify() {
+            return PageNetworkIpSettings.apply_settings(self.settings).
+                then(function () {
+                    $('#network-ip-settings-dialog').modal('hide');
+                    if (PageNetworkIpSettings.done)
+                        return PageNetworkIpSettings.done();
+                }).
+                fail(function (error) {
+                    show_dialog_error('#network-ip-settings-error', error);
+                });
         }
 
-        apply_or_create().
-            done(function () {
-                $('#network-ip-settings-dialog').modal('hide');
-                if (PageNetworkIpSettings.done)
-                    PageNetworkIpSettings.done();
-            }).
-            fail(function (error) {
-                $('#network-ip-settings-error').text(error.message || error.toString());
-            });
+        with_settings_checkpoint(PageNetworkIpSettings.model, modify,
+                                 { devices: connection_devices(PageNetworkIpSettings.connection) });
     }
 
 };
@@ -2596,11 +3276,7 @@ function is_interface_connection(iface, connection) {
 }
 
 function is_interesting_interface(iface) {
-    return (!iface.Device ||
-            iface.Device.DeviceType == 'ethernet' ||
-            iface.Device.DeviceType == 'bond' ||
-            iface.Device.DeviceType == 'vlan' ||
-            iface.Device.DeviceType == 'bridge');
+    return !iface.Device || iface.Device.Managed;
 }
 
 function array_find(array, predicate) {
@@ -2660,76 +3336,90 @@ function slave_chooser_btn(change, slave_choices) {
         if ($(elt).prop('checked'))
             choices.push({ title: name, choice: name });
     });
-    return select_btn(change, choices);
+    return select_btn(change, choices, "form-control");
 }
 
 function free_slave_connection(con) {
-    if (con.Settings.connection.slave_type) {
-        delete con.Settings.connection.slave_type;
-        delete con.Settings.connection.master;
-        return con.apply();
+    var cs = connection_settings(con);
+    if (cs.slave_type) {
+        delete cs.slave_type;
+        delete cs.master;
+        delete con.Settings.team_port;
+        delete con.Settings.bridge_port;
+        return con.apply_settings(con.Settings);
     }
 }
 
 function set_slave(model, master_connection, master_settings, slave_type,
                    iface_name, val) {
-    var iface, uuid;
+    var iface;
     var main_connection;
 
     iface = model.find_interface(iface_name);
     if (!iface)
         return false;
 
-    function find_main_connection(cons) {
-        cons.forEach(function(c) {
-            if (!main_connection ||
-                main_connection.Settings.connection.timestamp < c.Settings.connection.timestamp)
-                main_connection = c;
-        });
-    }
-
-    if (iface.Device)
-        find_main_connection(iface.Device.AvailableConnections);
-    else
-        find_main_connection(iface.Connections);
+    main_connection = iface.MainConnection;
 
     if (val) {
-        /* Turn the main_connection into a slave for master, if
-         * necessary.  If there is no main_connection, we assume that
-         * this is a ethernet device and create a suitable connection.
+        /* Turn the main_connection into a slave for master.
          */
 
-        if (!main_connection) {
-            uuid = generate_uuid();
-            return model.get_settings().add_connection({ connection:
-                                                         { id: uuid,
-                                                           uuid: uuid,
-                                                           autoconnect: true,
-                                                           type: "802-3-ethernet",
-                                                           interface_name: iface.Name,
-                                                           slave_type: slave_type,
-                                                           master: master_settings.connection.uuid
-                                                         },
-                                                         "802-3-ethernet":
-                                                         {
-                                                         }
-                                                       });
-        } else if (main_connection.Settings.connection.master != master_settings.connection.uuid) {
-            main_connection.Settings.connection.slave_type = slave_type;
-            main_connection.Settings.connection.master = master_settings.connection.uuid;
-            delete main_connection.Settings.ipv4;
-            delete main_connection.Settings.ipv6;
-            return main_connection.apply().then(function () {
-                var dev = iface.Device;
-                if (dev && dev.ActiveConnection && dev.ActiveConnection.Connection === main_connection)
-                    return main_connection.activate(dev, null);
-            });
+        var master_iface;
+        if (master_connection) {
+            master_iface = master_connection.Interfaces[0].Name;
+        } else {
+            master_iface = master_settings.connection.interface_name;
         }
+
+        if (!master_iface)
+            return false;
+
+        var slave_settings;
+        if (main_connection) {
+            slave_settings = main_connection.Settings;
+
+            if (slave_settings.connection.master == master_settings.connection.uuid ||
+                slave_settings.connection.master == master_settings.connection.id ||
+                slave_settings.connection.master == master_iface)
+                return cockpit.resolve();
+
+            slave_settings.connection.slave_type = slave_type;
+            slave_settings.connection.master = master_iface;
+            slave_settings.connection.autoconnect = true;
+            delete slave_settings.ipv4;
+            delete slave_settings.ipv6;
+            delete slave_settings.team_port;
+            delete slave_settings.bridge_port;
+        } else {
+            slave_settings = { connection:
+                               { autoconnect: true,
+                                 interface_name: iface.Name,
+                                 slave_type: slave_type,
+                                 master: master_iface
+                               }
+                             };
+            complete_settings(slave_settings, iface.Device);
+        }
+
+        return settings_applier(model, iface.Device, main_connection)(slave_settings).then(function () {
+            // If the master already exists, activate or deactivate the slave immediatly so that
+            // the settings actually apply and the interface becomes a slave.  Otherwise we
+            // activate it later when the master is created.
+            if (master_connection) {
+                var master_dev = master_connection.Interfaces[0].Device;
+                if (master_dev && master_dev.ActiveConnection)
+                    return main_connection.activate(iface.Device);
+                else if (iface.Device.ActiveConnection)
+                    return iface.Device.ActiveConnection.deactivate();
+            }
+        });
+
     } else {
         /* Free the main_connection from being a slave if it is our slave.  If there is
          * no main_connection, we don't need to do anything.
          */
-        if (main_connection && main_connection.Settings.connection.master == master_settings.connection.uuid) {
+        if (main_connection && main_connection.Masters.indexOf(master_connection) != -1) {
             free_slave_connection(main_connection);
         }
     }
@@ -2737,25 +3427,80 @@ function set_slave(model, master_connection, master_settings, slave_type,
     return true;
 }
 
-function apply_master_slave(choices, model, master_connection, master_settings, slave_type) {
-    var settings_manager = model.get_settings();
+function apply_master_slave(choices, model, apply_master, master_connection, master_settings, slave_type) {
+    var active_settings = [ ];
+    var iface;
+
+    if (!master_connection) {
+        if (master_settings.bond &&
+            master_settings.bond.options &&
+            master_settings.bond.options.primary) {
+            iface = model.find_interface(master_settings.bond.options.primary);
+            if (iface && iface.MainConnection)
+                active_settings.push(iface.MainConnection.Settings);
+        } else {
+            choices.find('input[data-iface]').map(function (i, elt) {
+                var iface;
+                if ($(elt).prop('checked')) {
+                    iface = model.find_interface($(elt).attr("data-iface"));
+                    if (iface.Device && iface.Device.ActiveConnection && iface.Device.ActiveConnection.Connection) {
+                        active_settings.push(iface.Device.ActiveConnection.Connection.Settings);
+                    }
+                }
+            });
+        }
+
+        if (active_settings.length == 1) {
+            master_settings.ipv4 = $.extend(true, { }, active_settings[0].ipv4);
+            master_settings.ipv6 = $.extend(true, { }, active_settings[0].ipv6);
+        }
+
+        master_settings.connection.autoconnect_slaves = 1;
+    }
+
+    /* For bonds, the order in which slaves are added to their master matters since the first slaves gets to
+     * set the MAC address of the bond, which matters for DHCP.  We leave it to NetworkManager to determine
+     * the order in which slaves are added so that the order is consistent with what happens when the bond is
+     * activated the next time, such as after a reboot.
+     */
 
     function set_all_slaves() {
         var deferreds = choices.find('input[data-iface]').map(function (i, elt) {
-            return set_slave(model, master_connection, master_settings, slave_type,
-                             $(elt).attr("data-iface"), $(elt).prop('checked'));
+            return model.synchronize().then(function () {
+                return set_slave(model, master_connection, master_settings, slave_type,
+                                 $(elt).attr("data-iface"), $(elt).prop('checked'));
+            });
         });
         return cockpit.all(deferreds.get());
     }
 
-    function update_master() {
-        if (master_connection)
-            return master_connection.apply();
-        else
-            return settings_manager.add_connection(master_settings);
+    return set_all_slaves().then(function () {
+        return apply_master(master_settings);
+    });
+}
+
+function fill_mac_menu(menu, input, model) {
+    menu.empty();
+
+    function menu_append(title, value) {
+        menu.append(
+            $('<li class="presentation">').append(
+                $('<a>').
+                    text(title).
+                    click(function () {
+                        input.val(value).trigger("change");
+                    })));
     }
 
-    return update_master().then(set_all_slaves);
+    model.list_interfaces().forEach(function (iface) {
+        if (iface.Device && iface.Device.HwAddress && iface.Device.HwAddress !== "00:00:00:00:00:00")
+            menu_append(cockpit.format("$0 ($1)", iface.Device.HwAddress, iface.Name), iface.Device.HwAddress);
+    });
+
+    menu_append(_("Permanent"), "permanent");
+    menu_append(_("Preserve"), "preserve");
+    menu_append(_("Random"), "random");
+    menu_append(_("Stable"), "stable");
 }
 
 PageNetworkBondSettings.prototype = {
@@ -2771,9 +3516,8 @@ PageNetworkBondSettings.prototype = {
     },
 
     enter: function () {
-        $('#network-bond-settings-error').text("");
-        if (PageNetworkBondSettings.connection)
-            PageNetworkBondSettings.connection.freeze();
+        $('#network-bond-settings-error').hide();
+        this.settings = PageNetworkBondSettings.ghost_settings || PageNetworkBondSettings.connection.copy_settings();
         this.update();
     },
 
@@ -2796,11 +3540,10 @@ PageNetworkBondSettings.prototype = {
         var self = this;
         var model = PageNetworkBondSettings.model;
         var master =  PageNetworkBondSettings.connection;
-        var settings = PageNetworkBondSettings.settings;
-        var options = settings.bond.options;
+        var options = self.settings.bond.options;
 
         var slaves_element;
-        var mode_btn, primary_btn;
+        var mac_input, mode_btn, primary_btn;
         var monitoring_btn, interval_input, targets_input, updelay_input, downdelay_input;
 
         function change_slaves() {
@@ -2809,6 +3552,14 @@ PageNetworkBondSettings.prototype = {
             primary_btn = btn;
             select_btn_select(primary_btn, options.primary);
             change_mode();
+            self.slaves_changed = true;
+        }
+
+        function change_mac() {
+            console.log("mac");
+            if (!self.settings.ethernet)
+                self.settings.ethernet = { };
+            self.settings.ethernet.assigned_mac_address = mac_input.val();
         }
 
         function change_mode() {
@@ -2843,8 +3594,10 @@ PageNetworkBondSettings.prototype = {
             }
         }
 
+        var mac = (self.settings.ethernet && self.settings.ethernet.assigned_mac_address) || "";
         var body = $(Mustache.render(self.bond_settings_template, {
-                       interface_name: settings.bond.interface_name,
+                       interface_name: self.settings.bond.interface_name,
+                       assigned_mac_address: mac,
                        monitoring_interval: options.miimon || options.arp_interval || "100",
                        monitoring_targets: options.arp_ip_targets,
                        link_up_delay: options.updelay || "0",
@@ -2853,18 +3606,23 @@ PageNetworkBondSettings.prototype = {
         body.find('#network-bond-settings-interface-name-input').
                     change(function (event) {
                         var val = $(event.target).val();
-                        settings.bond.interface_name = val;
-                        settings.connection.interface_name = val;
+                        self.settings.bond.interface_name = val;
+                        self.settings.connection.id = val;
+                        self.settings.connection.interface_name = val;
                     });
         body.find('#network-bond-settings-members').
                       append(slaves_element = render_slave_interface_choices(model, master).
                              change(change_slaves));
+        fill_mac_menu(body.find('#network-bond-settings-mac-menu'),
+                      mac_input = body.find('#network-bond-settings-mac-input'),
+                      model);
+        mac_input.change(change_mac);
         body.find('#network-bond-settings-mode-select').
-                      append(mode_btn = select_btn(change_mode, bond_mode_choices));
+                      append(mode_btn = select_btn(change_mode, bond_mode_choices, "form-control"));
         body.find('#network-bond-settings-primary-select').
-                      append(primary_btn = slave_chooser_btn(change_mode, slaves_element));
+                      append(primary_btn = slave_chooser_btn(change_mode, slaves_element, "form-control"));
         body.find('#network-bond-settings-link-monitoring-select').
-                      append(monitoring_btn = select_btn(change_monitoring, bond_monitoring_choices));
+                      append(monitoring_btn = select_btn(change_monitoring, bond_monitoring_choices, "form-control"));
 
         interval_input = body.find('#network-bond-settings-monitoring-interval-input');
         interval_input.change(change_monitoring);
@@ -2875,40 +3633,353 @@ PageNetworkBondSettings.prototype = {
         downdelay_input = body.find('#network-bond-settings-link-down-delay-input');
         downdelay_input.change(change_monitoring);
 
+        body.find('#network-bond-settings-mac-row').toggle(model.at_least_version("1.6"));
+
         select_btn_select(mode_btn, options.mode);
         select_btn_select(monitoring_btn, (options.miimon !== 0)? "mii" : "arp");
         change_slaves();
         change_mode();
         change_monitoring();
 
+        self.slaves_changed = false;
+
         $('#network-bond-settings-body').html(body);
     },
 
     cancel: function() {
-        if (PageNetworkBondSettings.connection)
-            PageNetworkBondSettings.connection.reset();
         $('#network-bond-settings-dialog').modal('hide');
     },
 
     apply: function() {
-        apply_master_slave($('#network-bond-settings-body'),
-                           PageNetworkBondSettings.model,
-                           PageNetworkBondSettings.connection,
-                           PageNetworkBondSettings.settings,
-                           "bond").
-            done(function() {
-                $('#network-bond-settings-dialog').modal('hide');
-                if (PageNetworkBondSettings.done)
-                    PageNetworkBondSettings.done();
-            }).
-            fail(function (error) {
-                $('#network-bond-settings-error').text(error.message || error.toString());
-            });
+        var self = this;
+
+        function modify() {
+            return apply_master_slave($('#network-bond-settings-body'),
+                                      PageNetworkBondSettings.model,
+                                      PageNetworkBondSettings.apply_settings,
+                                      PageNetworkBondSettings.connection,
+                                      self.settings,
+                                      "bond").
+                then(function() {
+                    $('#network-bond-settings-dialog').modal('hide');
+                    if (PageNetworkBondSettings.connection)
+                        cockpit.location.go([ self.settings.connection.interface_name ]);
+                    if (PageNetworkBondSettings.done)
+                        return PageNetworkBondSettings.done();
+                }).
+                fail(function (error) {
+                    show_dialog_error('#network-bond-settings-error', error);
+                });
+        }
+
+        if (PageNetworkBondSettings.connection) {
+            with_settings_checkpoint(PageNetworkBondSettings.model, modify,
+                                     { devices: (self.slaves_changed ?
+                                                 [ ] : connection_devices(PageNetworkBondSettings.connection)),
+                                       hack_does_add_or_remove: self.slaves_changed,
+                                       rollback_on_failure: self.slaves_changed
+                                     });
+        } else {
+            with_checkpoint(
+                PageNetworkBondSettings.model,
+                modify,
+                {
+                    fail_text: _("Creating this bond will break the connection to the server, and will make the administration UI unavailable."),
+                    anyway_text: _("Create it"),
+                    hack_does_add_or_remove: true,
+                    rollback_on_failure: true
+                });
+        }
     }
 
 };
 
 function PageNetworkBondSettings() {
+    this._init();
+}
+
+PageNetworkTeamSettings.prototype = {
+    _init: function () {
+        this.id = "network-team-settings-dialog";
+        this.team_settings_template = $("#network-team-settings-template").html();
+        Mustache.parse(this.team_settings_template);
+    },
+
+    setup: function () {
+        $('#network-team-settings-cancel').click($.proxy(this, "cancel"));
+        $('#network-team-settings-apply').click($.proxy(this, "apply"));
+    },
+
+    enter: function () {
+        $('#network-team-settings-error').hide();
+        this.settings = PageNetworkTeamSettings.ghost_settings || PageNetworkTeamSettings.connection.copy_settings();
+        this.update();
+    },
+
+    show: function() {
+    },
+
+    leave: function() {
+    },
+
+    find_slave_con: function(iface) {
+        if (!PageNetworkTeamSettings.connection)
+            return null;
+
+        return array_find(PageNetworkTeamSettings.connection.Slaves, function (s) {
+            return s.Interfaces.indexOf(iface) >= 0;
+        }) || null;
+    },
+
+    update: function() {
+        var self = this;
+        var model = PageNetworkTeamSettings.model;
+        var master =  PageNetworkTeamSettings.connection;
+        var config = self.settings.team.config;
+
+        var runner_btn, balancer_btn, watch_btn;
+        var interval_input, target_input, updelay_input, downdelay_input;
+
+        if (!config)
+            self.settings.team.config = config = { };
+        if (!config.runner)
+            config.runner = { };
+        if (!config.runner.name)
+            config.runner.name = "activebackup";
+        if (!config.link_watch)
+            config.link_watch = { };
+        if (!config.link_watch.name)
+            config.link_watch.name = "ethtool";
+        if (config.link_watch.interval === undefined)
+            config.link_watch.interval = 100;
+        if (config.link_watch.delay_up === undefined)
+            config.link_watch.delay_up = 0;
+        if (config.link_watch.delay_down === undefined)
+            config.link_watch.delay_down = 0;
+
+        function change_slaves() {
+            self.slaves_changed = true;
+        }
+
+        function change_runner() {
+            config.runner.name = select_btn_selected(runner_btn);
+            balancer_btn.parents("tr").toggle(config.runner.name == "loadbalance" ||
+                                              config.runner.name == "lacp");
+        }
+
+        function change_balancer() {
+            var balancer = select_btn_selected(balancer_btn);
+            if (balancer == "none") {
+                if (config.runner.tx_balancer)
+                    delete config.runner.tx_balancer.name;
+            } else {
+                if (!config.runner.tx_balancer)
+                    config.runner.tx_balancer = { };
+                config.runner.tx_balancer.name = balancer;
+            }
+        }
+
+        function change_watch() {
+            var name = select_btn_selected(watch_btn);
+
+            interval_input.parents("tr").toggle(name != "ethtool");
+            target_input.parents("tr").toggle(name != "ethtool");
+            updelay_input.parents("tr").toggle(name == "ethtool");
+            downdelay_input.parents("tr").toggle(name == "ethtool");
+
+            config.link_watch = { "name": name };
+
+            if (name == "ethtool") {
+                config.link_watch.delay_up = updelay_input.val();
+                config.link_watch.delay_down = downdelay_input.val();
+            } else {
+                config.link_watch.interval = interval_input.val();
+                config.link_watch.target_host = target_input.val();
+            }
+        }
+
+        var body = $(Mustache.render(self.team_settings_template,
+                                     {
+                                         interface_name: self.settings.team.interface_name,
+                                         config: config
+                                     }));
+        body.find('#network-team-settings-interface-name-input').
+                    change(function (event) {
+                        var val = $(event.target).val();
+                        self.settings.team.interface_name = val;
+                        self.settings.connection.id = val;
+                        self.settings.connection.interface_name = val;
+                    });
+        body.find('#network-team-settings-members').
+            append(render_slave_interface_choices(model, master).change(change_slaves));
+        body.find('#network-team-settings-runner-select').
+            append(runner_btn = select_btn(change_runner, team_runner_choices, "form-control"));
+        body.find('#network-team-settings-balancer-select').
+            append(balancer_btn = select_btn(change_balancer, team_balancer_choices, "form-control"));
+        body.find('#network-team-settings-link-watch-select').
+            append(watch_btn = select_btn(change_watch, team_watch_choices, "form-control"));
+
+        interval_input = body.find('#network-team-settings-ping-interval-input');
+        interval_input.change(change_watch);
+        target_input = body.find('#network-team-settings-ping-target-input');
+        target_input.change(change_watch);
+        updelay_input = body.find('#network-team-settings-link-up-delay-input');
+        updelay_input.change(change_watch);
+        downdelay_input = body.find('#network-team-settings-link-down-delay-input');
+        downdelay_input.change(change_watch);
+
+        select_btn_select(runner_btn, config.runner.name);
+        select_btn_select(balancer_btn, (config.runner.tx_balancer && config.runner.tx_balancer.name) || "none");
+        select_btn_select(watch_btn, config.link_watch.name);
+        change_runner();
+        change_watch();
+
+        self.slaves_changed = false;
+
+        $('#network-team-settings-body').html(body);
+    },
+
+    cancel: function() {
+        $('#network-team-settings-dialog').modal('hide');
+    },
+
+    apply: function() {
+        var self = this;
+
+        function modify () {
+            return apply_master_slave($('#network-team-settings-body'),
+                                      PageNetworkTeamSettings.model,
+                                      PageNetworkTeamSettings.apply_settings,
+                                      PageNetworkTeamSettings.connection,
+                                      self.settings,
+                                      "team").
+                then(function() {
+                    $('#network-team-settings-dialog').modal('hide');
+                    if (PageNetworkTeamSettings.connection)
+                        cockpit.location.go([ self.settings.connection.interface_name ]);
+                    if (PageNetworkTeamSettings.done)
+                        return PageNetworkTeamSettings.done();
+                }).
+                fail(function (error) {
+                    show_dialog_error('#network-team-settings-error', error);
+                });
+        }
+
+        if (PageNetworkTeamSettings.connection) {
+            with_settings_checkpoint(PageNetworkTeamSettings.model, modify,
+                                     { devices: (self.slaves_changed ?
+                                                 [ ] : connection_devices(PageNetworkTeamSettings.connection)),
+                                       hack_does_add_or_remove: self.slaves_changed,
+                                       rollback_on_failure: self.slaves_changed
+                                     });
+        } else {
+            with_checkpoint(
+                PageNetworkTeamSettings.model,
+                modify,
+                {
+                    fail_text: _("Creating this team will break the connection to the server, and will make the administration UI unavailable."),
+                    anyway_text: _("Create it"),
+                    hack_does_add_or_remove: true,
+                    rollback_on_failure: true
+                });
+        }
+    }
+
+};
+
+function PageNetworkTeamSettings() {
+    this._init();
+}
+
+PageNetworkTeamPortSettings.prototype = {
+    _init: function () {
+        this.id = "network-teamport-settings-dialog";
+        this.team_port_settings_template = $("#network-team-port-settings-template").html();
+        Mustache.parse(this.team_port_settings_template);
+    },
+
+    setup: function () {
+        $('#network-teamport-settings-cancel').click($.proxy(this, "cancel"));
+        $('#network-teamport-settings-apply').click($.proxy(this, "apply"));
+    },
+
+    enter: function () {
+        $('#network-teamport-settings-error').hide();
+        this.settings = PageNetworkTeamPortSettings.ghost_settings || PageNetworkTeamPortSettings.connection.copy_settings();
+        this.update();
+    },
+
+    show: function() {
+    },
+
+    leave: function() {
+    },
+
+    update: function() {
+        var self = this;
+        var master_config = PageNetworkTeamPortSettings.master_settings.team.config;
+        var config = self.settings.team_port.config;
+
+        var ab_prio_input, ab_sticky_input, lacp_prio_input, lacp_key_input;
+
+        if (!config)
+            self.settings.team_port.config = config = { };
+
+        function change() {
+            // XXX - handle parse errors
+            if (master_config.runner.name == "activebackup") {
+                config.prio = parseInt(ab_prio_input.val(), 10);
+                config.sticky = ab_sticky_input.prop('checked');
+            } else if (master_config.runner.name == "lacp") {
+                config.lacp_prio = parseInt(lacp_prio_input.val(), 10);
+                config.lacp_key = parseInt(lacp_key_input.val(), 10);
+            }
+        }
+
+        var body = $(Mustache.render(self.team_port_settings_template, config));
+        ab_prio_input = body.find('#network-team-port-settings-ab-prio-input');
+        ab_prio_input.change(change);
+        ab_sticky_input = body.find('#network-team-port-settings-ab-sticky-input');
+        ab_sticky_input.change(change);
+        lacp_prio_input = body.find('#network-team-port-settings-lacp-prio-input');
+        lacp_prio_input.change(change);
+        lacp_key_input = body.find('#network-team-port-settings-lacp-key-input');
+        lacp_key_input.change(change);
+
+        ab_prio_input.parents("tr").toggle(master_config.runner.name == "activebackup");
+        ab_sticky_input.parents("tr").toggle(master_config.runner.name == "activebackup");
+        lacp_prio_input.parents("tr").toggle(master_config.runner.name == "lacp");
+        lacp_key_input.parents("tr").toggle(master_config.runner.name == "lacp");
+
+        $('#network-teamport-settings-body').html(body);
+    },
+
+    cancel: function() {
+        $('#network-teamport-settings-dialog').modal('hide');
+    },
+
+    apply: function() {
+        var self = this;
+        var model = PageNetworkTeamPortSettings.model;
+
+        function modify () {
+            return PageNetworkTeamPortSettings.apply_settings(self.settings).
+                then(function () {
+                    $('#network-teamport-settings-dialog').modal('hide');
+                    if (PageNetworkTeamPortSettings.done)
+                        return PageNetworkTeamPortSettings.done();
+                }).
+                fail(function (error) {
+                    show_dialog_error('#network-teamport-settings-error', error);
+                });
+        }
+
+        with_settings_checkpoint(model, modify,
+                                 { devices: connection_devices(PageNetworkTeamPortSettings.connection) });
+    }
+};
+
+function PageNetworkTeamPortSettings() {
     this._init();
 }
 
@@ -2925,9 +3996,8 @@ PageNetworkBridgeSettings.prototype = {
     },
 
     enter: function () {
-        $('#network-bridge-settings-error').text("");
-        if (PageNetworkBridgeSettings.connection)
-            PageNetworkBridgeSettings.connection.freeze();
+        $('#network-bridge-settings-error').hide();
+        this.settings = PageNetworkBridgeSettings.ghost_settings || PageNetworkBridgeSettings.connection.copy_settings();
         this.update();
     },
 
@@ -2949,10 +4019,14 @@ PageNetworkBridgeSettings.prototype = {
     update: function() {
         var self = this;
         var model = PageNetworkBridgeSettings.model;
-        var settings = PageNetworkBridgeSettings.settings;
-        var options = settings.bridge;
+        var con = PageNetworkBridgeSettings.connection;
+        var options = self.settings.bridge;
 
         var stp_input, priority_input, forward_delay_input, hello_time_input, max_age_input;
+
+        function change_slaves() {
+            self.slaves_changed = true;
+        }
 
         function change_stp() {
             // XXX - handle parse errors
@@ -2980,11 +4054,12 @@ PageNetworkBridgeSettings.prototype = {
                       change(function (event) {
                                 var val = $(event.target).val();
                                 options.interface_name = val;
-                                settings.connection.interface_name = val;
+                                self.settings.connection.id = val;
+                                self.settings.connection.interface_name = val;
                             });
         body.find('#network-bridge-settings-slave-interfaces').
-                      append(render_slave_interface_choices(model, PageNetworkBridgeSettings.connection)).
-                      parent().toggle(!PageNetworkBridgeSettings.connection);
+            append(render_slave_interface_choices(model, con).change(change_slaves)).
+            parent().toggle(!con);
         stp_input = body.find('#network-bridge-settings-stp-enabled-input');
         stp_input.change(change_stp);
         priority_input = body.find('#network-bridge-settings-stp-priority-input');
@@ -2997,29 +4072,56 @@ PageNetworkBridgeSettings.prototype = {
         max_age_input.change(change_stp);
 
         change_stp();
+
+        self.slaves_changed = false;
+
         $('#network-bridge-settings-body').html(body);
     },
 
     cancel: function() {
-        if (PageNetworkBridgeSettings.connection)
-            PageNetworkBridgeSettings.connection.reset();
         $('#network-bridge-settings-dialog').modal('hide');
     },
 
     apply: function() {
-        apply_master_slave($('#network-bridge-settings-body'),
-                           PageNetworkBridgeSettings.model,
-                           PageNetworkBridgeSettings.connection,
-                           PageNetworkBridgeSettings.settings,
-                           "bridge").
-            done(function() {
-                $('#network-bridge-settings-dialog').modal('hide');
-                if (PageNetworkBridgeSettings.done)
-                    PageNetworkBridgeSettings.done();
-            }).
-            fail(function (error) {
-                $('#network-bridge-settings-error').text(error.message || error.toString());
-            });
+        var self = this;
+
+        function modify () {
+            return apply_master_slave($('#network-bridge-settings-body'),
+                                      PageNetworkBridgeSettings.model,
+                                      PageNetworkBridgeSettings.apply_settings,
+                                      PageNetworkBridgeSettings.connection,
+                                      self.settings,
+                                      "bridge").
+                then(function() {
+                    $('#network-bridge-settings-dialog').modal('hide');
+                    if (PageNetworkBridgeSettings.connection)
+                        cockpit.location.go([ self.settings.connection.interface_name ]);
+                    if (PageNetworkBridgeSettings.done)
+                        return PageNetworkBridgeSettings.done();
+                }).
+                fail(function (error) {
+                    $('#network-bridge-settings-error').show().find('span').text(error.message || error.toString());
+                });
+        }
+
+        if (PageNetworkBridgeSettings.connection) {
+            with_settings_checkpoint(PageNetworkBridgeSettings.model, modify,
+                                     { devices: (self.slaves_changed ?
+                                                 [ ] : connection_devices(PageNetworkBridgeSettings.connection)),
+                                       hack_does_add_or_remove: self.slaves_changed,
+                                       rollback_on_failure: self.slaves_changed
+                                     });
+        } else {
+            with_checkpoint(
+                PageNetworkBridgeSettings.model,
+                modify,
+                {
+                    fail_text: _("Creating this bridge will break the connection to the server, and will make the administration UI unavailable."),
+                    anyway_text: _("Create it"),
+                    hack_does_add_or_remove: true,
+                    rollback_on_failure: true
+                });
+        }
     }
 
 };
@@ -3041,9 +4143,8 @@ PageNetworkBridgePortSettings.prototype = {
     },
 
     enter: function () {
-        $('#network-bridgeport-settings-error').text("");
-        if (PageNetworkBridgePortSettings.connection)
-            PageNetworkBridgePortSettings.connection.freeze();
+        $('#network-bridgeport-settings-error').hide();
+        this.settings = PageNetworkBridgePortSettings.ghost_settings || PageNetworkBridgePortSettings.connection.copy_settings();
         this.update();
     },
 
@@ -3055,9 +4156,7 @@ PageNetworkBridgePortSettings.prototype = {
 
     update: function() {
         var self = this;
-        var model = PageNetworkBridgePortSettings.model;
-        var settings = PageNetworkBridgePortSettings.settings;
-        var options = settings.bridge_port;
+        var options = self.settings.bridge_port;
 
         var priority_input, path_cost_input, hairpin_mode_input;
 
@@ -3084,35 +4183,27 @@ PageNetworkBridgePortSettings.prototype = {
     },
 
     cancel: function() {
-        if (PageNetworkBridgePortSettings.connection)
-            PageNetworkBridgePortSettings.connection.reset();
         $('#network-bridgeport-settings-dialog').modal('hide');
     },
 
     apply: function() {
         var self = this;
         var model = PageNetworkBridgePortSettings.model;
-        var master_settings = PageNetworkBridgePortSettings.settings;
-        var settings_manager = model.get_settings();
 
-        function show_error(error) {
-            $('#network-bridgeport-settings-error').text(error.message || error.toString());
+        function modify () {
+            return PageNetworkBridgePortSettings.apply_settings(self.settings).
+                then(function () {
+                    $('#network-bridgeport-settings-dialog').modal('hide');
+                    if (PageNetworkBridgePortSettings.done)
+                        return PageNetworkBridgePortSettings.done();
+                }).
+                fail(function (error) {
+                    show_dialog_error('#network-bridgeport-settings-error', error);
+                });
         }
 
-        function update_master() {
-            if (PageNetworkBridgePortSettings.connection)
-                return PageNetworkBridgePortSettings.connection.apply();
-            else
-                return settings_manager.add_connection(master_settings);
-        }
-
-        update_master().
-            done(function () {
-                $('#network-bridgeport-settings-dialog').modal('hide');
-                if (PageNetworkBridgePortSettings.done)
-                    PageNetworkBridgePortSettings.done();
-            }).
-            fail(show_error);
+        with_settings_checkpoint(model, modify,
+                                 { devices: connection_devices(PageNetworkBridgePortSettings.connection) });
     }
 
 };
@@ -3134,9 +4225,8 @@ PageNetworkVlanSettings.prototype = {
     },
 
     enter: function () {
-        $('#network-vlan-settings-error').text("");
-        if (PageNetworkVlanSettings.connection)
-            PageNetworkVlanSettings.connection.freeze();
+        $('#network-vlan-settings-error').hide();
+        this.settings = PageNetworkVlanSettings.ghost_settings || PageNetworkVlanSettings.connection.copy_settings();
         this.update();
     },
 
@@ -3149,8 +4239,7 @@ PageNetworkVlanSettings.prototype = {
     update: function() {
         var self = this;
         var model = PageNetworkVlanSettings.model;
-        var settings = PageNetworkVlanSettings.settings;
-        var options = settings.vlan;
+        var options = self.settings.vlan;
 
         var auto_update_name = true;
         var parent_btn, id_input, name_input;
@@ -3166,7 +4255,8 @@ PageNetworkVlanSettings.prototype = {
                 name_input.val(options.parent + "." + options.id);
 
             options.interface_name = name_input.val();
-            settings.connection.interface_name = options.interface_name;
+            self.settings.connection.id = options.interface_name;
+            self.settings.connection.interface_name = options.interface_name;
         }
 
         function change_name() {
@@ -3186,7 +4276,7 @@ PageNetworkVlanSettings.prototype = {
                        vlan_id: options.id || "1",
                        interface_name: options.interface_name
                    }));
-        parent_btn = select_btn(change, parent_choices);
+        parent_btn = select_btn(change, parent_choices, "form-control");
         body.find('#network-vlan-settings-parent-select').html(parent_btn);
         id_input = body.find('#network-vlan-settings-vlan-id-input').
                        change(change).
@@ -3204,40 +4294,194 @@ PageNetworkVlanSettings.prototype = {
     },
 
     cancel: function() {
-        if (PageNetworkVlanSettings.connection)
-            PageNetworkVlanSettings.connection.reset();
         $('#network-vlan-settings-dialog').modal('hide');
     },
 
     apply: function() {
         var self = this;
         var model = PageNetworkVlanSettings.model;
-        var master_settings = PageNetworkVlanSettings.settings;
-        var settings_manager = model.get_settings();
 
-        function show_error(error) {
-            $('#network-vlan-settings-error').text(error.message || error.toString());
+        function modify () {
+            return PageNetworkVlanSettings.apply_settings(self.settings).
+                then(function () {
+                    $('#network-vlan-settings-dialog').modal('hide');
+                    if (PageNetworkVlanSettings.connection)
+                        cockpit.location.go([ self.settings.connection.interface_name ]);
+                    if (PageNetworkVlanSettings.done)
+                        return PageNetworkVlanSettings.done();
+                }).
+                fail(function (error) {
+                    show_dialog_error('#network-vlan-settings-error', error);
+                });
         }
 
-        function update_master() {
-            if (PageNetworkVlanSettings.connection)
-                return PageNetworkVlanSettings.connection.apply();
-            else
-                return settings_manager.add_connection(master_settings);
-        }
-
-        update_master().
-            done(function () {
-                $('#network-vlan-settings-dialog').modal('hide');
-                if (PageNetworkVlanSettings.done)
-                    PageNetworkVlanSettings.done();
-            }).
-            fail(show_error);
+        if (PageNetworkVlanSettings.connection)
+            with_settings_checkpoint(model, modify, { hack_does_add_or_remove: true });
+        else
+            with_checkpoint(
+                PageNetworkVlanSettings.model,
+                modify,
+                {
+                    fail_text: _("Creating this VLAN will break the connection to the server, and will make the administration UI unavailable."),
+                    anyway_text: _("Create it"),
+                    hack_does_add_or_remove: true
+                });
     }
 
 };
 
 function PageNetworkVlanSettings() {
+    this._init();
+}
+
+PageNetworkMtuSettings.prototype = {
+    _init: function () {
+        this.id = "network-mtu-settings-dialog";
+        this.ethernet_settings_template = $("#network-mtu-settings-template").html();
+        Mustache.parse(this.ethernet_settings_template);
+    },
+
+    setup: function () {
+        $('#network-mtu-settings-cancel').click($.proxy(this, "cancel"));
+        $('#network-mtu-settings-apply').click($.proxy(this, "apply"));
+    },
+
+    enter: function () {
+        $('#network-mtu-settings-error').hide();
+        this.settings = PageNetworkMtuSettings.ghost_settings || PageNetworkMtuSettings.connection.copy_settings();
+        this.update();
+    },
+
+    show: function() {
+    },
+
+    leave: function() {
+    },
+
+    update: function() {
+        var self = this;
+        var options = self.settings.ethernet;
+
+        var body = $(Mustache.render(self.ethernet_settings_template, options));
+        $('#network-mtu-settings-body').html(body);
+        $('#network-mtu-settings-input').focus(function () {
+            $('#network-mtu-settings-custom').prop('checked', true);
+        });
+    },
+
+    cancel: function() {
+        $('#network-mtu-settings-dialog').modal('hide');
+    },
+
+    apply: function() {
+        var self = this;
+        var model = PageNetworkMtuSettings.model;
+
+        function show_error(error) {
+            show_dialog_error('#network-mtu-settings-error', error);
+        }
+
+        if ($("#network-mtu-settings-auto").prop('checked'))
+            self.settings.ethernet.mtu = 0;
+        else {
+            var mtu = $("#network-mtu-settings-input").val();
+            if (/^[0-9]+$/.test(mtu))
+                self.settings.ethernet.mtu = parseInt(mtu, 10);
+            else {
+                show_error(_("MTU must be a positive number"));
+                return;
+            }
+        }
+
+        function modify () {
+            return PageNetworkMtuSettings.apply_settings(self.settings).
+                then(function () {
+                    $('#network-mtu-settings-dialog').modal('hide');
+                    if (PageNetworkMtuSettings.done)
+                        return PageNetworkMtuSettings.done();
+                }).
+                fail(show_error);
+        }
+
+        with_settings_checkpoint(model, modify,
+                                 { devices: connection_devices(PageNetworkMtuSettings.connection) });
+    }
+
+};
+
+function PageNetworkMtuSettings() {
+    this._init();
+}
+
+PageNetworkMacSettings.prototype = {
+    _init: function () {
+        this.id = "network-mac-settings-dialog";
+        this.ethernet_settings_template = $("#network-mac-settings-template").html();
+        Mustache.parse(this.ethernet_settings_template);
+    },
+
+    setup: function () {
+        $('#network-mac-settings-cancel').click($.proxy(this, "cancel"));
+        $('#network-mac-settings-apply').click($.proxy(this, "apply"));
+    },
+
+    enter: function () {
+        $('#network-mac-settings-error').hide();
+        this.settings = PageNetworkMacSettings.ghost_settings || PageNetworkMacSettings.connection.copy_settings();
+        this.update();
+    },
+
+    show: function() {
+    },
+
+    leave: function() {
+    },
+
+    update: function() {
+        var self = this;
+        var options = self.settings.ethernet;
+
+        var body = $(Mustache.render(self.ethernet_settings_template, options));
+        $('#network-mac-settings-body').html(body);
+
+        fill_mac_menu($('#network-mac-settings-menu'),
+                      $('#network-mac-settings-input'),
+                      PageNetworkMacSettings.model);
+    },
+
+    cancel: function() {
+        $('#network-mac-settings-dialog').modal('hide');
+    },
+
+    apply: function() {
+        var self = this;
+        var model = PageNetworkMacSettings.model;
+
+        function show_error(error) {
+            show_dialog_error('#network-mac-settings-error', error);
+        }
+
+        if (!self.settings.ethernet)
+            self.settings.ethernet = { };
+        self.settings.ethernet.assigned_mac_address = $("#network-mac-settings-input").val();
+
+        function modify () {
+            return PageNetworkMacSettings.apply_settings(self.settings).
+                then(function () {
+                    $('#network-mac-settings-dialog').modal('hide');
+                    if (PageNetworkMacSettings.done)
+                        return PageNetworkMacSettings.done();
+                }).
+                fail(show_error);
+        }
+
+        with_settings_checkpoint(model, modify,
+                                 { devices: connection_devices(PageNetworkMacSettings.connection) });
+    }
+
+};
+
+function PageNetworkMacSettings() {
     this._init();
 }
 
@@ -3284,18 +4528,20 @@ function init() {
     function navigate() {
         var path = cockpit.location.path;
 
-        if (path.length === 0) {
-            page_hide(interface_page);
-            page_show (overview_page);
-        } else if (path.length === 1) {
-            page_hide(overview_page);
-            page_show(interface_page, path[0]);
-        } else { /* redirect */
-            console.warn("not a networking location: " + path);
-            cockpit.location = '';
-        }
+        model.synchronize().then(function() {
+            if (path.length === 0) {
+                page_hide(interface_page);
+                page_show(overview_page);
+            } else if (path.length === 1) {
+                page_hide(overview_page);
+                page_show(interface_page, path[0]);
+            } else { /* redirect */
+                console.warn("not a networking location: " + path);
+                cockpit.location = '';
+            }
 
-        $("body").show();
+            $("body").show();
+        });
     }
 
     cockpit.translate();
@@ -3310,14 +4556,16 @@ function init() {
 
     dialog_setup(new PageNetworkIpSettings());
     dialog_setup(new PageNetworkBondSettings());
+    dialog_setup(new PageNetworkTeamSettings());
+    dialog_setup(new PageNetworkTeamPortSettings());
     dialog_setup(new PageNetworkBridgeSettings());
     dialog_setup(new PageNetworkBridgePortSettings());
     dialog_setup(new PageNetworkVlanSettings());
+    dialog_setup(new PageNetworkMtuSettings());
+    dialog_setup(new PageNetworkMacSettings());
 
     $(cockpit).on("locationchanged", navigate);
     navigate();
 }
 
 $(init);
-
-});

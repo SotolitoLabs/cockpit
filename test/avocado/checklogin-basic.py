@@ -41,7 +41,7 @@ class checklogin_basic(Test):
         b = c.browser
 
         # Setup users and passwords
-        setup_cmd = "useradd %s -c 'Barney Bär'; echo %s:abcdefg | chpasswd" % (
+        setup_cmd = "useradd %s -s /bin/bash -c 'Barney Bär'; echo %s:abcdefg | chpasswd" % (
             username, username)
         cleanup_cmd = "userdel -r %s" % username
         c.run_shell_command(setup_cmd, cleanup_cmd)
@@ -57,8 +57,10 @@ class checklogin_basic(Test):
         b.wait_visible("#login")
 
         def login(user, password):
+            b.wait_not_present("#login-button:disabled")
             b.set_val('#login-user-input', user)
             b.set_val('#login-password-input', password)
+            b.set_checked('#authorized-input', True)
             b.click('#login-button')
 
         # Try to login as a non-existing user
@@ -76,7 +78,7 @@ class checklogin_basic(Test):
         # Login as admin
         b.open("/system")
         login("admin", "foobar")
-        with b.wait_timeout(10) as r:
+        with b.wait_timeout(10):
             b.expect_load()
         b.wait_present("#content")
         b.wait_text('#content-user-name', 'Administrator')
@@ -87,6 +89,7 @@ class checklogin_basic(Test):
         b.wait_text('#content-user-name', 'Administrator')
 
         b.click("#content-user-name")
+        b.wait_visible('#go-account')
         b.click('#go-account')
         b.enter_page("/users")
         b.wait_text("#account-user-name", "admin")

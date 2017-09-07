@@ -1,0 +1,14 @@
+{
+    "version": "@VERSION@",
+    "requires": {
+	"cockpit": "138"
+    },
+
+    "dashboard": {
+        "index": {
+            "label": "Dashboard",
+            "order": 10,
+            "wants": "multiple-machines"
+        }
+    }
+}

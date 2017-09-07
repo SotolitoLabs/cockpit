@@ -17,8 +17,6 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* globals d3 */
-
 /* This is here to support cockpit.jump
  * If this ever needs to be used outsite of cockpit
  * then we'll need abstract this away in kube-client-cockpit
@@ -27,6 +25,26 @@
 
 (function() {
     "use strict";
+
+    var angular = require('angular');
+    var d3 = require('d3');
+    require('angular-route');
+    require('angular-dialog.js');
+
+    require('./charts');
+    require('./date');
+    require('./kube-client');
+    require('./listing');
+    require('./utils');
+
+    require('../views/nodes-page.html');
+    require('../views/node-page.html');
+    require('../views/node-body.html');
+    require('../views/node-capacity.html');
+    require('../views/node-stats.html');
+    require('../views/node-add.html');
+    require('../views/node-delete.html');
+    require('../views/node-alerts.html');
 
     angular.module('kubernetes.nodes', [
         'ngRoute',
@@ -69,17 +87,17 @@
         'nodeData',
         'nodeStatsSummary',
         '$timeout',
-        '$window',
+        'KubeBrowserStorage',
         function($scope, loader, select,  ListingState, filterService,
                  $routeParams, $location, actions, nodeData, statsSummary,
-                 $timeout, $window) {
+                 $timeout, browser) {
             var target = $routeParams["target"] || "";
             $scope.target = target;
 
             $scope.stats = statsSummary.newNodeStatsSummary();
 
-            var c = loader.listen(function() {
-                var timer, selection;
+            loader.listen(function() {
+                var selection;
                 $scope.nodes = select().kind("Node");
                 if (target) {
                     selection = select().kind("Node").name(target);
@@ -87,13 +105,13 @@
                 } else {
                     selection = $scope.nodes;
                 }
-                $scope.stats.trackNodes(selection);
-            });
+                if ($scope.stats)
+                    $scope.stats.trackNodes(selection);
+            }, $scope);
 
-            loader.watch("Node");
+            loader.watch("Node", $scope);
 
             $scope.$on("$destroy", function() {
-                c.cancel();
                 if ($scope.stats)
                     $scope.stats.close();
                 $scope.stats = null;
@@ -144,7 +162,7 @@
             };
 
             $scope.jump = function (node) {
-                var host, key, ip;
+                var host, ip;
                 if (!node || !node.spec)
                     return;
 
@@ -154,7 +172,7 @@
                 if (ip == "127.0.0.1" || ip == "::1") {
                     ip = "localhost";
                 } else {
-                    $window.sessionStorage.setItem(
+                    browser.sessionStorage.setItem(
                         "v1-session-machine/" + ip,
                         JSON.stringify({"address": ip,
                                         "label": host,
@@ -531,7 +549,7 @@
                 };
 
                 self.close = function close() {
-                    var name, body;
+                    var name;
                     if (interval)
                         $interval.cancel(interval);
 
@@ -691,12 +709,15 @@
                     var tabs = {
                         cpu: {
                             label: _("CPU"),
+                            tooltip: function(r) { return format.format(_("CPU Utilization: $0%"), Math.round((r.used / r.total) * 100)); }
                         },
                         memory: {
                             label: _("Memory"),
+                            tooltip: function(r) { return format.format(_("Memory Utilization: $0%"), Math.round((r.used / r.total) * 100)); }
                         },
                         fs: {
                             label: _("Disk"),
+                            tooltip: function(r) { return format.format(_("Disk Utilization: $0%"), Math.round((r.used / r.total) * 100)); }
                         }
                     };
 
@@ -729,7 +750,7 @@
 
                         angular.forEach(nodes, function(node) {
                             var result, value, name;
-
+                            var tooltip = _("Unknown");
                             if (node && node.metadata)
                                 name = node.metadata.name;
 
@@ -742,8 +763,11 @@
 
                             if (value === undefined)
                                 value = -1;
+                            else
+                                tooltip = tabs[currentTab].tooltip(result);
 
-                            data.push({ value: value, name: name });
+                            data.push({ value: value, name: name,
+                                        tooltip: tooltip });
                         });
 
                         data.sort(function (a, b) {
@@ -841,9 +865,18 @@
                             $scope.$applyAsync(function() {
                                 $scope.smallTitle = types[type].smallTitle(result);
                                 $scope.largeTitle = types[type].largeTitle(result);
+                                var u = Math.round((result.used / result.total) * 100);
+                                var l = 100 - u;
+                                var freeText = translate.ngettext("$0% Free",
+                                                                  "$0% Free", u);
+                                var usedText = translate.ngettext("$0% Used",
+                                                                  "$0% Used", u);
                                 $scope.data = [
-                                    { value: result.total - result.used, color: "#bbbbbb" },
+                                    { value: result.total - result.used,
+                                      tooltip : format.format(freeText, l),
+                                      color: "#bbbbbb"},
                                     { value: result.used,
+                                      tooltip : format.format(usedText, u),
                                       color: colorFunc(result.used / result.total) }
                                 ];
                             });

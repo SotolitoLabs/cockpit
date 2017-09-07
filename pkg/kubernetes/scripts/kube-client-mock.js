@@ -17,6 +17,8 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
+var angular = require("angular");
+
 (function() {
     var kubeLast = 100;
 
@@ -410,6 +412,8 @@
         return true;
     }
 
+    var unique = 0;
+
     angular.module("kubeClient.mock", [
         "kubeClient",
     ])
@@ -567,7 +571,5 @@
             };
         }
     ]);
-
-    var unique = 0;
 
 }());

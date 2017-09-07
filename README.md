@@ -1,33 +1,33 @@
-[![travis CI build status](https://travis-ci.org/cockpit-project/cockpit.svg?branch=master)](https://travis-ci.org/cockpit-project/cockpit) <br />
-[![Fedora 23 build status](https://fedorapeople.org/groups/cockpit/status/fedora-23.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-23.html) <br />
-[![Fedora 24 build status](https://fedorapeople.org/groups/cockpit/status/fedora-24.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-24.html) <br />
-[![Fedora 23 Atomic Host status](https://fedorapeople.org/groups/cockpit/status/fedora-atomic.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-atomic.html) <br />
-[![Fedora 24 Testing status](https://fedorapeople.org/groups/cockpit/status/fedora-testing.svg)](https://fedorapeople.org/groups/cockpit/status/fedora-testing.html) <br />
-[![RHEL 7 build status](https://fedorapeople.org/groups/cockpit/status/rhel-7.svg)](https://fedorapeople.org/groups/cockpit/status/rhel-7.html) <br />
-[![Debian Unstable build status](https://fedorapeople.org/groups/cockpit/status/debian-unstable.svg)](https://fedorapeople.org/groups/cockpit/status/debian-unstable.html)
+[![semaphore ci build status](https://semaphoreci.com/api/v1/cockpit/cockpit/branches/master/badge.svg)](https://semaphoreci.com/cockpit/cockpit) <br />
 
 # Cockpit
-**A remote manager for GNU/Linux servers**
+**A sysadmin login session in a web browser**
 
-### About
+[cockpit-project.org](http://cockpit-project.org/)
+
 Cockpit is an interactive server admin interface. It is easy to use and very light weight.
+Cockpit interacts directly with the operating system from a real Linux session in a browser.
 
-#### Easy to use
-Cockpit is perfect for new sysadmins, allowing them to easily perform simple tasks such as storage administration, inspecting journals and starting and stopping services.
+### Using Cockpit
 
-#### No interference
-Jumping between the terminal and the web tool is no problem. A service started via Cockpit can be stopped via the terminal. Likewise, if an error occurs in the terminal, it can be seen in the Cockpit journal interface.
+You can [install Cockpit](http://cockpit-project.org/running.html) on many Linux operating
+systems including Debian, Fedora and RHEL.
 
-#### Multi-server
-You can monitor and administer several servers at the same time. Just add them with a single click and your machine will look after its buddies.
+Cockpit makes Linux discoverable, allowing sysadmins to easily perform tasks such as starting
+containers, storage administration, network configuration, inspecting logs and so on.
+
+Jumping between the terminal and the web tool is no problem. A service started via Cockpit
+can be stopped via the terminal. Likewise, if an error occurs in the terminal, it can be seen
+in the Cockpit journal interface.
+
+On the Cockpit dashboard, you can easily add other machines with Cockpit installed that are
+accessible via SSH.
 
 ### Development
 
- * [Building Cockpit](HACKING.md)
+ * [Making changes to Cockpit](HACKING.md)
+ * [Adding a new part of Cockpit](https://github.com/cockpit-project/cockpit/wiki/Hackfest)
  * IRC Channel: #cockpit on FreeNode
- * [Mailing List](https://lists.fedorahosted.org/pipermail/cockpit-devel/)
- * [Guiding Principles](http://stef.thewalter.net/ideals-of-cockpit.html)
-
-### Warning
-Unless you got Cockpit via a stable release of an OS, treat it as pre-release
-software. We recommend installing pre-release versions in a virtual machine.
+ * [Mailing List](https://lists.fedorahosted.org/admin/lists/cockpit-devel.lists.fedorahosted.org/)
+ * [Guiding Principles](http://cockpit-project.org/ideals.html)
+ * [Release Notes](http://cockpit-project.org/blog/category/release.html)

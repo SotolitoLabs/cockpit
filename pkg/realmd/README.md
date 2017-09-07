@@ -12,8 +12,8 @@ To contribute to this component, run a test domain which ends
 up being rather easy. Install the stuff in ```test/README``` near the
 top. And then do the following:
 
-    $ sudo test/vm-prep
-    $ test/vm-run ipa
+    $ sudo bots/image-prep
+    $ bots/image-run --network ipa
 
 That runs an IPA domain. Now in another terminal do the following:
 
@@ -50,7 +50,7 @@ above if you do not.
 Use the following guide to configure things, with more troubleshooting advice
 below:
 
-http://files.cockpit-project.org/guide/latest/sso.html
+http://cockpit-project.org/guide/latest/sso.html
 
 **BUG:** The host name of the computer Cockpit is running on should end with
 the domain name. If it does not, then rename the computer Cockpit is running on:
@@ -69,7 +69,7 @@ the computer running Cockpit.
             --header 'Referer: https://f0.cockpit.lan/ipa' \
             --header "Content-Type: application/json" \
             --header "Accept: application/json" \
-            --data '{"params": [["HTTP/my-server.cockpit.lan@COCKPIT.LAN"], {"raw": false, "all": false, "version": "2.101", "force": true, "no_members": false}], "method": "service_add", "id": 0}'
+            --data '{"params": [["HTTP/my-server.cockpit.lan@COCKPIT.LAN"], {"raw": false, "all": false, "version": "2.101", "force": true, "no_members": false, "ipakrbokasdelegate": true}], "method": "service_add", "id": 0}'
     # ipa-getkeytab -q -s f0.cockpit.lan -p HTTP/my-server.cockpit.lan \
             -k /etc/krb5.keytab
 
@@ -85,5 +85,21 @@ with the domain user:
 
 If you thought that was nasty and tiresome, it's because it is at present :S
 
+## Using delegated credentials
 
+Cockpit can delegate forwardable credentials. Make sure to specify you want them
+during kinit:
 
+    $ kinit -f admin@COCKPIT.LAN
+    $ klist -f
+    Default principal: admin@COCKPIT.LAN
+    ...
+	Flags: FIA
+
+Use the IPA GUI to setup "Trusted for delegation" for the host and service that
+Cockpit is running on. Make sure to tell the browser to delegate credentials
+as seen in the guide:
+
+http://cockpit-project.org/guide/latest/sso.html
+
+Ze goggles, zey do nothing!

@@ -1,10 +1,9 @@
-define([
-    "jquery",
-    "base1/cockpit",
-    "data!./ssh-list-public-keys.sh",
-    "data!./ssh-add-public-key.sh"
-], function($, cockpit, lister, adder) {
-    var module = { };
+(function() {
+    var cockpit = require("cockpit");
+
+    var lister = require("raw!./ssh-list-public-keys.sh");
+    var adder = require("raw!./ssh-add-public-key.sh");
+
     var _ = cockpit.gettext;
 
     function AuthorizedKeys (user_name, home_dir) {
@@ -14,6 +13,8 @@ define([
         var file = null;
         var watch = null;
         var last_tag = null;
+
+        cockpit.event_target(self);
 
         self.keys = [];
         self.state = "loading";
@@ -28,7 +29,7 @@ define([
                 self.state = "failed";
                 console.warn("Error proccessing authentication keys: "+ ex);
             }
-            $(self).triggerHandler("changed");
+            self.dispatchEvent("changed");
         }
 
         function update_keys(keys, tag) {
@@ -37,7 +38,7 @@ define([
 
             self.keys = keys;
             self.state = "ready";
-            $(self).triggerHandler("changed");
+            self.dispatchEvent("changed");
         }
 
         /*
@@ -49,7 +50,7 @@ define([
         var PUBKEY_RE = /^(\S+)\s+(\S+)\s+(.*)\((\S+)\)$/;
 
         function parse_pubkeys(input) {
-            var df = $.Deferred();
+            var df = cockpit.defer();
             var keys = [];
 
             cockpit.script(lister)
@@ -61,14 +62,18 @@ define([
                         obj = { raw: lines[i + 1] };
                         keys.push(obj);
                         match = lines[i].trim().match(PUBKEY_RE);
-                        obj.valid = !!match;
+                        obj.valid = !!match && !!obj.raw;
                         if (match) {
                             obj.size = match[1];
                             obj.fp = match[2];
                             obj.comment = match[3].trim();
-                            if (obj.comment == "authorized_keys")
+                            if (obj.comment == "authorized_keys" || obj.comment == "no comment")
                                 obj.comment = null;
                             obj.algorithm = match[4];
+
+                            /* Old ssh-keygen versions need us to find the comment ourselves */
+                            if (!obj.comment && obj.raw)
+                                obj.comment = obj.raw.split(" ").splice(0, 2).join(" ") || null;
                         }
                     }
                 })
@@ -95,14 +100,14 @@ define([
         }
 
         self.add_key = function(key) {
-            var df = $.Deferred();
+            var df = cockpit.defer();
             df.notify(_("Validating key"));
             parse_pubkeys(key)
                 .done(function(keys) {
                     var obj = keys[0];
                     if (obj && obj.valid) {
                         df.notify(_("Adding key"));
-                        cockpit.script(adder, [ user_name, home_dir ], { superuser: "try" })
+                        cockpit.script(adder, [ user_name, home_dir ], { superuser: "try", err: "message" })
                             .input(obj.raw + "\n")
                             .done(function() {
                                 df.resolve();
@@ -151,9 +156,9 @@ define([
         watch = file.watch(parse_keys);
     }
 
-    module.instance = function instance(user_name, home_dir) {
-        return new AuthorizedKeys(user_name, home_dir);
+    module.exports = {
+        instance: function instance(user_name, home_dir) {
+            return new AuthorizedKeys(user_name, home_dir);
+        }
     };
-
-    return module;
-});
+}());

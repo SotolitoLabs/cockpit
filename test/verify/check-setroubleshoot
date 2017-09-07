@@ -21,10 +21,6 @@
 import parent
 from testlib import *
 
-import os
-import subprocess
-import unittest
-
 FIX_AUDITD = """
 set -e
 mkdir -p /var/log/audit
@@ -54,10 +50,9 @@ ssh -o StrictHostKeyChecking=no -o 'BatchMode=yes' -i ~/.ssh/test-avc-rsa localh
 mv -f ~/.ssh/authorized_keys.test-avc ~/.ssh/authorized_keys
 """
 
-@unittest.skipIf("rhel" in os.environ.get("TEST_OS", ""), "DBUS API of setroubleshoot too old.")
-@unittest.skipIf("debian" in os.environ.get("TEST_OS", ""), "No setroubleshoot on debian.")
-@unittest.skipIf("atomic" in os.environ.get("TEST_OS", ""), "No setroubleshoot on atomic systems.")
+@skipImage("DBus API of setroubleshoot too old", "centos-7")
 class TestSelinux(MachineCase):
+    @skipImage("No setroubleshoot", "continuous-atomic", "debian-stable", "debian-testing", "fedora-atomic", "rhel-atomic", "ubuntu-1604", "ubuntu-stable")
     def testTroubleshootAlerts(self):
         b = self.browser
 
@@ -73,7 +68,7 @@ class TestSelinux(MachineCase):
         # trigger an alert
         self.machine.execute(script=SELINUX_ALERT_SCRIPT)
 
-        row_selector = "tbody:contains('SELinux is preventing ls from read access on the directory')"
+        row_selector = "tbody:contains('ls from read access on the directory')"
 
         # wait for the alert to appear
         b.wait_present(row_selector)
@@ -102,11 +97,25 @@ class TestSelinux(MachineCase):
         # wait until it is collapsed
         b.wait_not_in_text(row_selector, "You must tell SELinux about this by enabling the 'httpd_read_user_content' boolean.")
 
+        # now expand again so we can dismiss the alert
+        b.click(toggle_selector)
+        b.wait_present(row_selector + " button.pficon-delete")
+
+        # HACK: we need updated test images for delete to work
+        # dismiss the alert
+        #b.click(row_selector + " button.pficon-delete")
+        #b.wait_not_present(row_selector)
+
+        #b.wait_in_text("body", "No SELinux alerts.")
+
         #########################################################
         # trigger a fixable alert
         self.machine.execute(script=SELINUX_FIXABLE_ALERT_SCRIPT)
 
-        row_selector = "tbody:contains('SELinux is preventing sshd from open access on the file')"
+        row_selector = "tbody:contains('sshd from open access on the file')"
+
+        if self.machine.image in ["rhel-7", "rhel-7-4"]:
+            self.skipTest("Unable to fix automatically, setroubleshoot too old")
         # wait for the alert to appear
         b.wait_present(row_selector)
 
@@ -125,9 +134,68 @@ class TestSelinux(MachineCase):
         btn_sel = "div.list-group-item:contains('you can run restorecon') button"
         b.click(btn_sel)
 
-        # there's a known issue where setroubleshoot is unable to run the fix
-        #b.wait_in_text(row_selector, "Successfully ran /sbin/restorecon /etc/ssh/ssh_host_ecdsa_key")
+        # HACK there's a known issue where setroubleshoot is unable to run the fix
+        # the fix should be applied
         b.wait_in_text(row_selector, "Solution applied successfully:")
+        # b.wait_in_text(row_selector, "Successfully ran /sbin/restorecon")
+
+        # HACK: we need updated test images for delete to work
+        # dismiss the alert
+        #b.click(row_selector + " button.pficon-delete")
+        #b.wait_not_present(row_selector)
+
+        #b.wait_in_text("body", "No SELinux alerts.")
+
+    @skipImage("No cockpit-selinux", "debian-stable", "debian-testing", "continuous-atomic", "fedora-atomic", "ubuntu-1604", "ubuntu-stable")
+    def testEnforcingToggle(self):
+        b = self.browser
+        m = self.machine
+
+        # HACK: http://bugzilla.redhat.com/show_bug.cgi?id=1346364
+        # This issue happens when selinux item is in kickstart
+        # as happens in our virt-builder and virt-install usage
+        m.execute("chmod ugo+r /etc/selinux/config")
+
+        self.login_and_go("/selinux/setroubleshoot")
+
+        #########################################################
+        # wait for the page to be present
+        b.wait_in_text("body", "SELinux Policy")
+
+        # SELinux should be enabled and enforcing at the beginning
+        on_off_selector_active = "div.btn-onoff-ct label.active"
+        b.wait_in_text(on_off_selector_active, "On")
+        m.execute("getenforce | grep -q 'Enforcing'")
+
+        # now set to permissive using the ui button
+        b.click("div.btn-onoff-ct label.active span")
+        b.wait_in_text(on_off_selector_active, "Off")
+        m.execute("getenforce | grep -q 'Permissive'")
+
+        # when in permissive mode, expect a warning
+        b.wait_in_text("div.selinux-policy-ct", "Setting deviates")
+
+        # switch back using cli, ui should react
+        m.execute("setenforce 1")
+        b.wait_in_text(on_off_selector_active, "On")
+
+        # warning should disappear
+        b.wait_not_in_text("div.selinux-policy-ct", "Setting deviates")
+
+        # Switch to another page
+        b.switch_to_top()
+        b.go("/system")
+        b.enter_page("/system")
+
+        # Now on another page change the status
+        m.execute("setenforce 0")
+
+        # Switch back into the page and we get the updated status
+        b.switch_to_top()
+        b.go("/selinux/setroubleshoot")
+        b.enter_page("/selinux/setroubleshoot")
+        b.wait_in_text(on_off_selector_active, "Off")
+        b.wait_in_text("div.selinux-policy-ct", "Setting deviates")
 
 if __name__ == '__main__':
     test_main()

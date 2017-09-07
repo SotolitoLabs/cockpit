@@ -17,16 +17,19 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "docker/docker",
-    "docker/bar",
-    "shell/controls",
-], function($, cockpit, Mustache, docker, bar) {
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var Mustache = require("mustache");
+    require("patterns");
+
+    var docker = require("./docker");
+    var bar = require("./bar");
+
     var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
 
     var util = { };
 
@@ -58,6 +61,24 @@ define([
             return util.quote_cmdline ((container.Config.Entrypoint || []).concat(container.Config.Cmd || []));
         else
             return container.Command;
+    };
+
+    /*
+     * Recent versions of docker have a 'Status' field in the state,
+     * but earlier versions have distinct fields which we need to combine.
+     */
+    util.render_container_status = function render_container_status(state) {
+        if (state.Status)
+            return state.Status;
+        if (state.Running)
+            return "running";
+        if (state.Paused)
+            return "paused";
+        if (state.Restarting)
+            return "restarting";
+        if (state.FinishedAt && state.FinishedAt.indexOf("0001") === 0)
+            return "created";
+        return "exited";
     };
 
     util.render_container_name = function render_container_name (name) {
@@ -118,6 +139,9 @@ define([
     };
 
     util.format_memory_and_limit = function format_memory_and_limit(usage, limit) {
+        if (usage === undefined || isNaN(usage))
+            return "";
+
         var mtext = "";
         var units = 1024;
         var parts;
@@ -161,7 +185,7 @@ define([
         var danger_button = $('<button class="btn btn-default btn-control-ct fa fa-check enable-danger">')
             .toggle(false)
             .on("click", callback);
-        $(id + ' th.container-col-actions').append(danger_button);
+        $(id + ' th.container-column-actions').append(danger_button);
         $(parent_id)[0].addEventListener("click", function(ev) {
             if ($(ev.target).parents(id).length === 0 &&
                 $(id + ' button.enable-danger').hasClass('active'))
@@ -189,7 +213,6 @@ define([
         var cputext;
         var memuse, memlimit;
         var membar, memtext, memtextstyle;
-        var barvalue;
 
         if (container.State && container.State.Running) {
             cputext = util.format_cpu_usage(container.CpuUsage);
@@ -240,14 +263,14 @@ define([
                     return false;
                 });
             tr = $('<tr>', { 'id': prefix + id }).append(
-                $('<td class="container-col-name">'),
-                $('<td class="container-col-image">'),
-                $('<td class="container-col-command">'),
-                $('<td class="container-col-cpu">'),
-                $('<td class="container-col-memory-graph">').append(bar.create("containers-containers")),
-                $('<td class="container-col-memory-text">'),
-                $('<td class="container-col-danger cell-buttons">').append(btn_delete, img_waiting),
-                $('<td class="container-col-actions cell-buttons">').append(btn_play, btn_stop, img_waiting.clone()));
+                $('<td class="container-column-name">'),
+                $('<td class="container-column-image">'),
+                $('<td class="container-column-command">'),
+                $('<td class="container-column-cpu">'),
+                $('<td class="container-column-memory-graph">').append(bar.create("containers-containers")),
+                $('<td class="container-column-memory-text">'),
+                $('<td class="container-column-danger cell-buttons">').append(btn_delete, img_waiting),
+                $('<td class="container-column-actions cell-buttons">').append(btn_play, btn_stop, img_waiting.clone()));
 
             tr.on('click', function(event) {
                 cockpit.location.go([ id ]);
@@ -258,7 +281,12 @@ define([
 
         var row = tr.children("td");
         $(row[0]).text(util.render_container_name(container.Name));
-        $(row[1]).text(container.Image);
+
+        var image = container.Image;
+        if (container.ImageID && image == container.ImageID)
+            image = docker.truncate_id(image);
+        $(row[1]).text(image);
+
         $(row[2]).text(util.render_container_cmdline(container));
         $(row[3]).text(cputext);
         util.update_memory_bar($(row[4]).children("div").toggle(membar), memuse, memlimit);
@@ -295,128 +323,162 @@ define([
         bar.update();
     };
 
-    /* Memory limit slider/checkbox interaction happens here */
-    util.MemorySlider = function MemorySlider(sel, min, max) {
+    /* Slider/text/checkbox interaction happens here */
+    function Slider(sel, min, max, parse, format) {
         var self = this;
-        var slider, desc;
-        var limit;
+        var slider, input, check;
+        var updating = false;
+        var data;
 
-        function update_limit() {
-            if (slider.disabled) {
-                limit = undefined;
-                return _("unlimited");
-            }
-            limit = Math.round(slider.value * max);
-            if (limit < min)
-                limit = min;
-            return cockpit.format_bytes(limit, 1024);
-        }
-
-        /* Slider to limit amount of memory */
-        slider = sel.find("div.slider").
-            on('change', function() {
-                $(desc).text(update_limit());
-            })[0];
-
-        /* Description of how much memory is selected */
-        desc = sel.find("span")[0];
-
-        /* Unlimited checkbox */
-        var check = sel.find("input[type='checkbox']").
-            on('change', function() {
-                $(slider).attr("disabled", !this.checked);
-                $(desc).toggleClass("disabled", !this.checked);
-                $(desc).text(update_limit());
-                $(slider).trigger("change");
-            })[0];
-
-        Object.defineProperty(this, "value", {
-            get: function() {
-                return limit;
-            },
-            set: function(v) {
-                if (v !== undefined) {
-                    $(slider).
-                        prop("value", v / max).
-                        trigger("change");
-                }
-                $(check).
-                    prop("checked", v !== undefined).
-                    trigger("change");
-            }
-        });
-
-        Object.defineProperty(this, "max", {
-            get: function() {
-                return max;
-            },
-            set: function(v) {
-                var old_max = max;
-                max = v;
-                $(slider).
-                    prop("value", (slider.value*old_max) / max).
-                    trigger("change");
-            }
-        });
-
-        return this;
-    };
-
-    /* CPU priority slider/checkbox interaction happens here */
-    util.CpuSlider = function CpuSlider(sel, min, max) {
-        var self = this;
-        var slider, desc;
-        var priority;
-
-        /* Logarithmic CPU scale */
+        /* Logarithmic scale */
+        if (min < 0)
+            min = 0;
+        if (max < 0)
+            max = 0;
         var minv = Math.log(min);
         var maxv = Math.log(max);
         var scale = (maxv - minv);
 
-        function update_priority() {
-            if (slider.disabled)
-                priority = undefined;
+        function limit(val) {
+            if (val < min)
+                val = min;
+            else if (val > max)
+                val = max;
+            return val;
+        }
+
+        function slider_load() {
+            if (check.checked)
+                data = limit(Math.round(Math.exp(minv + scale * slider.value)));
             else
-                priority = Math.round(Math.exp(minv + scale * slider.value));
-            return util.format_cpu_shares(priority);
+                data = undefined;
+        }
+
+        function slider_update() {
+            updating = true;
+            if (data !== undefined)
+                $(slider).prop("value", (Math.log(data) - minv) / scale);
+            $(slider)
+                .attr("disabled", data === undefined)
+                .trigger("change");
+            updating = false;
+        }
+
+        function text_load() {
+            var val;
+            if (check.checked)
+                val = limit(parse($(input).val()));
+            else
+                val = undefined;
+            if (isNaN(val))
+                val = undefined;
+            data = val;
+        }
+
+        function text_update() {
+            updating = true;
+            if (data !== undefined)
+                $(input).val(format(data));
+            $(input).attr("disabled", data === undefined);
+            updating = false;
+        }
+
+        function check_load() {
+            if (!check.checked)
+                data = undefined;
+        }
+
+        function check_update() {
+            updating = true;
+            $(check).prop("checked", data !== undefined);
+            updating = false;
         }
 
         /* Slider to change CPU priority */
         slider = sel.find("div.slider").
             on('change', function() {
-                $(desc).text(update_priority());
+                if (updating)
+                    return;
+                slider_load();
+                text_update();
             })[0];
 
-        /* Description of CPU priority */
-        desc = sel.find("span")[0];
+        /* Number value of CPU priority */
+        input = sel.find("input.size-text-ct").
+            on('change', function() {
+                if (updating)
+                    return;
+                text_load();
+                slider_update();
+            })[0];
 
         /* Default checkbox */
-        var check = sel.find("input[type='checkbox']").
+        check = sel.find("input[type='checkbox']").
             on('change', function() {
-                $(slider).attr("disabled", !this.checked);
-                $(desc).toggleClass("disabled", !this.checked);
-                $(desc).text(update_priority());
-            });
+                if (updating)
+                    return;
+                check_load();
+                if (this.checked)
+                    text_load();
+                slider_update();
+                text_update();
+            })[0];
 
-        Object.defineProperty(this, "value", {
+        Object.defineProperty(self, "value", {
             get: function() {
-                return priority;
+                return data;
             },
             set: function(v) {
-                if (v !== undefined) {
-                    $(slider).
-                        prop("value", (Math.log(v) - minv) / scale).
-                        trigger("change");
-                }
-                $(check).
-                    prop("checked", v !== undefined).
-                    trigger("change");
+                data = v;
+                check_update();
+                slider_update();
+                text_update();
             }
         });
 
-        return this;
+        Object.defineProperty(self, "max", {
+            get: function() {
+                return max;
+            },
+            set: function(v) {
+                if (v < 0)
+                    v = 0;
+                max = v;
+                maxv = Math.log(max);
+                scale = (maxv - minv);
+                if (slider)
+                    slider_update();
+            }
+        });
+
+        return self;
+    }
+
+    /* Memory limit slider/checkbox interaction happens here */
+    util.MemorySlider = function MemorySlider(sel, min, max) {
+        function parse(val) {
+            return parseInt(val, 10) * 1024 * 1024;
+        }
+
+        function format(val) {
+            return cockpit.format_bytes(val, "MiB", true)[0];
+        }
+
+        return new Slider(sel, min, max, parse, format);
     };
 
+    /* CPU priority slider/checkbox interaction happens here */
+    util.CpuSlider = function CpuSlider(sel, min, max) {
+        function parse(val) {
+            return parseInt(val, 10);
+        }
+
+        function format(val) {
+            return String(val);
+        }
+
+        return new Slider(sel, min, max, parse, format);
+    };
 
     util.docker_container_delete = function docker_container_delete(docker_client, container_id, on_success, on_failure) {
         docker_client.rm(container_id).
@@ -528,6 +590,5 @@ define([
         return deferred.promise();
     };
 
-    return util;
-
-});
+    module.exports = util;
+}());

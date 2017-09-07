@@ -17,16 +17,15 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-require([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "shell/controls",
-    "shell/shell",
-    "users/authorized-keys",
-    "base1/patterns",
-], function($, cockpit, Mustache, controls, shell, authorized_keys) {
-"use strict";
+var $ = require("jquery");
+var cockpit = require("cockpit");
+
+var React = require("react");
+var Mustache = require("mustache");
+var authorized_keys = require("./authorized-keys");
+
+require("patterns");
+require("bootstrap-datepicker/dist/js/bootstrap-datepicker");
 
 var _ = cockpit.gettext;
 var C_ = cockpit.gettext;
@@ -37,10 +36,8 @@ $(permission).on("changed", update_accounts_privileged);
 function update_accounts_privileged() {
     $(".accounts-self-privileged").addClass("accounts-privileged");
 
-    controls.update_privileged_ui(
-        permission,
-        ".accounts-privileged:not('.accounts-current-account')",
-        cockpit.format(
+    $(".accounts-privileged:not('.accounts-current-account')").update_privileged(
+        permission, cockpit.format(
             _("The user <b>$0</b> is not permitted to modify accounts"),
             permission.user ? permission.user.name : '')
     );
@@ -49,18 +46,16 @@ function update_accounts_privileged() {
                           $('#account-user-name').text() === 'root');
 
     // enable fields for current account.
-    controls.update_privileged_ui(
-        {allowed: true}, ".accounts-current-account", ""
+    $(".accounts-current-account").update_privileged(
+        {allowed: true}, ""
     );
     $(".accounts-current-account").find("input")
         .attr('disabled', false);
 
     if ($('#account-user-name').text() === 'root' && permission.allowed) {
-        controls.update_privileged_ui({allowed: false},
-                                      "#account-delete",
+        $("#account-delete").update_privileged({allowed: false},
                                       _("Unable to delete root account"));
-        controls.update_privileged_ui({allowed: false},
-                                      "#account-real-name-wrapper",
+        $("#account-real-name-wrapper").update_privileged({allowed: false},
                                       _("Unable to rename root account"));
     }
 }
@@ -77,18 +72,19 @@ function passwd_self(old_pass, new_pass) {
         /.*BAD PASSWORD:.*/
     ];
 
-    var dfd = $.Deferred();
+    var dfd = cockpit.defer();
     var buffer = "";
     var sent_new = false;
     var failure = _("Old password not accepted");
     var i;
 
+    var proc;
     var timeout = window.setTimeout(function() {
         failure = _("Prompting via passwd timed out");
         proc.close("terminated");
     }, 10 * 1000);
 
-    var proc = cockpit.spawn(["/usr/bin/passwd"], { pty: true, environ: [ "LC_ALL=C" ], err: "out" })
+    proc = cockpit.spawn(["/usr/bin/passwd"], { pty: true, environ: [ "LC_ALL=C" ], err: "out" })
         .always(function() {
             window.clearInterval(timeout);
         })
@@ -105,7 +101,7 @@ function passwd_self(old_pass, new_pass) {
             for (i = 0; i < old_exps.length; i++) {
                 if (old_exps[i].test(buffer)) {
                     buffer = "";
-                    proc.input(old_pass + "\n", true);
+                    this.input(old_pass + "\n", true);
                     return;
                 }
             }
@@ -113,7 +109,7 @@ function passwd_self(old_pass, new_pass) {
             for (i = 0; i < new_exps.length; i++) {
                 if (new_exps[i].test(buffer)) {
                     buffer = "";
-                    proc.input(new_pass + "\n", true);
+                    this.input(new_pass + "\n", true);
                     failure = _("Failed to change password");
                     sent_new = true;
                     return;
@@ -132,9 +128,8 @@ function passwd_self(old_pass, new_pass) {
 }
 
 function passwd_change(user, new_pass) {
-    var dfd = $.Deferred();
+    var dfd = cockpit.defer();
 
-    var buffer = "";
     cockpit.spawn([ "chpasswd" ], {superuser: "require", err: "out" })
         .input(user + ":" + new_pass)
         .done(function() {
@@ -159,7 +154,7 @@ function passwd_change(user, new_pass) {
  * that return promises
  */
 function chain(functions) {
-    var dfd = $.Deferred();
+    var dfd = cockpit.defer();
     var i = 0;
 
     /* Either an array or functions passed */
@@ -242,9 +237,9 @@ function parse_group_content(content) {
 }
 
 function password_quality(password) {
-    var dfd = $.Deferred();
+    var dfd = cockpit.defer();
 
-    cockpit.spawn('/usr/bin/pwscore', { "environ": ["LC_ALL=C"] })
+    cockpit.spawn('/usr/bin/pwscore', { "err": "message" })
        .input(password)
        .done(function(content) {
            var quality = parseInt(content, 10);
@@ -260,8 +255,8 @@ function password_quality(password) {
                dfd.resolve("excellent");
            }
        })
-       .fail(function() {
-           dfd.reject(new Error(_("Password is not acceptable")));
+       .fail(function(ex) {
+           dfd.reject(new Error(ex.message || _("Password is not acceptable")));
        });
 
     return dfd.promise();
@@ -275,6 +270,31 @@ function is_user_in_group(user, group) {
 
     return false;
 }
+
+var AccountItem = React.createClass({
+    displayName: 'AccountItem',
+    click: function(ev) {
+        if (ev && ev.button === 0)
+            cockpit.location.go([this.props.name]);
+    },
+    render: function() {
+        return React.createElement('div', {className: "cockpit-account", onClick: this.click },
+            React.createElement('div', {className: "cockpit-account-pic pficon pficon-user"}),
+            React.createElement('div', {className: "cockpit-account-real-name"}, this.props.gecos),
+            React.createElement('div', {className: "cockpit-account-user-name"}, this.props.name)
+        );
+    }
+});
+
+var AccountList = React.createClass({
+    displayName: 'AccountList',
+    render: function() {
+        var i, items = [];
+        for (i in this.props.accounts)
+            items.push(React.createElement(AccountItem, this.props.accounts[i]));
+        return React.createElement('div', null, items);
+    }
+});
 
 function log_unexpected_error(error) {
     console.warn("Unexpected error", error);
@@ -321,30 +341,22 @@ PageAccounts.prototype = {
     },
 
     update: function() {
-        var list = $("#accounts-list");
-
         this.accounts.sort (function (a, b) {
                                 if (! a["gecos"]) return -1;
                                 else if (! b["gecos"]) return 1;
                                 else return a["gecos"].localeCompare(b["gecos"]);
                             });
 
-        list.empty();
-        for (var i = 0; i < this.accounts.length; i++) {
-            if ((this.accounts[i]["uid"] < 1000 && this.accounts[i]["uid"] !== 0) ||
-                  this.accounts[i]["shell"].match(/^(\/usr)?\/sbin\/nologin/) ||
-                  this.accounts[i]["shell"] === '/bin/false')
-                continue;
-            var img =
-                $('<div/>', { 'class': "cockpit-account-pic pficon pficon-user" });
-            var div =
-                $('<div/>', { 'class': "cockpit-account" }).append(
-                    img,
-                    $('<div/>', { 'class': "cockpit-account-real-name" }).text(this.accounts[i]["gecos"]),
-                    $('<div/>', { 'class': "cockpit-account-user-name" }).text(this.accounts[i]["name"]));
-            div.on('click', $.proxy(this, "go", this.accounts[i]["name"]));
-            list.append(div);
-        }
+        var accounts = this.accounts.filter(function(account) {
+            return !((account["uid"] < 1000 && account["uid"] !== 0) ||
+                     account["shell"].match(/^(\/usr)?\/sbin\/nologin/) ||
+                     account["shell"] === '/bin/false');
+        });
+
+        React.render(
+            React.createElement(AccountList, { accounts: accounts }),
+            document.getElementById('accounts-list')
+        );
     },
 
     create: function () {
@@ -413,7 +425,7 @@ PageAccountsCreate.prototype = {
         }
 
         /* The first check is immediately complete */
-        var dfd = $.Deferred();
+        var dfd = cockpit.defer();
         if (fails.length)
             dfd.reject(fails);
         else
@@ -452,7 +464,7 @@ PageAccountsCreate.prototype = {
     create: function() {
         var tasks = [
             function create_user() {
-                var prog = ["/usr/sbin/useradd"];
+                var prog = ["/usr/sbin/useradd", "-s", "/bin/bash"];
                 if ($('#accounts-create-real-name').val()) {
                     prog.push('-c');
                     prog.push($('#accounts-create-real-name').val());
@@ -497,7 +509,7 @@ PageAccountsCreate.prototype = {
     },
 
     check_username: function() {
-        var dfd = $.Deferred();
+        var dfd = cockpit.defer();
         var username = $('#accounts-create-user-name').val();
 
         for (var i = 0; i < username.length; i++) {
@@ -672,12 +684,22 @@ PageAccount.prototype = {
         }
 
         this.handle_passwd = cockpit.file('/etc/passwd');
+        self.handle_shadow = cockpit.file('/etc/shadow', { "superuser": "try" });
+        var saw_shadow = false;
 
         this.handle_passwd.read()
            .done(parse_user)
            .fail(log_unexpected_error);
 
-        this.handle_passwd.watch(parse_user);
+        this.handle_passwd.watch(function(content) {
+            parse_user(content);
+            if (!saw_shadow)
+                self.get_expire();
+        });
+        self.handle_shadow.watch(function() {
+            saw_shadow = true;
+            self.get_expire();
+        });
     },
 
     get_roles: function() {
@@ -745,7 +767,7 @@ PageAccount.prototype = {
 
     get_locked: function(update_display) {
         update_display = typeof update_display !== 'undefined' ? update_display : true;
-        var dfd = $.Deferred();
+        var dfd = cockpit.defer();
         var self = this;
 
         function parse_locked(content) {
@@ -790,15 +812,73 @@ PageAccount.prototype = {
            .fail(log_unexpected_error);
     },
 
+    get_expire: function() {
+        var self = this;
+
+        function parse_expire(data) {
+            var i, line;
+            data = data.split('\n');
+
+            var account_expiration = '';
+            var account_date = '';
+
+            var password_expiration = '';
+            var password_days = -1;
+
+            for (i = 0; i < data.length; i++) {
+                line = data[i].split(': ');
+                if (line[0] && line[0].indexOf("Password expires") === 0) {
+                    if (line[1].indexOf("never") === 0) {
+                        password_expiration = _("Never expire password");
+                    } else if (line[1].indexOf("password must be changed") === 0) {
+                        password_expiration = _("Password must be changed");
+                    } else {
+                        password_expiration = cockpit.format(_("Require password change on $0"), line[1]);
+                    }
+                } else if (line[0] && line[0].indexOf("Account expires") === 0) {
+                    if (line[1].indexOf("never") === 0) {
+                        account_expiration = _("Never lock account");
+                    } else {
+                        account_date = new Date(line[1] + " 12:00:00 UTC");
+                        account_expiration = cockpit.format(_("Lock account on $0"), line[1]);
+                    }
+                } else if (line[0] && line[0].indexOf("Maximum number of days between password change") === 0) {
+                        password_days = line[1];
+                }
+            }
+
+            $('#account-expiration-button').text(account_expiration);
+            $('#account-expiration-button').data('expire-date', account_date);
+
+            $('#password-expiration-button').text(password_expiration);
+            $('#password-expiration-button').data('expire-days', password_days);
+
+            self.update();
+        }
+
+        cockpit.spawn(["/usr/bin/chage", "-l", self.account_id],
+                      { "environ": [ "LC_ALL=C" ], "err": "message", "superuser": "try" })
+           .done(function(data) {
+               parse_expire(data);
+           })
+           .fail(function(ex) {
+               parse_expire("");
+           });
+    },
+
     enter: function(account_id) {
         this.account_id = account_id;
 
         $("#account-real-name").removeAttr("data-dirty");
+        $('#password-reset-button').data('account-id', this.account_id);
+        $('#password-expiration-button').data('account-id', this.account_id);
+        $('#account-expiration-button').data('account-id', this.account_id);
 
         this.get_user();
         this.get_roles();
         this.get_locked();
         this.get_logged();
+        this.get_expire();
     },
 
     leave: function() {
@@ -849,9 +929,9 @@ PageAccount.prototype = {
 
             if (typeof this.locked != 'undefined' && this.account["uid"] !== 0) {
                 $('#account-locked').prop('checked', this.locked);
-                $('#account-locked').parents('tr').show();
+                $('#account-locked').prop('disabled', false);
             } else {
-                $('#account-locked').parents('tr').hide();
+                $('#account-locked').prop('disabled', true);
             }
 
             if (this.authorized_keys) {
@@ -984,6 +1064,8 @@ PageAccount.prototype = {
             return;
 
         PageAccountSetPassword.user_name = this.account["name"];
+        /* TODO: get rid of this once monitoring /etc/shadow will be implemented */
+        PageAccountSetPassword.update_callback = $.proxy(this, "enter");
         $('#account-set-password-dialog').modal('show');
     },
 
@@ -993,7 +1075,7 @@ PageAccount.prototype = {
     },
 
     logout_account: function() {
-        cockpit.spawn(["/usr/bin/loginctl", "kill-user", this.account["name"]],
+        cockpit.spawn(["/usr/bin/loginctl", "terminate-user", this.account["name"]],
                       { "superuser": "try", err: "message"})
            .done($.proxy (this, "get_logged"))
            .fail(show_unexpected_error);
@@ -1004,8 +1086,6 @@ PageAccount.prototype = {
 function PageAccount(user) {
     this._init(user);
 }
-
-var crop_handle_width = 20;
 
 PageAccountConfirmDelete.prototype = {
     _init: function() {
@@ -1048,6 +1128,147 @@ function PageAccountConfirmDelete() {
     this._init();
 }
 
+function AccountExpiration() {
+    $("#account-expiration").on("show.bs.modal", function(ev) {
+        var account_id = $(ev.relatedTarget).data("account-id");
+        $("#account-expiration").data("account-id", account_id);
+
+        /* Fill in initial dialog values */
+        var expire_date = $(ev.relatedTarget).data("expire-date");
+        $(expire_date ? '#account-expiration-expires' : "#account-expiration-never").prop('checked', true);
+        $('#account-expiration-input').val(expire_date ? expire_date.toISOString().substr(0, 10) : "");
+        $('#account-expiration-input').prop('disabled', !expire_date);
+
+        /* TRANSLATORS: This is split up and therefore cannot use ngettext plurals */
+        var parts = _("Lock account on $0").split("$0");
+        $("#account-expiration-before").text(parts[0]);
+        $("#account-expiration-after").text(parts[1]);
+    });
+
+    $('#account-expiration .btn-primary').on('click', function() {
+        var date, value;
+        var ex, promise = null;
+
+        /* Parse the dialog data and validate */
+        if ($('#account-expiration-expires').prop('checked')) {
+            value = $('#account-expiration-input').val();
+            if (!value) {
+                ex = new Error(_("Please specify an expiration date"));
+                ex.target = "#account-expiration-input";
+            } else {
+                date = new Date(value + "T12:00:00Z");
+                if (isNaN(date.getTime()) || date.getTime() < 0) {
+                    ex = new Error(_("Invalid expiration date"));
+                    ex.target = "#account-expiration-input";
+                }
+            }
+            if (ex)
+                promise = cockpit.reject(ex);
+        }
+
+        if ($('#account-expiration-never').prop('checked')) {
+            date = null;
+            promise = null;
+        }
+
+        /* Actually perform the action if valid */
+        var prog = ["/usr/sbin/usermod", "-e"];
+        var account_id = $("#account-expiration").data("account-id");
+        if (!promise) {
+            if (date)
+                prog.push(date.toISOString().substr(0, 10));
+            else
+                prog.push("");
+            prog.push(account_id);
+            promise = cockpit.spawn(prog, { "superuser" : true, "err": "message" });
+        }
+
+        $("#account-expiration").dialog("promise", promise);
+    });
+
+    $('#account-expiration input').on('change', function() {
+        $('#account-expiration-input').prop('disabled', $("#account-expiration-never").prop('checked'));
+    });
+
+    $('#account-expiration-input').datepicker({
+        autoclose: true,
+        todayHighlight: true,
+        format: 'yyyy-mm-dd'
+    });
+
+    $('#account-expiration-input').on("show.bs.modal", function(ev) {
+        ev.stopPropagation();
+    });
+}
+
+function PasswordExpiration() {
+    var never = 99999;
+
+    $("#password-expiration").on("show.bs.modal", function(ev) {
+        var account_id = $(ev.relatedTarget).data("account-id");
+        $("#password-expiration").data("account-id", account_id);
+
+        /* Fill in initial dialog values */
+        var expire_days = parseInt($(ev.relatedTarget).data("expire-days"), 10);
+        if (isNaN(expire_days) || expire_days < 0 || expire_days >= never)
+            expire_days = null;
+        $(expire_days ? '#password-expiration-expires' : "#password-expiration-never").prop('checked', true);
+        $('#password-expiration-input').val(expire_days || "");
+        $('#password-expiration-input').prop('disabled', !expire_days);
+
+        /* TRANSLATORS: This is split up and therefore cannot use ngettext plurals */
+        var parts = _("Require password change every $0 days").split("$0");
+        $("#password-expiration-before").text(parts[0]);
+        $("#password-expiration-after").text(parts[1]);
+    });
+
+    $('#password-expiration .btn-primary').on('click', function() {
+        var days, ex, promise = null;
+
+        if ($('#password-expiration-expires').prop('checked'))
+            days = parseInt($('#password-expiration-input').val().trim(), 10);
+        if ($('#password-expiration-never').prop('checked'))
+            days = never;
+
+        if (isNaN(days) || days < 0) {
+            ex = new Error(_("Invalid number of days"));
+            ex.target = "#password-expiration-input";
+            promise = cockpit.reject(ex);
+        }
+
+        var account_id = $("#password-expiration").data("account-id");
+
+        if (!promise) {
+            promise = cockpit.spawn(["/usr/bin/passwd", "-x", String(days), account_id ],
+                { "superuser": true, "err": "message" });
+        }
+
+        $("#password-expiration").dialog("promise", promise);
+    });
+
+    $('#password-expiration input').on('change', function() {
+        $('#password-expiration-input').prop('disabled', $("#password-expiration-never").prop('checked'));
+    });
+}
+
+function PasswordReset() {
+    $("#password-reset").on("show.bs.modal", function(ev) {
+        var account_id = $(ev.relatedTarget).data("account-id");
+        $("#password-reset").data("account-id", account_id);
+
+        var msg = cockpit.format(_("The account '$0' will be forced to change their password on next login"),
+                                 account_id);
+        $("#password-reset .modal-body p").text(msg);
+    });
+
+    $("#password-reset .btn-primary").on("click", function() {
+        var account_id = $("#password-reset").data("account-id");
+        var promise = cockpit.spawn(["/usr/bin/passwd", "-e", account_id],
+                               { "superuser" : true, "err": "message" });
+        $("#password-reset").dialog("promise", promise);
+    });
+}
+
 PageAccountSetPassword.prototype = {
     _init: function(user) {
         this.id = "account-set-password-dialog";
@@ -1088,7 +1309,7 @@ PageAccountSetPassword.prototype = {
             ex.target = "#account-set-password-pw2";
         }
 
-        var dfd = $.Deferred();
+        var dfd = cockpit.defer();
         if (ex)
             dfd.reject(ex);
         else
@@ -1228,11 +1449,13 @@ function init() {
         dialog_setup(new PageAccountConfirmDelete());
         dialog_setup(new PageAccountSetPassword(user));
 
+        new AccountExpiration();
+        new PasswordExpiration();
+        new PasswordReset();
+
         $(cockpit).on("locationchanged", navigate);
         navigate();
     });
 }
 
 $(init);
-
-});

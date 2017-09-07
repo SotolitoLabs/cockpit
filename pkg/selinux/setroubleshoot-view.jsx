@@ -17,16 +17,13 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "base1/react",
-    "base1/cockpit",
-    "base1/cockpit-components-listing",
-    "selinux/moment",
-], function(React, cockpit, cockpitListing, moment) {
-
-"use strict";
-
+var cockpit = require("cockpit");
 var _ = cockpit.gettext;
+
+var React = require("react");
+
+var cockpitListing = require("cockpit-components-listing.jsx");
+var OnOffSwitch = require("cockpit-components-onoff.jsx").OnOffSwitch;
 
 /* Show details for an alert, including possible solutions
  * Props correspond to an item in the setroubleshoot dataStore
@@ -49,7 +46,7 @@ var SELinuxEventDetails = React.createClass({
         e.stopPropagation();
         e.preventDefault();
     },
-    runFix: function(itmIdx, e) {
+    runFix: function(itmIdx) {
         // make sure the details for the solution are collapsed, or they can hide the progress and result
         var solutionExpanded = this.state.solutionExpanded;
         if (solutionExpanded[itmIdx]) {
@@ -67,7 +64,7 @@ var SELinuxEventDetails = React.createClass({
             return (
                 <EmptyState
                     icon={ waiting ? 'waiting' : 'error' }
-                    description={ waiting ? _('Waiting for details...') : _('Unable to get alert details.') }
+                    description={ waiting ? _("Waiting for details...") : _("Unable to get alert details.") }
                     message={null}
                     relative={true}/>
             );
@@ -133,11 +130,11 @@ var SELinuxEventDetails = React.createClass({
             }
             return (
                 <div className="list-group-item" key={itm.analysisId}>
-                    {fixit}
                     <div>
                         <div>
                             <span>{itm.ifText}</span>
                         </div>
+                        {fixit}
                         <div>
                             {itm.thenText}
                         </div>
@@ -165,7 +162,7 @@ var SELinuxEventLog = React.createClass({
             return (
                 <EmptyState
                     icon={ waiting ? 'waiting' : 'error' }
-                    description={ waiting ? _('Waiting for details...') : _('Unable to get alert details.') }
+                    description={ waiting ? _("Waiting for details...") : _("Unable to get alert details.") }
                     message={null}
                     relative={true}/>
             );
@@ -245,50 +242,6 @@ var DismissableError = React.createClass({
     }
 });
 
-/* Component to show an on/off switch
- * state      boolean value (off or on)
- * captionOff optional string, default 'Off'
- * captionOn  optional string, default 'On'
- * onChange   triggered when the switch is flipped, parameter: new state
- */
-var OnOffSwitch = React.createClass({
-    getDefaultProps: function() {
-        return {
-            captionOff: _('Off'),
-            captionOn: _('On'),
-        };
-    },
-    handleOnOffClick: function(newState, e) {
-        // only consider primary mouse button
-        if (!e || e.button !== 0)
-            return;
-        if (this.props.onChange)
-            this.props.onChange(newState);
-        e.stopPropagation();
-    },
-    render: function() {
-        var onClasses = ["btn"];
-        var offClasses = ["btn"];
-        if (this.props.state)
-            onClasses.push("active");
-        else
-            offClasses.push("active");
-        var clickHandler = this.handleOnOffClick.bind(this, !this.props.state);
-        return (
-            <div className="btn-group btn-onoff-ct">
-                <label className={ onClasses.join(" ") }>
-                    <input className="toggle-ct" type="radio" />
-                    <span onClick={clickHandler}>{this.props.captionOn}</span>
-                </label>
-                <label className={ offClasses.join(" ") }>
-                    <input className="toggle-ct" type="radio" />
-                    <span onClick={clickHandler}>{this.props.captionOff}</span>
-                </label>
-            </div>
-        );
-    }
-});
-
 /* Component to show selinux status and offer an option to change it
  * selinuxStatus      status of selinux on the system, properties as defined in selinux-client.js
  * selinuxStatusError error message from reading or setting selinux status/mode
@@ -322,14 +275,19 @@ var SELinuxStatus = React.createClass({
             );
         }
         var note;
-        if (this.props.selinuxStatus.enforcing !== this.props.selinuxStatus.configEnforcing)
+        var configUnknown = (this.props.selinuxStatus.configEnforcing === undefined);
+        if (configUnknown)
+            note = <span> {_("The configured state is unknown, it might change on the next boot.")}</span>;
+        else if (!configUnknown && this.props.selinuxStatus.enforcing !== this.props.selinuxStatus.configEnforcing)
             note = <span> {_("Setting deviates from the configured state and will revert on the next boot.")}</span>;
 
         return (
-            <div>
+            <div className="selinux-policy-ct">
+                <h2>{_("SELinux Policy")}</h2>
                 {errorMessage}
-                <span className="title-ct-selinux">{_("Enforced security mode")} </span>
+                <label>{_("Enforce policy:")}
                 <OnOffSwitch state={this.props.selinuxStatus.enforcing} onChange={this.props.changeSelinuxMode} />
+                </label>
                 {note}
             </div>
         );
@@ -371,35 +329,40 @@ var SETroubleshootPage = React.createClass({
         e.stopPropagation();
     },
     render: function() {
-        var self = this;
-        if (!this.props.connected) {
-            var icon;
-            var description;
-            if (this.props.connecting) {
-                icon = <div className="spinner spinner-lg" />;
-                description = _("Connecting...");
-            } else {
-                icon = <i className="fa fa-exclamation-circle" />;
-                description = _("Couldn't connect to SETroubleshoot daemon. Please ensure that setroubleshoot-server is installed.");
-            }
-
+        // if selinux is disabled, we only show EmptyState
+        if (this.props.selinuxStatus.enabled === false) {
             return (
                 <EmptyState
-                    icon={icon}
-                    description={description}
-                    message={this.props.error} />
+                    icon={ <div className="fa fa-exclamation-circle"></div> }
+                    description={ _("SELinux is disabled on the system") }
+                    message={null}
+                    relative={false}/>
             );
-        } else {
-            // if we don't have any entries, show a sane message instead of an empty page */
-            if (this.props.entries.length === 0) {
-                return (
-                    <EmptyState
-                        icon={ <i className="fa fa-check" /> }
-                        description={ _("No SELinux alerts.") }
-                        message={null} />
+        }
+        var self = this;
+        var entries;
+        var troubleshooting;
+        var title = _("SELinux Access Control Errors");
+        var emptyCaption = _("No SELinux alerts.");
+        if (!this.props.connected) {
+            if (this.props.connecting) {
+                emptyCaption = (
+                    <div>
+                        <div className="spinner spinner-sm"></div>
+                        <span>{_("Connecting to SETroubleshoot daemon...")}</span>
+                    </div>
+                );
+            } else {
+                // if we don't have setroubleshoot-server, be more subtle about saying that
+                title = "";
+                emptyCaption = (
+                    <span>
+                        {_("Install setroubleshoot-server to troubleshoot SELinux events.")}
+                    </span>
                 );
             }
-            var entries = this.props.entries.map(function(itm) {
+        } else {
+            entries = this.props.entries.map(function(itm) {
                 itm.runFix = self.props.runFix;
                 var listingDetail;
                 if (itm.details && 'firstSeen' in itm.details) {
@@ -424,12 +387,12 @@ var SETroubleshootPage = React.createClass({
                 );
                 var tabRenderers = [
                     {
-                        name: _('Solutions'),
+                        name: _("Solutions"),
                         renderer: SELinuxEventDetails,
                         data: itm,
                     },
                     {
-                        name: _('Audit log'),
+                        name: _("Audit log"),
                         renderer: SELinuxEventLog,
                         data: itm,
                     },
@@ -442,8 +405,14 @@ var SETroubleshootPage = React.createClass({
                     criticalAlert,
                     { name: itm.description, 'header': true }
                 ];
-                if (itm.count > 1)
-                    columns.push(<span className="badge">{itm.count}</span>);
+                var title;
+                if (itm.count > 1) {
+                    title = cockpit.format(cockpit.ngettext("$0 occurrence", "$1 occurrences", itm.count),
+                            itm.count);
+                    columns.push(<span className="badge" title={title}>{itm.count}</span>);
+                } else {
+                    columns.push(<span></span>);
+                }
                 return (
                     <cockpitListing.ListingRow
                         columns={columns}
@@ -452,41 +421,45 @@ var SETroubleshootPage = React.createClass({
                         listingActions={ [dismissAction] } />
                 );
             });
+        }
 
-            var errorMessage;
-            if (this.props.error) {
-                errorMessage = (
-                    <div className="alert alert-danger alert-dismissable alert-ct-top">
-                        <span className="pficon pficon-error-circle-o" />
-                        <span>{this.props.error}</span>
-                        <button type="button" className="close" aria-hidden="true" onClick={this.handleDismissError}>
-                            <span className="pficon pficon-close"/>
-                        </button>
-                    </div>
-                );
-            }
+        troubleshooting = (
+            <cockpitListing.Listing
+                    title={ title }
+                    emptyCaption={ emptyCaption }
+                    >
+                {entries}
+            </cockpitListing.Listing>
+        );
 
-            return (
-                <div className="container-fluid setroubleshoot-page">
-                    <SELinuxStatus
-                        selinuxStatus={this.props.selinuxStatus}
-                        selinuxStatusError={this.props.selinuxStatusError}
-                        changeSelinuxMode={this.props.changeSelinuxMode}
-                        dismissError={this.props.dismissStatusError}
-                    />
-                    {errorMessage}
-                    <cockpitListing.Listing title={ _("SELinux Access Control errors") }>
-                        {entries}
-                    </cockpitListing.Listing>
+        var errorMessage;
+        if (this.props.error) {
+            errorMessage = (
+                <div className="alert alert-danger alert-dismissable alert-ct-top">
+                    <span className="pficon pficon-error-circle-o" />
+                    <span>{this.props.error}</span>
+                    <button type="button" className="close" aria-hidden="true" onClick={this.handleDismissError}>
+                        <span className="pficon pficon-close"/>
+                    </button>
                 </div>
             );
         }
+
+        return (
+            <div className="container-fluid">
+                <SELinuxStatus
+                    selinuxStatus={this.props.selinuxStatus}
+                    selinuxStatusError={this.props.selinuxStatusError}
+                    changeSelinuxMode={this.props.changeSelinuxMode}
+                    dismissError={this.props.dismissStatusError}
+                />
+                {errorMessage}
+                {troubleshooting}
+            </div>
+        );
     }
 });
 
-return {
+module.exports = {
     SETroubleshootPage: SETroubleshootPage,
 };
-
-});
-

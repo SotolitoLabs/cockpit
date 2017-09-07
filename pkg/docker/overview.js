@@ -17,56 +17,63 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "docker/util",
-    "docker/run",
-    "docker/search",
-    "docker/docker",
-    "docker/bar",
-    "shell/shell",
-    "shell/plot",
-], function($, cockpit, Mustache, util, run_image, search_image, docker, bar, shell) {
-    var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var React = require("react");
+    var plot = require("plot");
+
+    var util = require("./util");
+    var storage = require("./storage.jsx");
+    var view = require("./containers-view.jsx");
+
+    require("plot.css");
 
     /* OVERVIEW PAGE
      */
 
     function init_overview (client) {
+        var headerNode = document.querySelector('#containers .content-filter');
+        var containerNode = document.getElementById('containers-containers');
+        var imageNode = document.getElementById('containers-images');
 
-        var danger_enabled = false;
-
-        function set_danger_enabled(val) {
-            danger_enabled = val;
-            $('#containers-containers button.enable-danger').toggleClass('active', danger_enabled);
-            $("#containers-containers td.container-col-actions").toggle(!danger_enabled);
-            $("#containers-containers td.container-col-danger").toggle(danger_enabled);
+        function update_container_list(onlyShowRunning, filterText) {
+            React.render(React.createElement(view.ContainerList, {
+                client: client,
+                onlyShowRunning: onlyShowRunning,
+                filterText: filterText
+            }), containerNode);
         }
 
-        util.setup_danger_button('#containers-containers', "#containers",
-                                 function() {
-                                     set_danger_enabled(!danger_enabled);
-                                 });
-
-        $('#containers-containers-filter a').on('click', function() {
-            var el = $(this);
-            $("#containers-containers-filter button span").text(el.text());
-            $("#containers-containers table").toggleClass("filter-unimportant", el.attr('value') === "running");
-        });
-
-        $('#containers-images-search').on("click", function() {
-            search_image(client);
-            return false;
-        });
-
-        function highlight_container_row(event, id) {
-            id = client.container_from_cgroup(id) || id;
-            $('#containers-containers tr').removeClass('highlight-ct');
-            $('#' + id).addClass('highlight-ct');
+        function update_image_list(filterText) {
+            React.render(React.createElement(view.ImageList, {
+                client: client,
+                filterText: filterText
+            }), imageNode);
         }
+
+        React.render(React.createElement(view.ContainerHeader, {
+            onFilterChanged: function (filter, filterText) {
+                update_container_list(filter === 'running', filterText);
+                update_image_list(filterText);
+            }
+        }), headerNode);
+
+        update_container_list(true, '');
+        update_image_list('');
+
+        var cpu_series;
+        var mem_series;
+
+        $(client).on('container.containers', function(event, id, container) {
+            if (container && container.CGroup) {
+                cpu_series.add_instance(container.CGroup);
+                mem_series.add_instance(container.CGroup);
+            }
+        });
 
         var cpu_data = {
             internal: "cgroup.cpu.usage",
@@ -75,7 +82,7 @@ define([
             factor: 0.1  // millisec / sec -> percent
         };
 
-        var cpu_options = shell.plot_simple_template();
+        var cpu_options = plot.plot_simple_template();
         $.extend(cpu_options.yaxis, { tickFormatter: function(v) { return v.toFixed(0); }
                                     });
         $.extend(cpu_options.grid,  { hoverable: true,
@@ -92,23 +99,22 @@ define([
             axes.yaxis.options.min = 0;
         };
 
-        var cpu_plot = shell.plot($("#containers-cpu-graph"), 300);
+        var cpu_plot = plot.plot($("#containers-cpu-graph"), 300);
         cpu_plot.set_options(cpu_options);
-        var cpu_series = cpu_plot.add_metrics_stacked_instances_series(cpu_data, { });
+        cpu_series = cpu_plot.add_metrics_stacked_instances_series(cpu_data, { });
         $(cpu_series).on("value", function(ev, value) {
             $('#containers-cpu-text').text(util.format_cpu_usage(value));
         });
         cpu_plot.start_walking();
-        $(cpu_series).on('hover', highlight_container_row);
 
         var mem_data = {
             internal: "cgroup.memory.usage",
             units: "bytes"
         };
 
-        var mem_options = shell.plot_simple_template();
-        $.extend(mem_options.yaxis, { ticks: shell.memory_ticks,
-                                      tickFormatter: shell.format_bytes_tick_no_unit
+        var mem_options = plot.plot_simple_template();
+        $.extend(mem_options.yaxis, { ticks: plot.memory_ticks,
+                                      tickFormatter: plot.format_bytes_tick_no_unit
                                     });
         $.extend(mem_options.grid,  { hoverable: true,
                                       autoHighlight: false
@@ -121,199 +127,73 @@ define([
                 axes.yaxis.options.max = null;
             axes.yaxis.options.min = 0;
 
-            $("#containers-mem-unit").text(shell.bytes_tick_unit(axes.yaxis));
+            $("#containers-mem-unit").text(plot.bytes_tick_unit(axes.yaxis));
         };
 
-        var mem_plot = shell.plot($("#containers-mem-graph"), 300);
+        var mem_plot = plot.plot($("#containers-mem-graph"), 300);
         mem_plot.set_options(mem_options);
-        var mem_series = mem_plot.add_metrics_stacked_instances_series(mem_data, { });
+        mem_series = mem_plot.add_metrics_stacked_instances_series(mem_data, { });
         $(mem_series).on("value", function(ev, value) {
             $('#containers-mem-text').text(cockpit.format_bytes(value, 1024));
         });
         mem_plot.start_walking();
-        $(mem_series).on('hover', highlight_container_row);
 
         $(window).on('resize', function () {
             cpu_plot.resize();
             mem_plot.resize();
         });
 
-        function render_container(id, container) {
-            if (container && container.CGroup) {
-                cpu_series.add_instance(container.CGroup);
-                mem_series.add_instance(container.CGroup);
-            }
-            util.render_container(client, $('#containers-containers'),
-                                  "", id, container, danger_enabled);
-        }
+        React.render(React.createElement(storage.OverviewBox,
+                                         { model: storage.get_storage_model(),
+                                           small: true }),
+                     $("#containers-storage-details")[0]);
 
-        function render_image(id, image) {
+        var commit = $('#container-commit-dialog')[0];
+        $(commit).
+            on("show.bs.modal", function(event) {
+                var container = client.containers[event.relatedTarget.dataset.containerId];
 
-            // Docker ID can contain funny characters such as ":" so
-            // we take care not to embed them into jQuery query
-            // strings or HTML.
+                $(commit).find(".container-name").text(container.Name.replace(/^\//, ''));
+                $(commit).attr('data-container-id', container.Id);
 
-            var tr = $(document.getElementById(id));
+                var image = client.images[container.Config.Image];
+                var repo = "";
+                if (image && image.RepoTags)
+                    repo = image.RepoTags[0].split(":", 1)[0];
+                $(commit).find(".container-repository").attr('value', repo);
 
-            if (!image ||
-                !image.RepoTags ||
-                image.RepoTags[0] == "<none>:<none>") {
-                tr.remove();
-                return;
-            }
+                $(commit).find(".container-tag").attr('value', "");
 
-            var added = false;
-            if (!tr.length) {
-                var button = $('<button class="btn btn-default btn-control-ct fa fa-play">').
-                    attr("title", _("Run image")).
-                    on("click", function() {
-                        run_image(client, id);
-                        return false;
+                cockpit.user().done(function (user) {
+                    var author = user.full_name || user.name;
+                    $(commit).find(".container-author").attr('value', author);
+                });
+
+                var command = "";
+                if (container.Config)
+                    command = util.quote_cmdline(container.Config.Cmd);
+                if (!command)
+                    command = container.Command;
+                $(commit).find(".container-command").attr('value', command);
+            }).
+            find(".btn-primary").on("click", function() {
+                var location = cockpit.location;
+                var run = { "Cmd": util.unquote_cmdline($(commit).find(".container-command").val()) };
+                var options = {
+                    "author": $(commit).find(".container-author").val()
+                };
+                var tag = $(commit).find(".container-tag").val();
+                if (tag)
+                    options["tag"] = tag;
+                var repository = $(commit).find(".container-repository").val();
+                client.commit($(commit).attr('data-container-id'), repository, options, run).
+                    fail(function(ex) {
+                        util.show_unexpected_error(ex);
+                    }).
+                    done(function() {
+                        location.go("/");
                     });
-                tr = $('<tr>', { 'id': id }).append(
-                    $('<td class="image-col-tags">'),
-                    $('<td class="image-col-created">'),
-                    $('<td class="image-col-size-graph">'),
-                    $('<td class="image-col-size-text">'),
-                    $('<td class="cell-buttons">').append(button));
-                tr.on('click', function(event) {
-                    cockpit.location.go([ 'image', id ]);
-                });
-
-                added = true;
-            }
-
-            var row = tr.children("td");
-            $(row[0]).html(util.multi_line(image.RepoTags));
-
-            /* if an image is older than two days, don't show the time */
-            var threshold_date = new Date(image.Created * 1000);
-            threshold_date.setDate(threshold_date.getDate() + 2);
-
-            if (threshold_date > (new Date())) {
-                $(row[1]).text(new Date(image.Created * 1000).toLocaleString());
-            } else {
-                var creation_date = new Date(image.Created * 1000);
-
-                /* we hide the time, so put full timestamp in the hover text */
-                $(row[1])
-                    .text(creation_date.toLocaleDateString())
-                    .attr("title", creation_date.toLocaleString());
-            }
-
-            $(row[2]).children("div").attr("value", image.VirtualSize);
-            $(row[3]).text(cockpit.format_bytes(image.VirtualSize, 1024));
-
-            if (added) {
-                util.insert_table_sorted($('#containers-images table'), tr);
-            }
-        }
-
-        $('#containers-containers table tbody tr').remove();
-        $('#containers-images table tbody tr').remove();
-
-        /* Every time a container appears, disappears, changes */
-        $(client).on('container.containers', function(event, id, container) {
-            render_container(id, container);
-        });
-
-        /* Every time a image appears, disappears, changes */
-        $(client).on('image.containers', function(event, id, image) {
-            render_image(id, image);
-        });
-
-        var id;
-        $("#containers-containers button.enable-danger").toggle(false);
-        for (id in client.containers) {
-            render_container(id, client.containers[id]);
-        }
-
-        for (id in client.images) {
-            render_image(id, client.images[id]);
-        }
-
-        // Render storage, throttle update on events
-
-        function render_storage() {
-            client.info().done(function(data) {
-                var resp = data && JSON.parse(data);
-                if (resp['Driver'] !== "devicemapper") {
-                    // TODO: None of the other graphdrivers currently
-                    // report size information.
-                    $('#containers-storage .bar').html();
-                    $('#containers-storage .data').html("Unknown");
-                }
-
-                var used;
-                var total;
-                var avail;
-                $.each(resp['DriverStatus'], function (index, value) {
-                    if (value && value[0] == "Data Space Total")
-                        total = value[1];
-                    else if (value && value[0] == "Data Space Used")
-                        used = value[1];
-                    else if (value && value[0] == "Data Space Available")
-                        avail = value[1];
-                });
-
-                if (used && total && docker) {
-
-                    var b_used = docker.bytes_from_format(used);
-                    var b_total = docker.bytes_from_format(total);
-
-                    // Prefer available if present as that will be accurate for
-                    // sparse file based devices
-                    if (avail) {
-                        $('#containers-storage').tooltip('destroy');
-                        b_total = b_used + docker.bytes_from_format(avail);
-                        total = cockpit.format_bytes(b_total);
-                    } else {
-                        var warning = _("WARNING: Docker may be reporting the size it has allocated to it's storage pool using sparse files, not the actual space available to the underlying storage device.");
-                        $('#containers-storage').tooltip({ title : warning, placement : "auto" });
-                    }
-
-                    var formated = used + " / " + total;
-                    var bar_row = bar.create();
-                    bar_row.attr("value", b_used + "/" + b_total);
-                    bar_row.toggleClass("bar-row-danger", used > 0.95 * total);
-
-                    $('#containers-storage .bar').html(bar_row);
-                    $('#containers-storage .data').html(formated);
-                } else {
-                    $('#containers-storage .bar').html();
-                    $('#containers-storage .data').html("Unknown");
-                }
-
-                bar.update();
             });
-        }
-
-        function throttled_render_storage() {
-            var self = this;
-            var timer = null;
-            var missed = false;
-
-            var throttle = function() {
-                if (!timer) {
-                    render_storage();
-                    timer = window.setTimeout(function () {
-                        var need_call = missed;
-                        missed = false;
-                        timer = null;
-                        if (need_call && client)
-                            throttle();
-
-                    }, 10000);
-                } else {
-                    missed = true;
-                }
-            };
-
-            return throttle;
-        }
-
-        render_storage();
-        $(client).on('event.containers', throttled_render_storage());
 
         function hide() {
             $('#containers').hide();
@@ -331,7 +211,7 @@ define([
         };
     }
 
-    return {
+    module.exports = {
         init: init_overview
     };
-});
+}());

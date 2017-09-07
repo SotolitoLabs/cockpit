@@ -35,14 +35,15 @@ PKG_NAME="Cockpit"
 olddir=$(pwd)
 cd $srcdir
 
+# Development dependencies: See node_modules/README
+npm prune
 npm install # see package.json
+
 find node_modules -name test | xargs rm -rf
 
 rm -rf autom4te.cache
 
 autoreconf -f -i -I tools
-
-intltoolize --force --copy || exit $?
 
 set +x
 
@@ -68,10 +69,18 @@ if [ -z "${NOREDIRECTMAKEFILE:-}" ]; then
 fi
 $srcdir/configure --enable-maintainer-mode ${AUTOGEN_CONFIGURE_ARGS:-} "$@" || exit $?
 
-# Put a redirect makefile here
-if [ -z "${NOREDIRECTMAKEFILE:-}" -a ! -f $srcdir/Makefile ]; then
-    cat $srcdir/tools/Makefile.redirect > $srcdir/Makefile
-    printf "\nREDIRECT = %s\n" "$(realpath $olddir)" >> $srcdir/Makefile
+# Put a redirect makefile and dist directory here
+if [ -z "${NOREDIRECTMAKEFILE:-}" ]; then
+    if [ ! -e $srcdir/Makefile ]; then
+        cat $srcdir/tools/Makefile.redirect > $srcdir/Makefile
+        printf "\nREDIRECT = %s\n" "$(realpath $olddir)" >> $srcdir/Makefile
+    fi
+
+    mkdir -p $olddir/dist
+    cp $srcdir/tools/README.dist $olddir/dist/README.md
+    if [ ! -e $srcdir/dist ]; then
+        ln -s $olddir/dist $srcdir/dist
+    fi
 fi
 
 echo

@@ -19,19 +19,16 @@
 
 var phantom_checkpoint = phantom_checkpoint || function () { };
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "shell/indexes",
-    'shell/po',
-    "manifests",
-], function($, cockpit, indexes, po, manifests) {
+(function() {
     "use strict";
 
-    cockpit.locale(po);
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var indexes = require("./indexes");
 
     var default_title = "Cockpit";
-    var manifest = manifests["shell"] || { };
+    var manifest = cockpit.manifests["shell"] || { };
     if (manifest.title)
         default_title = manifest.title;
 
@@ -44,9 +41,9 @@ define([
         default_title: default_title
     });
 
-    var login_data = window.sessionStorage.getItem('login-data');
+    var login_data = cockpit.localStorage.getItem('login-data', true);
     if (login_data) {
         var data = JSON.parse(login_data);
         $("#content-user-name").text(data["displayName"]);
     }
-});
+}());

@@ -21,6 +21,17 @@ AC_INIT([Cockpit],
         [cockpit],
         [http://www.cockpit-project.org/])
 
+# The above git-version-gen command can either use .git or a .tarball file
+# in the top level directory to determine the version. If that didn't work
+# bail early. Cockpit needs to know its own version number
+AC_MSG_CHECKING(that PACKAGE_VERSION is properly set)
+if test -z "$PACKAGE_VERSION"; then
+  AC_MSG_RESULT(no)
+  AC_MSG_ERROR(Please build from a .git checkout or .tar.xz tarball)
+else
+  AC_MSG_RESULT(yes)
+fi
+
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([tools])
@@ -52,10 +63,11 @@ AC_MSG_RESULT($enable_prefix_only)
 
 GLIB_VERSION="2.34"
 LIBSSH_VERSION="0.6.0"
+GIO_VERSION="2.37.4" # For appropriate version of TLS logic
 
-GIO_REQUIREMENT="gio-unix-2.0 >= $GLIB_VERSION"
-SYSTEMD_REQUIREMENT="libsystemd"
-SYSTEMD_REQUIREMENT_OLD="libsystemd-journal >= 187 libsystemd-daemon"
+GIO_REQUIREMENT="gio-unix-2.0 >= $GIO_VERSION gio-2.0 >= $GIO_VERSION"
+LIBSYSTEMD_REQUIREMENT="libsystemd"
+LIBSYSTEMD_REQUIREMENT_OLD="libsystemd-journal >= 187 libsystemd-daemon libsystemd-login"
 JSON_GLIB_REQUIREMENT="json-glib-1.0 >= 0.14.0"
 POLKIT_REQUIREMENT="polkit-agent-1 >= 0.105"
 
@@ -64,8 +76,8 @@ GLIB_VERSION_DEF="GLIB_VERSION_$(echo $GLIB_VERSION | tr '.' '_')"
 GIO_CFLAGS="$GIO_CFLAGS -DGLIB_VERSION_MIN_REQUIRED=$GLIB_VERSION_DEF"
 GIO_CFLAGS="$GIO_CFLAGS -DGLIB_VERSION_MAX_ALLOWED=$GLIB_VERSION_DEF"
 
-PKG_CHECK_MODULES(SYSTEMD, [$SYSTEMD_REQUIREMENT], [], [
-	PKG_CHECK_MODULES(SYSTEMD, [$SYSTEMD_REQUIREMENT_OLD])
+PKG_CHECK_MODULES(LIBSYSTEMD, [$LIBSYSTEMD_REQUIREMENT], [], [
+	PKG_CHECK_MODULES(LIBSYSTEMD, [$LIBSYSTEMD_REQUIREMENT_OLD])
 ])
 PKG_CHECK_MODULES(JSON_GLIB, [$JSON_GLIB_REQUIREMENT])
 PKG_CHECK_MODULES(POLKIT, [$POLKIT_REQUIREMENT])
@@ -81,8 +93,8 @@ else
   AC_MSG_ERROR(no. Please install MIT kerberos devel package)
 fi
 
-COCKPIT_CFLAGS="$GIO_CFLAGS $JSON_GLIB_CFLAGS $SYSTEMD_CFLAGS"
-COCKPIT_LIBS="$GIO_LIBS $JSON_GLIB_LIBS $SYSTEMD_LIBS -lutil"
+COCKPIT_CFLAGS="$GIO_CFLAGS $JSON_GLIB_CFLAGS $LIBSYSTEMD_CFLAGS"
+COCKPIT_LIBS="$GIO_LIBS $JSON_GLIB_LIBS $LIBSYSTEMD_LIBS -lutil -lm"
 AC_SUBST(COCKPIT_CFLAGS)
 AC_SUBST(COCKPIT_LIBS)
 
@@ -101,30 +113,36 @@ COCKPIT_SESSION_LIBS="$KRB5_LIBS"
 AC_SUBST(COCKPIT_SESSION_CFLAGS)
 AC_SUBST(COCKPIT_SESSION_LIBS)
 
-COCKPIT_POLKIT_CFLAGS="$GIO_CFLAGS $POLKIT_CFLAGS"
-COCKPIT_POLKIT_LIBS="$GIO_LIBS $POLKIT_LIBS"
-AC_SUBST(COCKPIT_POLKIT_CFLAGS)
-AC_SUBST(COCKPIT_POLKIT_LIBS)
+COCKPIT_WS_CFLAGS="$COCKPIT_CFLAGS $KRB5_CFLAGS"
+COCKPIT_WS_LIBS="$COCKPIT_LIBS $KRB5_LIBS"
+AC_SUBST(COCKPIT_WS_CFLAGS)
+AC_SUBST(COCKPIT_WS_LIBS)
 
-# whether to build cockpit-ws
-AC_ARG_ENABLE(ws, AC_HELP_STRING([--disable-ws], [Disable cockpit-ws build]))
-
-AC_MSG_CHECKING([build with cockpit-ws])
-if test "$enable_ws" != "no"; then
-  enable_ws="yes"
-  AC_MSG_RESULT([$enable_ws])
-  PKG_CHECK_MODULES(GLIB_TLS, [glib-2.0 >= 2.37.4])
+# whether to build cockpit-ssh
+AC_ARG_ENABLE(ssh, AC_HELP_STRING([--disable-ssh], [Disable cockpit-ssh build and libssh dependency]))
+AC_MSG_CHECKING([build with cockpit-ssh])
+if test "$enable_ssh" != "no"; then
+  enable_ssh="yes"
+  AC_MSG_RESULT([$enable_ssh])
   PKG_CHECK_MODULES(LIBSSH, [libssh >= $LIBSSH_VERSION libssh_threads])
-  COCKPIT_WS_CFLAGS="$COCKPIT_CFLAGS $LIBSSH_CFLAGS $KRB5_CFLAGS"
-  COCKPIT_WS_LIBS="$COCKPIT_LIBS $LIBSSH_LIBS $KRB5_LIBS"
-  AC_SUBST(COCKPIT_WS_CFLAGS)
-  AC_SUBST(COCKPIT_WS_LIBS)
+
+  AC_DEFINE_UNQUOTED(WITH_COCKPIT_SSH, 1, [Build cockpit-ssh and include libssh dependency])
+
+  AC_CHECK_LIB(ssh, ssh_get_server_publickey, [
+    AC_DEFINE_UNQUOTED(HAVE_SSH_GET_SERVER_PUBLICKEY, 1, Whether ssh_get_server_publickey is available)
+  ])
+
+  COCKPIT_SSH_SESSION_CFLAGS="$COCKPIT_CFLAGS $LIBSSH_CFLAGS $KRB5_CFLAGS"
+  COCKPIT_SSH_SESSION_LIBS="$COCKPIT_LIBS $LIBSSH_LIBS $KRB5_LIBS"
+  AC_SUBST(COCKPIT_SSH_SESSION_LIBS)
+  AC_SUBST(COCKPIT_SSH_SESSION_CFLAGS)
 else
-  enable_ws="no"
-  AC_MSG_RESULT([$enable_ws])
+  enable_ssh="no"
+  key_auth="no"
+  AC_MSG_RESULT([$enable_ssh])
 fi
 
-AM_CONDITIONAL(WITH_COCKPIT_WS, test "$enable_ws" = "yes")
+AM_CONDITIONAL(WITH_COCKPIT_SSH, test "$enable_ssh" = "yes")
 
 # pam
 AC_CHECK_HEADER([security/pam_appl.h], ,
@@ -136,7 +154,6 @@ AC_CHECK_LIB(pam, pam_open_session, [ true ],
 PAM_LIBS="-lpam"
 COCKPIT_SESSION_LIBS="$COCKPIT_SESSION_LIBS $PAM_LIBS"
 COCKPIT_WS_LIBS="$COCKPIT_WS_LIBS $PAM_LIBS"
-REAUTHORIZE_LIBS="$REAUTHORIZE_LIBS $PAM_LIBS"
 
 # pam module directory
 AC_ARG_WITH([pamdir],
@@ -146,16 +163,6 @@ AC_ARG_WITH([pamdir],
 pamdir=$with_pamdir
 AC_SUBST(pamdir)
 
-# keyutils
-AC_CHECK_HEADER([keyutils.h], ,
-  [AC_MSG_ERROR([Couldn't find keyutils headers. Try installing keyutils-libs-devel])]
-)
-AC_CHECK_LIB(keyutils, keyctl_join_session_keyring, [ true ],
-  [AC_MSG_ERROR([Couldn't find keyutils library. Try installing keyutils-libs-devel])]
-)
-COCKPIT_SESSION_LIBS="$COCKPIT_SESSION_LIBS -lkeyutils"
-REAUTHORIZE_LIBS="$REAUTHORIZE_LIBS -lkeyutils"
-
 # crypt
 AC_CHECK_HEADER([crypt.h], ,
   [AC_MSG_ERROR([Couldn't find crypt headers. Try installing glibc-headers])]
@@ -164,7 +171,6 @@ AC_CHECK_LIB(crypt, crypt_r, [ true ],
   [AC_MSG_ERROR([Couldn't find crypt library. Try installing glibc-devel])]
 )
 COCKPIT_WS_LIBS="$COCKPIT_WS_LIBS -lcrypt"
-REAUTHORIZE_LIBS="$REAUTHORIZE_LIBS -lcrypt"
 
 # pcp
 AC_MSG_CHECKING([whether to build with PCP])
@@ -203,43 +209,71 @@ fi
 AM_CONDITIONAL([ENABLE_PCP], [test "$enable_pcp" = "yes"])
 
 # gssapi
-AC_CHECK_LIB(gssapi_krb5, gss_import_cred,
-  [AC_DEFINE_UNQUOTED(HAVE_GSS_IMPORT_CRED, 1, Whether gss_import_cred is available)])
-AC_CHECK_LIB(ssh, ssh_gssapi_set_creds,
-  [AC_DEFINE_UNQUOTED(HAVE_SSH_GSSAPI_SET_CREDS, 1, Whether ssh_gssapi_set_creds is available)])
-
-# key auth
-AC_CHECK_LIB(ssh, ssh_set_agent_socket,
-  [AC_DEFINE_UNQUOTED(HAVE_SSH_SET_AGENT_SOCKET, 1, Whether ssh_set_agent_socket is available)
-  key_auth="yes"],
-  [key_auth="no"])
+AC_CHECK_LIB(gssapi_krb5, gss_store_cred, [ true ],
+  [AC_MSG_ERROR([Couldn't find GSSAPI KRB5 library. Try installing krb5-devel])]
+)
 
 # systemd
-AC_MSG_CHECKING(for systemd unit dir)
-if test "$enable_prefix_only" = "yes"; then
-  systemdunitdir='${prefix}/lib/systemd/system'
+AC_ARG_WITH([systemdunitdir], [AC_HELP_STRING([--with-systemdunitdir=DIR],
+                                              [directory to install systemd unit files in])])
+
+if test ! -z "$with_systemdunitdir"; then
+  systemdunitdir=$with_systemdunitdir
+elif test "$enable_prefix_only" = "yes"; then
+    systemdunitdir='${prefix}/lib/systemd/system'
 else
+  PKG_CHECK_MODULES(SYSTEMD, [systemd])
+  AC_MSG_CHECKING(for systemd unit dir)
   systemdunitdir=$($PKG_CONFIG systemd --variable=systemdsystemunitdir)
   if test "$systemdunitdir" = ""; then
-    systemdunitdir="/tmp"
+    AC_MSG_ERROR([systemd's pkg-config file doesn't contain 'systemdsystemunitdir' variable])
   fi
+  AC_MSG_RESULT($systemdunitdir)
 fi
 AC_SUBST([systemdunitdir], [$systemdunitdir])
-AC_MSG_RESULT($systemdunitdir)
 
 # Internationalization
-
-IT_PROG_INTLTOOL([$INTLTOOL_REQUIRED])
 
 GETTEXT_PACKAGE=cockpit
 AC_SUBST([GETTEXT_PACKAGE])
 AM_GLIB_GNU_GETTEXT
 AC_DEFINE_UNQUOTED([GETTEXT_PACKAGE],["$GETTEXT_PACKAGE"],[gettext domain])
 
+AC_PATH_PROG(MSGCAT, msgcat)
+AC_PATH_PROG(MSGFMT, msgfmt)
+AC_PATH_PROG(MSGGREP, msggrep)
+AC_PATH_PROG(MSGMERGE, msgmerge)
+AC_PATH_PROG(XGETTEXT, xgettext)
+AC_MSG_CHECKING(for gettext binaries)
+if test -x "$MSGCAT" -a -x "$MSGFMT" -a -x "$MSGMERGE" -a -x "$MSGGREP" -a -x "$XGETTEXT"; then
+  AC_SUBST(MSGCAT)
+  AC_SUBST(MSGFMT)
+  AC_SUBST(MSGGREP)
+  AC_SUBST(MSGMERGE)
+  AC_SUBST(XGETTEXT)
+  AC_MSG_RESULT(yes)
+else
+  AC_MSG_ERROR([no. Please install gettext tools])
+fi
+
+AC_PATH_PROG(INTLTOOL_EXTRACT, intltool-extract)
+AC_PATH_PROG(INTLTOOL_MERGE, intltool-merge)
+AC_PATH_PROG(INTLTOOL_UPDATE, intltool-update)
+AC_MSG_CHECKING(for intltool binaries)
+if test -x "$INTLTOOL_EXTRACT" -a -x "$INTLTOOL_MERGE" -a -x "$INTLTOOL_UPDATE"; then
+  AC_SUBST(INTLTOOL_EXTRACT)
+  AC_SUBST(INTLTOOL_MERGE)
+  AC_SUBST(INTLTOOL_UPDATE)
+  AC_MSG_RESULT(yes)
+else
+  AC_MSG_ERROR(no. Please install intltool package)
+fi
+
 # phantomjs
 
-AC_PATH_PROG([PHANTOMJS], [phantomjs], [], [$PATH$PATH_SEPARATOR$srcdir/node_modules/.bin/])
+AC_PATH_PROG([PHANTOMJS], [phantomjs], [], [$srcdir/node_modules/.bin$PATH_SEPARATOR$PATH])
 AM_CONDITIONAL([WITH_PHANTOMJS], [test -n "$PHANTOMJS"])
+AC_SUBST([PHANTOMJS])
 
 # go
 
@@ -271,11 +305,11 @@ AC_DEFINE_UNQUOTED([PATH_CHPASSWD],["$CHPASSWD"],[Location of chpasswd binary])
 
 # pkexec
 AC_PATH_PROG([PKEXEC], [pkexec], [/usr/bin/pkexec], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
-AC_DEFINE_UNQUOTED([PATH_PKEXEC], ["$PKEXEC"], [Location of pkexec binary])
+AC_SUBST(PKEXEC)
 
 # sudo
 AC_PATH_PROG([SUDO], [sudo], [/usr/bin/sudo], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
-AC_DEFINE_UNQUOTED([PATH_SUDO], ["$SUDO"], [Location of sudo binary])
+AC_SUBST(SUDO)
 
 # ssh-add
 AC_PATH_PROG([SSH_ADD], [ssh-add], [/usr/bin/ssh-add], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])
@@ -295,7 +329,8 @@ if test "x$GCC" = "xyes"; then
           -Werror=strict-prototypes -Werror=missing-prototypes \
           -Werror=implicit-function-declaration \
           -Werror=pointer-arith -Werror=init-self \
-          -Werror=format-security \
+          -Werror=format=2 \
+          -Werror=return-type \
           -Werror=missing-include-dirs $CFLAGS"
 fi
 changequote([,])dnl
@@ -303,6 +338,34 @@ changequote([,])dnl
 # System functions
 
 AC_CHECK_FUNCS(fdwalk)
+
+
+# Package specific settings
+
+# HACK - Storaged before 2.5.3 doesn't tell us when it supports
+#        sessions, so we allow it to be switched off explicitly.
+#
+# https://github.com/storaged-project/storaged/pull/68
+
+AC_ARG_WITH(storaged-iscsi-sessions,
+            AC_HELP_STRING([--with-storaged-iscsi-sessions=yes/no],
+                           [Whether storaged supports listing iSCSI sessions]),
+            [],
+            [with_storaged_iscsi_sessions=yes])
+AC_SUBST(with_storaged_iscsi_sessions)
+
+# HACK - Debian has a broken policy for NetworkManager where it
+#        only allows local sessions or root to perform actions.
+#
+# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=808162
+
+AC_ARG_WITH(networkmanager-needs-root,
+	    AC_HELP_STRING([--with-networkmanager-needs-root=yes/no],
+			   [Whether NetworkManager requires root access]),
+            [],
+	    [with_networkmanager_needs_root=yes])
+AC_SUBST(with_networkmanager_needs_root)
+
 
 # Address sanitizer
 
@@ -396,10 +459,10 @@ AM_CONDITIONAL([ENABLE_DOC], [test "$enable_doc" = "yes"])
 
 AC_MSG_CHECKING([for branding directory])
 AC_ARG_WITH(branding,
-            AC_HELP_STRING([--with-branding=default],
-                           [Specify which branding to use.  A value of "auto" means to detect it at run-time.])
+            AC_HELP_STRING([--with-branding=auto],
+                           [Specify which branding to use.  A value of "default" means upstream branding.])
 )
-BRAND=${with_branding:-default}
+BRAND=${with_branding:-auto}
 AC_MSG_RESULT($BRAND)
 if test "$BRAND" != "auto"; then
   AC_DEFINE_UNQUOTED([PACKAGE_BRAND], ["$BRAND"], [Which brand to show.])
@@ -423,14 +486,18 @@ if test "$enable_debug" = "yes"; then
   debug_status="yes"
   debugdir=
   CFLAGS="$CFLAGS -O0"
+  NODE_ENV="development"
 elif test "$enable_debug" = "no"; then
   debug_status="no"
   CFLAGS="$CFLAGS -O2"
+  NODE_ENV="production"
 else
   debug_status="default"
+  NODE_ENV="production"
 fi
 AM_CONDITIONAL(WITH_DEBUG, test "$enable_debug" = "yes")
 AC_MSG_RESULT($debug_status)
+AC_SUBST(NODE_ENV)
 AC_SUBST(debugdir)
 
 # Coverage
@@ -470,14 +537,15 @@ AC_MSG_RESULT($enable_strict)
 # Generate
 #
 
-AC_SUBST(REAUTHORIZE_LIBS)
 AC_SUBST(PAM_LIBS)
+
+AC_DEFINE([MAX_PACKET_SIZE], [65536], [Maximum size of packet messages])
 
 AC_OUTPUT([
 Makefile
 doc/guide/version
-po/Makefile.in
 ])
+
 
 dnl ==========================================================================
 echo "
@@ -495,12 +563,12 @@ echo "
         sysconfdir:                 ${sysconfdir}
         localstatedir:              ${localstatedir}
         pamdir:                     ${pamdir}
+        systemd unit dir:           ${systemdunitdir}
 
         compiler:                   ${CC}
         cflags:                     ${CFLAGS}
         cppflags:                   ${CPPFLAGS}
 
-        cockpit-ws:                 ${enable_ws}
         cockpit-ws user:            ${COCKPIT_USER}
         cockpit-ws group:           ${COCKPIT_GROUP}
         selinux config type:        ${COCKPIT_SELINUX_CONFIG_TYPE}
@@ -512,6 +580,8 @@ echo "
         With address sanitizer:     ${asan_status}
         With PCP:                   ${enable_pcp}
 	Branding:                   ${BRAND}
+
+        cockpit-ssh:                ${enable_ssh}
         Supports key auth:          ${key_auth}
 
         pkexec:                     ${PKEXEC}

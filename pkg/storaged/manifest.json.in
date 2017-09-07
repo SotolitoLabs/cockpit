@@ -1,0 +1,18 @@
+{
+    "version": "@VERSION@",
+    "name": "storage",
+    "requires": {
+	"cockpit": "122"
+    },
+
+    "menu": {
+        "index": {
+            "label": "Storage",
+            "order": 30
+        }
+    },
+
+    "hacks": {
+        "with_storaged_iscsi_sessions": "@with_storaged_iscsi_sessions@"
+    }
+}

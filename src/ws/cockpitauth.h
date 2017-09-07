@@ -30,14 +30,13 @@
 
 G_BEGIN_DECLS
 
+#define MAX_AUTH_TIMEOUT 900
+#define MIN_AUTH_TIMEOUT 1
+
 #define COCKPIT_TYPE_AUTH         (cockpit_auth_get_type ())
 #define COCKPIT_AUTH(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), COCKPIT_TYPE_AUTH, CockpitAuth))
 #define COCKPIT_AUTH_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), COCKPIT_TYPE_AUTH, CockpitAuthClass))
 #define COCKPIT_IS_AUTH_CLASS(k)  (G_TYPE_CHECK_CLASS_TYPE ((k), COCKPIT_TYPE_AUTH))
-
-typedef enum {
-    COCKPIT_AUTH_COOKIE_INSECURE = 1 << 1
-} CockpitAuthFlags;
 
 typedef struct _CockpitAuth        CockpitAuth;
 typedef struct _CockpitAuthClass   CockpitAuthClass;
@@ -47,7 +46,9 @@ struct _CockpitAuth
   GObject parent_instance;
 
   GBytes *key;
-  GHashTable *authenticated;
+  GHashTable *sessions;
+  GHashTable *conversations;
+
   guint64 nonce_seed;
   gboolean login_loopback;
   gulong timeout_tag;
@@ -60,20 +61,6 @@ struct _CockpitAuth
 struct _CockpitAuthClass
 {
   GObjectClass parent_class;
-
-  /* vfunc */
-  void           (* login_async)         (CockpitAuth *auth,
-                                          const gchar *path,
-                                          GHashTable *headers,
-                                          const gchar *remote_peer,
-                                          GAsyncReadyCallback callback,
-                                          gpointer user_data);
-
-  CockpitCreds * (* login_finish)        (CockpitAuth *auth,
-                                          GAsyncResult *result,
-                                          GHashTable *out_headers,
-                                          CockpitTransport **transport,
-                                          GError **error);
 };
 
 GType           cockpit_auth_get_type        (void) G_GNUC_CONST;
@@ -84,27 +71,30 @@ gchar *         cockpit_auth_nonce           (CockpitAuth *self);
 
 void            cockpit_auth_login_async     (CockpitAuth *self,
                                               const gchar *path,
+                                              GIOStream *connection,
                                               GHashTable *headers,
-                                              const gchar *remote_peer,
                                               GAsyncReadyCallback callback,
                                               gpointer user_data);
 
-CockpitWebService *  cockpit_auth_login_finish    (CockpitAuth *self,
-                                                   GAsyncResult *result,
-                                                   CockpitAuthFlags flags,
-                                                   GHashTable *out_headers,
-                                                   GError **error);
+JsonObject *    cockpit_auth_login_finish    (CockpitAuth *self,
+                                              GAsyncResult *result,
+                                              GIOStream *connection,
+                                              GHashTable *out_headers,
+                                              GError **error);
 
 CockpitWebService *  cockpit_auth_check_cookie    (CockpitAuth *self,
                                                    const gchar *path,
                                                    GHashTable *in_headers);
 
-gchar *         cockpit_auth_parse_application    (const gchar *path);
+gchar *         cockpit_auth_parse_application    (const gchar *path,
+                                                   gboolean *is_host);
 
-GBytes *        cockpit_auth_parse_authorization      (GHashTable *headers,
-                                                       gboolean base64_decode);
+gchar *         cockpit_auth_steal_authorization      (GHashTable *headers,
+                                                       GIOStream *connection,
+                                                       gchar **ret_type,
+                                                       gchar **ret_conversation);
 
-gchar *        cockpit_auth_parse_authorization_type  (GHashTable *headers);
+gchar *         cockpit_auth_empty_cookie_value       (const gchar *path);
 
 G_END_DECLS
 

@@ -4,8 +4,11 @@
     <meta charset="utf-8">
     <title>Cockpit Plots</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="../base1/cockpit.css" type="text/css" rel="stylesheet">
-    <script src="../base1/require.js"></script>
+    <link href="../base1/patternfly.css" type="text/css" rel="stylesheet">
+    <link href="plot.css" type="text/css" rel="stylesheet">
+    <script src="../base1/jquery.js"></script>
+    <script src="../base1/cockpit.js"></script>
+    <script src="plot.js"></script>
 </head>
 <body hidden>
   <div class="container-fluid">
@@ -38,27 +41,5 @@
 
     <div id="plot"    class="zoomable-plot" style="height:200px"></div>
   </div>
-  <script>
-require([
-    'jquery',
-    'base1/cockpit',
-    'shell/shell',
-    'shell/plot'
-], function($, cockpit, shell) {
-
-    var plot = shell.plot($('#plot'), 300);
-    plot.set_options(shell.plot_simple_template());
-    plot.add_metrics_sum_series({ direct: [ "mem.util.used" ]
-                                }, { });
-    $(function () {
-        $("body").show();
-        plot.resize();
-
-        var plot_controls = shell.setup_plot_controls($('body'), $('#toolbar'));
-        plot_controls.reset([ plot ]);
-    });
-
-});
-  </script>
 </body>
 </html>

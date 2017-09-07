@@ -21,21 +21,25 @@
 import parent
 from testlib import *
 
-import os
 import subprocess
-import unittest
 
-@unittest.skipIf("debian" in os.environ.get("TEST_OS", ""), "No sosreport on Debian.")
+@skipImage("No sosreport", "continuous-atomic", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable")
 class TestSOS(MachineCase):
     def testBasic(self):
         b = self.browser
+        m = self.machine
 
         self.login_and_go("/sosreport")
+
+        # HACK - start docker so that the docker plugin doesn't hang.
+        # https://bugzilla.redhat.com/show_bug.cgi?id=1441207
+        #
+        m.execute("systemctl start docker || systemctl start docker-latest")
 
         b.click('[data-target="#sos"]')
         b.wait_visible("#sos")
 
-        with b.wait_timeout(180):
+        with b.wait_timeout(360):
             b.wait_visible("#sos-download")
 
         # There doesn't seem to be a easy way to do a real download
@@ -47,7 +51,7 @@ class TestSOS(MachineCase):
 
         b.click("#sos-download button")
         b.wait_present("body > iframe")
-        url = "http://" + self.machine.address + ":9090" + b.attr("body > iframe", "src")
+        url = "http://" + self.machine.web_address + ":" + self.machine.web_port + b.attr("body > iframe", "src")
         cookie = b.cookie('cockpit')
         size = subprocess.check_output('curl -s -f -b "cockpit=%s" "%s" | wc -c' % (cookie, url), shell=True)
         self.assertGreater(int(size), 1000000)

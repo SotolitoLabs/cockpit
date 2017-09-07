@@ -1,0 +1,29 @@
+{
+    "version": "@VERSION@",
+    "name": "system",
+
+    "requires": {
+	"cockpit": "122"
+    },
+
+    "menu": {
+        "index": {
+            "label": "System",
+            "order": 10
+        },
+        "services": {
+            "label": "Services",
+            "order": 100
+        },
+        "logs": {
+            "label": "Logs",
+            "order": 20
+        }
+    },
+
+    "tools": {
+        "terminal": {
+            "label": "Terminal"
+        }
+    }
+}

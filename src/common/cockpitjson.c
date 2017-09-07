@@ -21,6 +21,7 @@
 
 #include "cockpitjson.h"
 
+#include <math.h>
 #include <string.h>
 
 gboolean
@@ -43,6 +44,34 @@ cockpit_json_get_int (JsonObject *object,
     {
       if (value)
         *value = json_node_get_int (node);
+      return TRUE;
+    }
+  else
+    {
+      return FALSE;
+    }
+}
+
+gboolean
+cockpit_json_get_double (JsonObject *object,
+                         const gchar *name,
+                         gdouble defawlt,
+                         gdouble *value)
+{
+  JsonNode *node;
+
+  node = json_object_get_member (object, name);
+  if (!node)
+    {
+      if (value)
+        *value = defawlt;
+      return TRUE;
+    }
+  else if (json_node_get_value_type (node) == G_TYPE_INT64 ||
+           json_node_get_value_type (node) == G_TYPE_DOUBLE)
+    {
+      if (value)
+        *value = json_node_get_double (node);
       return TRUE;
     }
   else
@@ -254,7 +283,7 @@ cockpit_json_get_null (JsonObject *object,
     }
 }
 
-static gboolean
+gboolean
 cockpit_json_equal_object (JsonObject *previous,
                            JsonObject *current)
 {
@@ -586,6 +615,14 @@ cockpit_json_parse_bytes (GBytes *data,
                           GError **error)
 {
   gsize length = g_bytes_get_size (data);
+
+  if (length == 0)
+    {
+      g_set_error (error, JSON_PARSER_ERROR, JSON_PARSER_ERROR_PARSE,
+                   "JSON data was empty");
+      return NULL;
+    }
+
   return cockpit_json_parse_object (g_bytes_get_data (data, NULL), length, error);
 }
 
@@ -720,11 +757,17 @@ dump_value (const gchar   *name,
     }
   else if (type == G_TYPE_DOUBLE)
     {
-        gchar buf[G_ASCII_DTOSTR_BUF_SIZE];
+      gchar buf[G_ASCII_DTOSTR_BUF_SIZE];
+      gdouble d = json_node_get_double (node);
 
-        g_string_append (buffer,
-                         g_ascii_dtostr (buf, sizeof (buf),
-                                         json_node_get_double (node)));
+      if (fpclassify (d) == FP_NAN || fpclassify (d) == FP_INFINITE)
+        {
+          g_string_append (buffer, "null");
+        }
+      else
+        {
+          g_string_append (buffer, g_ascii_dtostr (buf, sizeof (buf), d));
+        }
     }
   else if (type == G_TYPE_BOOLEAN)
     {
@@ -919,4 +962,48 @@ cockpit_json_write (JsonNode *node,
     }
 
   return retval;
+}
+
+JsonObject *
+cockpit_json_from_hash_table (GHashTable *hash_table,
+                              const gchar **fields)
+{
+  JsonObject *block = NULL;
+  gint i;
+  const gchar *value;
+
+  if (hash_table)
+   {
+     block = json_object_new ();
+     for (i = 0; fields[i] != NULL; i++)
+       {
+         value = g_hash_table_lookup (hash_table, fields[i]);
+         if (value)
+           json_object_set_string_member (block, fields[i], value);
+         else
+           json_object_set_null_member (block, fields[i]);
+       }
+   }
+
+  return block;
+}
+
+GHashTable *
+cockpit_json_to_hash_table (JsonObject *object,
+                            const gchar **fields)
+{
+  gint i;
+  GHashTable *hash_table = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+
+  for (i = 0; fields[i] != NULL; i++)
+    {
+      const gchar *value;
+      if (!cockpit_json_get_string (object, fields[i], NULL, &value))
+        continue;
+
+      if (value)
+        g_hash_table_insert (hash_table, g_strdup (fields[i]), g_strdup (value));
+   }
+
+  return hash_table;
 }

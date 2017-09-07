@@ -17,15 +17,16 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "base1/patterns",
-    "shell/controls"
-], function($, cockpit, mustache, patterns, controls) {
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var mustache = require("mustache");
+    require("patterns");
+
     var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
 
     /* GENERIC STORAGE DIALOG SUPPORT
      */
@@ -49,10 +50,15 @@ define([
             // Put in the Units for SizeSliders
             if (f.SizeSlider && !f.Units)
                 f.Units = cockpit.get_byte_units(f.Value || f.Max);
+
+            // Help SelectMany with counting
+            if (f.SelectMany)
+                f.HasOptions = (f.Options.length > 0);
         });
 
 
         function toggle_arrow(event) {
+            /* jshint validthis:true */
             var collapsed = $(this).hasClass('collapsed');
             if (collapsed) {
                 $(this).removeClass('collapsed');
@@ -65,6 +71,7 @@ define([
         }
 
         function select_row(event) {
+            /* jshint validthis:true */
             var tbody = $(this);
             var row = $(event.target).parent('tr');
             tbody.find('tr').removeClass('highlight-ct');
@@ -119,7 +126,10 @@ define([
         function setup_size_slider(field) {
             var value = field.Value || field.Max;
             var parent = $dialog.find('[data-field="' + field.SizeSlider + '"]');
-            var slider = controls.Slider();
+            var slider = $("<div class='slider'>").
+                append($("<div class='slider-bar'>").
+                    append($("<div class='slider-thumb'>")));
+            $(slider).slider();
 
             parent.data('max', field.Max);
             parent.data('round', field.Round);
@@ -134,6 +144,7 @@ define([
         }
 
         function size_slider_changed(event, value) {
+            /* jshint validthis:true */
             var parent = $(this).parents('.size-slider');
             var input = parent.find('.size-text');
             var unit = parent.find('.size-unit');
@@ -154,6 +165,7 @@ define([
         }
 
         function size_text_changed(event) {
+            /* jshint validthis:true */
             var input = $(this);
             var parent = input.parents('.size-slider');
             var unit = parent.find('.size-unit');
@@ -180,6 +192,7 @@ define([
         }
 
         function size_unit_changed(event) {
+            /* jshint validthis:true */
             var unit = $(this);
             var parent = unit.parents('.size-slider');
             var input = parent.find('.size-text');
@@ -213,9 +226,9 @@ define([
                 else if (f.SelectOne)
                     vals[n] = $f.val();
                 else if (f.SizeInput)
-                    vals[n] = parseInt($f.val())*1024*1024;
+                    vals[n] = parseInt($f.val(), 10)*1024*1024;
                 else if (f.SizeSlider)
-                    vals[n] = parseInt($f.val());
+                    vals[n] = parseInt($f.val(), 10);
                 else if (f.CheckBox)
                     vals[n] = $f.prop('checked');
                 else if (f.SelectMany) {
@@ -256,9 +269,9 @@ define([
                 if (isNaN(val))
                     msg = _("Size must be a number");
                 if (val === 0)
-                    msg = _("Size can not be zero");
+                    msg = _("Size cannot be zero");
                 if (val < 0)
-                    msg = _("Size can not be negative");
+                    msg = _("Size cannot be negative");
                 if (!field.AllowInfinite && val > field.Max)
                     msg = _("Size is too large");
             }
@@ -337,5 +350,5 @@ define([
 
     $(init_dialogs);
 
-    return { open: dialog_open };
-});
+    module.exports = { open: dialog_open };
+}());

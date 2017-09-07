@@ -113,11 +113,6 @@ th.networking-action {
     width: 28px;
 }
 
-td.networking-configure {
-    text-align: right;
-    vertical-align top;
-}
-
 td.networking-row-configure {
     text-align: right;
 }
@@ -164,4 +159,35 @@ span.inverted-switchbox {
 
 .bootstrap-select {
     min-width: 150px;
+}
+
+#network-mtu-settings-dialog label {
+    font-weight: normal;
+}
+
+#network-mtu-settings-dialog label input[type=radio] {
+    position: relative;
+    top: 3px;
+    margin-right: 0.5em;
+}
+
+#network-mtu-settings-input {
+    margin-left: 0.5em;
+    width: 5em;
+    display: inline;
+}
+
+#network-mac-settings-dialog label {
+    font-weight: normal;
+}
+
+#testing-connection-curtain {
+    z-index: 2000;
+}
+
+#confirm-breaking-change-popup .pficon-warning-triangle-o {
+    float: left;
+    font-size: 36px;
+    margin-top: 6px;
+    margin-right: 20px;
 }

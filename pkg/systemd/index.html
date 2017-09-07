@@ -1,21 +1,35 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Cockpit</title>
+    <title translatable="yes">System</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="../base1/cockpit.css" rel="stylesheet">
-    <link href="../shell/shell.css" rel="stylesheet">
-    <link href="../shell/plot.css" rel="stylesheet">
-    <link href="../system/host.css" rel="stylesheet">
-    <script data-main="system/host" src="../base1/bundle.js"></script>
-    <script src="../shell/bundle.js"></script>
-    <script src="../shell/shell.js"></script>
-    <script src="../system/bundle.js"></script>
-    <script src="../domain/bundle.js"></script>
-    <script src="../performance/bundle.js"></script>
+    <link href="../base1/patternfly.css" rel="stylesheet">
+    <link href="../shell/index.css" rel="stylesheet">
+    <link href="system.css" rel="stylesheet">
+    <script src="../base1/jquery.js"></script>
+    <script src="../base1/cockpit.js"></script>
+    <script src="../*/po.js"></script>
 </head>
 <body hidden>
+
+    <script id="ssh-host-keys-tmpl" type="x-template/mustache">
+        <div class="list-group dialog-list-ct">
+            {{#keys}}
+                <div class="list-group-item">
+                    <p>{{ title }}</p>
+                    {{#fps}}
+                    <small>{{.}}</small>
+                    {{/fps}}
+                </div>
+            {{/keys}}
+            {{^keys}}
+                <div class="list-group-item">
+                    <p translatable="yes">No host keys found.</p>
+                </div>
+            {{/keys}}
+        </div>
+    </script>
 
     <script id="ntp-status-icon-tmpl" type="x-template/mustache">
       {{#Synched}}
@@ -47,7 +61,7 @@
       {{^Server}}
       <div translatable="yes">Not synchronized</div>
       {{#service}}
-      <a data-goto-service="{{.}}" class="small-messages">Log messages</a>
+      <a data-goto-service="{{.}}" class="small-messages" translate>Log messages</a>
       {{/service}}
       {{/Server}}
       {{/Synched}}
@@ -56,6 +70,16 @@
       {{/SubStatus}}
     </script>
 
+    <div id="motd-box" class="container-fluid page-ct" hidden>
+      <div class="alert alert-info">
+        <button type="button" class="close" aria-hidden="true">
+          <span class="pficon pficon-close"></span>
+        </button>
+        <span class="pficon pficon-info"></span>
+        <pre id="motd"></pre>
+      </div>
+    </div>
+
     <div id="server" class="container-fluid page-ct">
         <div class="col-md-4 col-lg-3 info-table-ct-container">
             <table class="info-table-ct">
@@ -63,13 +87,22 @@
                     <td translatable="yes">Hardware</td>
                     <td id="system_information_hardware_text"></td>
                 </tr>
-                <tr>
+                <tr id="system-info-asset-row">
                     <td translatable="yes">Asset Tag</td>
                     <td id="system_information_asset_tag_text"></td>
                 </tr>
                 <tr>
+                    <td translatable="yes">Machine ID</td>
+                    <td id="system_machine_id"></td>
+                </tr>
+                <tr id="system_information_os">
                     <td translatable="yes">Operating System</td>
                     <td id="system_information_os_text"></td>
+                </tr>
+                <tr id="system-ssh-keys">
+                    <td translatable="yes">Secure Shell Keys</td>
+                    <td><a id="system-ssh-keys-link" translatable="yes" data-toggle="modal"
+                           data-target="#system_information_ssh_keys">Show fingerprints</a></td>
                 </tr>
                 <tr id="system-ostree-version" class="hidden">
                     <td translatable="yes">Version</td>
@@ -77,18 +110,18 @@
                 </tr>
                 <tr>
                     <td translatable="yes">Host Name</td>
-                    <td><button class="btn btn-default hostname-privileged"
-                            id="system_information_hostname_button"></button></td>
+                    <td><a class="hostname-privileged"
+                            id="system_information_hostname_button"></a></td>
                 </tr>
-                <tr id="system-info-realms">
+                <tr id="system-info-domain" hidden>
                     <td translatable="yes">Domain</td>
                     <td class="button-location">
                     </td>
                 </tr>
                 <tr>
                     <td translatable="yes">System Time</td>
-                    <td><button class="btn btn-default systime-privileged"
-                                id="system_information_systime_button"></button>
+                    <td><a class="systime-privileged"
+                                id="system_information_systime_button"></a>
                       <a hidden id="system_information_systime_ntp_status"
                          tabindex="0" role="button" data-toggle="popover"
                          data-trigger="focus" data-placement="top"
@@ -100,9 +133,9 @@
                     <td translatable="yes">Power Options</td>
                     <td id="shutdown-group">
                         <div class="btn-group">
-                            <button class="btn btn-default btn-danger" data-action="restart"
+                            <button class="btn btn-default btn-danger shutdown-privileged" data-action="restart"
                                 data-container="body" translatable="yes">Restart</button>
-                            <button data-toggle="dropdown" class="btn btn-default dropdown-toggle">
+                            <button data-toggle="dropdown" class="btn btn-default dropdown-toggle shutdown-privileged">
                                 <span class="caret"></span>
                             </button>
                             <ul role="menu" class="dropdown-menu">
@@ -110,13 +143,13 @@
                                     <a role="menuitem" data-action="restart" translatable="yes">Restart</a>
                                 </li>
                                 <li class="presentation">
-                                    <a role="menuitem" data-action="shutdown" translatable="yes">Shutdown</a>
+                                    <a role="menuitem" data-action="shutdown" translatable="yes">Shut Down</a>
                                 </li>
                             </ul>
                         </div>
                     </td>
                 </tr>
-                <tr id="system-info-performance">
+                <tr id="system-info-performance" hidden>
                     <td translatable="yes">Performance Profile</td>
                     <td class="button-location">
                     </td>
@@ -147,18 +180,18 @@
                     </button>
                     <ul class="dropdown-menu" role="menu">
                         <li role="presentation"><a role="menuitem" tabindex="-1"
-                            data-action="goto-now">Go to now</a></li>
+                            data-action="goto-now" translate>Go to now</a></li>
                         <li role="presentation" class="divider"></li>
                         <li role="presentation"><a role="menuitem" tabindex="-1"
-                            data-range="300">5 minutes</a></li>
+                            data-range="300" translate>5 minutes</a></li>
                         <li role="presentation"><a role="menuitem" tabindex="-1"
-                            data-range="3600">1 hour</a></li>
+                            data-range="3600" translate>1 hour</a></li>
                         <li role="presentation"><a role="menuitem" tabindex="-1"
-                            data-range="21600">6 hours</a></li>
+                            data-range="21600" translate>6 hours</a></li>
                         <li role="presentation"><a role="menuitem" tabindex="-1"
-                            data-range="86400">1 day</a></li>
+                            data-range="86400" translate>1 day</a></li>
                         <li role="presentation"><a role="menuitem" tabindex="-1"
-                            data-range="604800">1 week</a></li>
+                            data-range="604800" translate>1 week</a></li>
                     </ul>
                 </div>
                 <button class="btn btn-default" data-action="zoom-out">
@@ -170,22 +203,22 @@
                 </div>
             </div>
             <div>
-              <span class="plot-unit" id="server_cpu_unit">%</span><a id="link-cpu">CPU</a>
+              <span class="plot-unit" id="server_cpu_unit">%</span><a id="link-cpu" translate>CPU</a>
             </div>
             <div id="server_cpu_graph" class="server-graph zoomable-plot"></div>
             <br/>
             <div>
-              <span class="plot-unit" id="server_memory_unit"></span><a id="link-memory">Memory</a>
+              <span class="plot-unit" id="server_memory_unit"></span><a id="link-memory" translate>Memory</a>
             </div>
             <div id="server_memory_graph" class="server-graph zoomable-plot"></div>
             <br/>
             <div>
-              <span class="plot-unit" id="server_disk_io_unit"></span><a id="link-disk">Disk I/O</a>
+              <span class="plot-unit" id="server_disk_io_unit"></span><a id="link-disk" translate>Disk I/O</a>
             </div>
             <div id="server_disk_io_graph" class="server-graph zoomable-plot"></div>
             <br/>
             <div>
-              <span class="plot-unit" id="server_network_traffic_unit"></span><a id="link-network">Network Traffic</a>
+              <span class="plot-unit" id="server_network_traffic_unit"></span><a id="link-network" translate>Network Traffic</a>
             </div>
             <div id="server_network_traffic_graph" class="server-graph zoomable-plot"></div>
         </div>
@@ -235,17 +268,23 @@
         <div id="memory_status_graph"></div>
     </div>
 
-    <div class="modal" id="error-popup" tabindex="-1" role="dialog" data-backdrop="static">
+    <div class="modal" id="system_information_ssh_keys" tabindex="-1"
+        role="dialog" data-backdrop="static">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h4 class="modal-title" id="error-popup-title">Unexpected error</h4>
+                    <h4 class="modal-title" translatable="yes">Machine SSH Key Fingerprints</h4>
                 </div>
                 <div class="modal-body">
-                    <p id="error-popup-message"></p>
+                    <div class="spinner spinner-lg"></div>
+                    <div class="alert alert-danger" hidden>
+                      <span class="pficon pficon-error-circle-o"></span>
+                      <strong></strong>
+                    </div>
+                    <div class="content" hidden></div>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-primary" data-dismiss="modal">Close</button>
+                    <button class="btn btn-default" data-dismiss="modal" translate>Close</button>
                 </div>
             </div>
         </div>
@@ -256,7 +295,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h4 class="modal-title">Change Host Name</h4>
+                    <h4 class="modal-title" translate>Change Host Name</h4>
                 </div>
                 <div class="modal-body">
                     <table class="form-table-ct">
@@ -299,8 +338,8 @@
                     </table>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-default" data-dismiss="modal">Cancel</button>
-                    <button class="btn btn-primary" id="sich-apply-button">Change</button>
+                    <button class="btn btn-default" data-dismiss="modal" translate>Cancel</button>
+                    <button class="btn btn-primary" id="sich-apply-button" translate>Change</button>
                 </div>
             </div>
         </div>
@@ -310,8 +349,8 @@
       <div class="systime-inline">
         {{#NTPServers}}
         <form class="form-inline">
-          <button data-action="add" data-index={{index}} class="btn btn-default fa fa-plus"/>
-          <button data-action="del" data-index={{index}} class="btn btn-default pficon-close"/>
+          <button data-action="add" data-index={{index}} class="btn btn-default fa fa-plus"></button>
+          <button data-action="del" data-index={{index}} class="btn btn-default pficon-close"></button>
           <div class="form-group">
             <input type="text" class="form-control" value="{{Value}}" placeholder="{{Placeholder}}">
           </div>
@@ -325,7 +364,7 @@
         <div class="modal-dialog cockpit-modal-md">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h4 class="modal-title">Change System Time</h4>
+                    <h4 class="modal-title" translate>Change System Time</h4>
                 </div>
                 <div class="modal-body">
                     <table class="form-table-ct">
@@ -341,14 +380,12 @@
                         <tr>
                             <td></td>
                             <td class="has-error">
-                                <span id="systime-timezone-error" class="help-block" translatable="yes">
-                                    Invalid time zone
-                                </span>
+                                <span id="systime-timezone-error" class="help-block" translatable="yes">Invalid time zone</span>
                             </td>
                         </tr>
                         <tr>
                             <td><label class="control-label" for="change_systime"
-                                       translatable="yes">Set time</label></td>
+                                       translatable="yes">Set Time</label></td>
                             <td>
                                 <div class="btn-group bootstrap-select dropdown form-control" id="change_systime">
                                     <button class="btn btn-default dropdown-toggle" type="button"
@@ -388,8 +425,8 @@
                     </table>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-default" data-dismiss="modal">Cancel</button>
-                    <button class="btn btn-primary" id="systime-apply-button">Change</button>
+                    <button class="btn btn-default" data-dismiss="modal" translate>Cancel</button>
+                    <button class="btn btn-primary" id="systime-apply-button" translate>Change</button>
                 </div>
             </div>
         </div>
@@ -402,12 +439,14 @@
                     <h4 class="modal-title"></h4>
                 </div>
                 <div class="modal-body">
-                    <textarea class="form-control" id="shutdown-message">
+                    <textarea class="form-control">
                     </textarea>
                     <table>
                         <tr>
-                            <td translatable="yes">Delay</td>
-                            <td id="shutdown-delay">
+                            <td>
+                                <label translatable="yes">Delay</label>
+                            </td>
+                            <td>
                                 <div class="btn-group bootstrap-select dropdown form-control">
                                     <button class="btn btn-default dropdown-toggle" type="button"
                                         data-toggle="dropdown">
@@ -427,21 +466,19 @@
                                 </div>
                             </td>
                             <td>
-                                <div id="shutdown-time">
-                                    <input class="form-control" value="18"/>
-                                    <span>:</span>
-                                    <input class="form-control" value="00"/>
+                                <div>
+                                    <input class="form-control shutdown-date" type="text">
+                                    <input class="form-control shutdown-hours" type="text">
+                                    :
+                                    <input class="form-control shutdown-minutes" type="text">
                                 </div>
                             </td>
                         </tr>
                     </table>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-default btn-danger" translatable="yes" data-dismiss="modal">
-                        Cancel
-                    </button>
-                    <button class="btn btn-danger" id="shutdown-action">
-                    </button>
+                    <button class="btn btn-default" translatable="yes" data-dismiss="modal">Cancel</button>
+                    <button class="btn btn-danger"></button>
                 </div>
             </div>
         </div>
@@ -456,9 +493,7 @@
                 <div class="modal-body" id="confirmation-dialog-body">
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-default" translatable="yes" id="confirmation-dialog-cancel">
-                        Cancel
-                    </button>
+                    <button class="btn btn-default" translatable="yes" id="confirmation-dialog-cancel">Cancel</button>
                     <button class="btn btn-danger" id="confirmation-dialog-confirm">
                     </button>
                 </div>
@@ -466,5 +501,8 @@
         </div>
     </div>
 
+    <script src="system.js"></script>
+    <script src="../domain/domain.js"></script>
+    <script src="../performance/performance.js"></script>
 </body>
 </html>

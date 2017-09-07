@@ -17,33 +17,31 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-require([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "shell/controls",
-    "shell/shell",
-    "shell/machines",
-    "dashboard/image-editor",
-    "shell/machine-dialogs",
-    "base1/patterns",
-    "shell/plot",
-], function($, cockpit, Mustache, controls, shell, machines, image_editor, mdialogs) {
-"use strict";
+var $ = require("jquery");
+var cockpit = require("cockpit");
+
+var Mustache = require("mustache");
+var plot = require("plot");
+
+var machines = require("machines");
+var mdialogs = require("machine-dialogs");
+require("patterns");
+
+var image_editor = require("./image-editor");
 
 var _ = cockpit.gettext;
-var C_ = cockpit.gettext;
 
 /* Handles an href link to a server */
 $(document).on("click", "a[data-address]", function(ev) {
     cockpit.jump("/", $(this).attr("data-address"));
     ev.preventDefault();
+    return false;
 });
 
 var common_plot_options = {
     legend: { show: false },
     series: { shadowSize: 0 },
-    xaxis: { tickColor: "#d1d1d1", mode: "time", tickFormatter: shell.format_date_tick, minTickSize: [ 1, 'minute' ] },
+    xaxis: { tickColor: "#d1d1d1", mode: "time", tickFormatter: plot.format_date_tick, minTickSize: [ 1, 'minute' ] },
     // The point radius influences the margin around the grid even if
     // no points are plotted.  We don't want any margin, so we set the
     // radius to zero.
@@ -86,9 +84,9 @@ var resource_monitors = [
           ],
           units: "bytes",
       },
-      options: { yaxis: { ticks: shell.memory_ticks,
+      options: { yaxis: { ticks: plot.memory_ticks,
                           tickColor: "#e1e6ed",
-                          tickFormatter: shell.format_bytes_tick
+                          tickFormatter: plot.format_bytes_tick
                         }
                },
       ymax_unit: 100000000
@@ -99,15 +97,15 @@ var resource_monitors = [
               "network.interface.total.bytes"
           ],
           internal: [
-              "network.all.rx",
-              "network.all.tx"
+              "network.interface.rx",
+              "network.interface.tx"
           ],
           units: "bytes",
           'omit-instances': [ "lo" ],
           derive: "rate"
       },
       options: { yaxis: { tickColor: "#e1e6ed",
-                          tickFormatter: shell.format_bits_per_sec_tick
+                          tickFormatter: plot.format_bits_per_sec_tick
                         }
                },
       ymax_min: 100000
@@ -124,9 +122,9 @@ var resource_monitors = [
           units: "bytes",
           derive: "rate"
       },
-      options: { yaxis: { ticks: shell.memory_ticks,
+      options: { yaxis: { ticks: plot.memory_ticks,
                           tickColor: "#e1e6ed",
-                          tickFormatter: shell.format_bytes_per_sec_tick
+                          tickFormatter: plot.format_bytes_per_sec_tick
                         }
                },
       ymax_min: 100000
@@ -206,9 +204,8 @@ var permission = cockpit.permission({ admin: true });
 $(permission).on("changed", update_servers_privileged);
 
 function update_servers_privileged() {
-    controls.update_privileged_ui(
-        permission, ".servers-privileged",
-        cockpit.format(
+    $(".servers-privileged").update_privileged(
+        permission, cockpit.format(
             _("The user <b>$0</b> is not permitted to manage servers"),
             permission.user ? permission.user.name : '')
     );
@@ -247,6 +244,7 @@ PageDashboard.prototype = {
         $('#dashboard-enable-edit').click(function () {
             self.toggle_edit(!self.edit_enabled);
         });
+        $('#dashboard-enable-edit').tooltip({ trigger : 'hover' });
 
         var renderer = host_renderer($("#dashboard-hosts .list-group"));
         $(self.machines).on("added.dashboard", renderer);
@@ -268,7 +266,7 @@ PageDashboard.prototype = {
 
         plot_init();
         set_monitor(current_monitor);
-        shell.setup_plot_controls($('#dashboard'), $('#dashboard-toolbar'), self.plots);
+        plot.setup_plot_controls($('#dashboard'), $('#dashboard-toolbar'), self.plots);
 
         $("#dashboard-hosts")
             .on("click", "a.list-group-item", function() {
@@ -478,9 +476,9 @@ PageDashboard.prototype = {
                 var options = $.extend({ setup_hook: setup_hook },
                                        common_plot_options,
                                        rm.options);
-                var plot = shell.plot($(rm.selector));
-                plot.set_options(options);
-                self.plots.push(plot);
+                var pl = plot.plot($(rm.selector));
+                pl.set_options(options);
+                self.plots.push(pl);
             });
 
             series = {};
@@ -518,17 +516,9 @@ function PageDashboard() {
  * pages and dialogs, and expects page.setup, page.enter, page.show,
  * and page.leave to be called at the right times.
  *
- * We cater to this with a little compatability shim consisting of
+ * We cater to this with a little compatibility shim consisting of
  * 'dialog_setup', 'page_show', and 'page_hide'.
  */
-
-function dialog_setup(d) {
-    d.setup();
-    $('#' + d.id).
-        on('show.bs.modal', function () { d.enter(); }).
-        on('shown.bs.modal', function () { d.show(); }).
-        on('hidden.bs.modal', function () { d.leave(); });
-}
 
 function page_show(p, arg) {
     if (p._entered_)
@@ -537,14 +527,6 @@ function page_show(p, arg) {
     p._entered_ = true;
     $('#' + p.id).show();
     p.show();
-}
-
-function page_hide(p) {
-    $('#' + p.id).hide();
-    if (p._entered_) {
-        p.leave();
-        p._entered_ = false;
-    }
 }
 
 function init() {
@@ -572,5 +554,4 @@ function init() {
     navigate();
 }
 
-init();
-});
+$(init);

@@ -1,14 +1,12 @@
 <modal-dialog>
     <div class="modal-header">
-        <h4 class="modal-title" translatable="yes">Add User</h4>
+        <h4 class="modal-title" translate>Add User</h4>
     </div>
     <div class="modal-body">
         <table class="form-table-ct">
             <tr>
                 <td class="top">
-                    <label class="control-label" for="user_name" translatable="yes">
-                        Name
-                    </label>
+                    <label class="control-label" for="user_name" translate>Name</label>
                 </td>
                 <td>
                     <input id="user_name" ng-model="fields.name" class="form-control" type="text" autofocus>
@@ -16,9 +14,7 @@
             </tr>
             <tr>
                 <td class="top">
-                    <label class="control-label" for="identities" translatable="yes">
-                        Identity
-                    </label>
+                    <label class="control-label" for="identities" translate>Identity</label>
                 </td>
                 <td>
                     <input id="identities" ng-model="fields.identities" class="form-control" type="text">
@@ -27,7 +23,7 @@
         </table>
     </div>
     <div class="modal-footer">
-        <button class="btn btn-default btn-cancel" translatable="yes">Cancel</button>
-        <button class="btn btn-primary" translatable="yes" ng-click="complete(performCreate())">Add</button>
+        <button class="btn btn-default btn-cancel" translate>Cancel</button>
+        <button class="btn btn-primary" translate ng-click="complete(performCreate())">Add</button>
     </div>
 </modal-dialog>

@@ -1,16 +1,19 @@
-/* global angular */
+(function() {
+    "use strict";
 
-require([
-    "jquery",
-    "base1/cockpit",
-    "updates/moment",
-    "shell/po",
-    "updates/client",
-], function($, cockpit, moment, po, client) {
-    'use strict';
+    var cockpit = require('cockpit');
+    var moment = require('moment');
+
+    var angular = require('angular');
+    require('angular-dialog.js');
+    require('angular-route');
+    require('angular-gettext/dist/angular-gettext.js');
+    require('angular-bootstrap-npm/dist/angular-bootstrap.js');
+
+    var client = require('./client');
+    require('./remotes');
 
     var _ = cockpit.gettext;
-    cockpit.locale(po);
     cockpit.translate();
 
     var phantom_checkpoint = phantom_checkpoint || function () { };
@@ -50,6 +53,9 @@ require([
 
     angular.module('ostree', [
             'ngRoute',
+            'gettext',
+            'ui.cockpit',
+            'ostree.remotes',
         ])
         .config([
             '$routeProvider',
@@ -91,6 +97,7 @@ require([
                                    final: final });
                 }
 
+                var timeout;
                 function check_empty() {
                     window.clearTimeout(timeout);
                     timeout = null;
@@ -106,16 +113,16 @@ require([
                 }
 
                 $scope.curtains = { state: 'silent' };
-                var timeout = window.setTimeout(function() {
+                timeout = window.setTimeout(function() {
                     set_curtains({ state: 'connecting' });
-                    $("body").show();
+                    document.body.removeAttribute('hidden');
                     timeout = null;
                 }, 1000);
 
                 function handle(promise) {
                     promise
                         .always(function() {
-                            $("body").show();
+                            document.body.removeAttribute('hidden');
                             window.clearTimeout(timeout);
                             timeout = null;
                         })
@@ -125,10 +132,11 @@ require([
                         .fail(show_failure);
                 }
 
-                $(client).on("connectionLost.main", function(event, ex) {
+                function on_connection_lost(event, ex) {
                     show_failure(ex);
-                });
-                $(client).on("changed.main", check_empty);
+                }
+                client.addEventListener("connectionLost", on_connection_lost);
+                client.addEventListener("changed", check_empty);
 
                 handle(client.connect());
                 $scope.reconnect = function reconnect() {
@@ -137,7 +145,8 @@ require([
                 };
 
                 $scope.$on("$destroy", function() {
-                    $(client).off(".main");
+                    client.removeEventListener("connectionLost", on_connection_lost);
+                    client.removeEventListener("changed", check_empty);
                 });
             }
         ])
@@ -145,6 +154,7 @@ require([
         .controller('indexController', [
             '$scope',
             function($scope) {
+                $scope.os = null;
                 $scope.track_id = track_id;
 
                 /*
@@ -155,31 +165,60 @@ require([
                     phantom_checkpoint();
                 });
 
-                $scope.knownVersions = function(os) {
-                    return client.known_versions_for(os);
+                $scope.displayOS = function(os) {
+                    $scope.os = os;
+                    $scope.currentOrigin = client.get_default_origin(os);
+                };
+
+                $scope.knownVersions = function() {
+                    var origin = $scope.currentOrigin || {};
+                    return client.known_versions_for($scope.os,
+                                                     origin.remote,
+                                                     origin.branch);
                 };
 
                 $scope.itemMatches = function(item, proxy_arg) {
                     return client.item_matches(item, proxy_arg);
                 };
 
+                $scope.$on("changeOrigin", function (ev, remote, branch) {
+                    $scope.$applyAsync(function() {
+                        var origin = {
+                            "remote": remote,
+                            "branch": branch,
+                        };
+
+                        var defaultOrigin = client.get_default_origin($scope.os) || {};
+                        if (!origin.branch)
+                            origin.branch = defaultOrigin.branch;
+                        if (!origin.remote)
+                            origin.remote = defaultOrigin.remote;
+
+                        $scope.currentOrigin = origin;
+                    });
+                });
+
+                function on_changed() {
+                    $scope.$applyAsync(function() {
+                        $scope.runningMethod = client.running_method;
+                        $scope.os_list = client.os_list;
+                        if (client.os_list) {
+                            if (!$scope.os || !client.get_os_proxy($scope.os))
+                                $scope.displayOS(client.os_list[0]);
+                        } else {
+                            $scope.displayOS(null);
+                        }
+                    });
+                }
+
                 client.connect().
                     done(function () {
-                        $(client).on("changed.ostreeIndex", function() {
-                            $scope.$applyAsync(function() {
-                                $scope.runningMethod = client.running_method;
-                                $scope.os_list = client.os_list;
-                            });
-                        });
-
-                        $scope.$applyAsync(function() {
-                            $scope.runningMethod = client.running_method;
-                            $scope.os_list = client.os_list;
-                        });
+                        client.addEventListener("changed", on_changed);
+                        on_changed();
                     });
 
                 $scope.$on("$destroy", function() {
-                    $(client).off(".ostreeIndex");
+                    client.removeEventListener("changed", on_changed);
                 });
         }])
 
@@ -196,29 +235,124 @@ require([
         }])
 
         .directive('ostreeCheck', [
-            function() {
+            '$modal',
+            "remoteActions",
+            function($modal, remoteActions) {
                 return {
                     restrict: 'E',
                     templateUrl: "ostree-check.html",
                     scope: {
                         os: "=",
-                        runningMethod: "="
+                        runningMethod: "=",
+                        currentOrigin: "="
                     },
                     link: function(scope, element, attrs) {
                         scope.error = null;
                         scope.progressMsg = null;
                         scope.isRunning = false;
+                        scope.branches = {};
+
+                        function updateBranchCache(remote, branch) {
+                            scope.isRunning = true;
+
+                            /* We want to populate the list with already downloaded updates
+                             * but this can error if there are no new updates or the remote
+                             * hasn't yes been downloaded from so we ignore errors.
+                             * If there is a real error, the use will see if when they
+                             * check for updates.
+                             */
+                            client.cache_update_for(scope.os,
+                                                    remote,
+                                                    branch)
+                                .always(function () {
+                                    scope.$applyAsync(function () {
+                                        scope.isRunning = false;
+                                    });
+                                });
+                        }
+
+                        scope.$watch("currentOrigin.remote", function (newValue) {
+                            var branches = {
+                                remote: newValue
+                            };
+
+                            if (!newValue) {
+                                scope.branches = {};
+                                return;
+                            }
+
+                            // Only run when remote is changed by loading new OS
+                            // dialog takes care of this when changed there
+                            if (scope.branches.remote === newValue)
+                                return;
+
+                            scope.isRunning = true;
+                            remoteActions.listBranches(newValue)
+                                .then(function (data) {
+                                    branches.list = data;
+                                }, function (ex) {
+                                    branches.error = cockpit.message(ex);
+                                })
+                                .then(function () {
+                                    scope.$applyAsync(function() {
+                                        scope.branches = branches;
+                                        scope.isRunning = false;
+                                    });
+                                });
+                        });
+
                         scope.$watch("runningMethod", function() {
                             var expected = "DownloadUpdateRpmDiff:" + scope.os;
-                            scope.isRunning = expected === client.running_method;
+                            var expected2 = "DownloadRebaseRpmDiff:" + scope.os;
+                            scope.isRunning = expected === client.running_method ||
+                                              expected2 === client.running_method;
                         });
 
                         scope.checkForUpgrades = function() {
+                            var origin = scope.currentOrigin || {};
                             scope.error = null;
                             scope.progressMsg = _("Checking for updates");
-                            var promise = client.run_transaction("DownloadUpdateRpmDiff",
-                                                                 null, scope.os);
+
+                            var promise = client.check_for_updates(scope.os,
+                                                                   origin.remote,
+                                                                   origin.branch);
                             notify_result(promise, scope);
+                        };
+
+                        scope.switchBranch = function(branch) {
+                            if (!scope.currentOrigin)
+                                return;
+
+                            scope.error = null;
+
+                            updateBranchCache(scope.currentOrigin.remote, branch);
+                            scope.$emit("changeOrigin", scope.currentOrigin.remote, branch);
+                        };
+
+                        scope.changeRepository = function() {
+                            scope.error = null;
+                            var promise = $modal.open({
+                                animation: false,
+                                controller: 'ChangeRepositoryCtrl',
+                                templateUrl: 'repository-dialog.html',
+                                resolve: {
+                                    dialogData: function() {
+                                        var origin = scope.currentOrigin || {};
+                                        return {
+                                            "remote": origin.remote,
+                                            "branch": origin.branch,
+                                            "os": scope.os
+                                        };
+                                    }
+                                },
+                            }).result;
+
+                            /* If the change is successful */
+                            promise.then(function(result) {
+                                scope.branches = result.branches;
+                                scope.$emit("changeOrigin", result.remote, result.branch);
+                            });
+                            return promise;
                         };
                     }
                 };
@@ -241,6 +375,8 @@ require([
                                 expected = "Deploy:";
                             else if (client.item_matches(scope.item, "RollbackDeployment"))
                                 expected = "Rollback:";
+                            else if (!scope.item.id)
+                                expected = "Rebase:";
 
                             if (scope.item && scope.item.osname)
                                 expected = expected + scope.item.osname.v;
@@ -253,20 +389,40 @@ require([
                         scope.id = track_id(scope.item);
                         scope.active = 'tree';
 
-                        scope.packages = client.packages(scope.item);
-                        $(scope.packages).on("changed", function() {
+                        function on_changed() {
                             scope.$digest();
-                        });
+                        }
+
+                        scope.matches = function (proxy_arg) {
+                            return client.item_matches(scope.item, proxy_arg);
+                        };
+
+                        scope.packages = client.packages(scope.item);
+                        scope.packages.addEventListener("changed", on_changed);
                         scope.$on("$destroy", function() {
-                            $(scope.packages).off();
+                            scope.packages.removeEventListener("changed", on_changed);
                         });
+
+                        scope.signature_obj = client.signature_obj;
 
                         scope.isRunning = false;
                         set_running();
                         scope.$watch("runningMethod", set_running);
 
-                        scope.matches = function(proxy_arg) {
-                            return client.item_matches(scope.item, proxy_arg);
+                        scope.isUpdate = function () {
+                            return scope.matches('CachedUpdate') && !scope.matches('DefaultDeployment');
+                        };
+
+                        scope.isRollback = function() {
+                            return scope.matches('RollbackDeployment') &&
+                                   !scope.matches('CachedUpdate');
+                        };
+
+                        scope.isRebase = function() {
+                            return scope.item && !scope.item.id &&
+                                   !client.item_matches(scope.item, 'BootedDeployment', 'origin') &&
+                                   !scope.matches('RollbackDeployment') &&
+                                   !scope.matches('DefaultDeployment');
                         };
 
                         scope.switchTab = function(data) {
@@ -292,6 +448,16 @@ require([
                                 "reboot" : cockpit.variant("b", true)
                             };
                             var promise = client.run_transaction("Deploy", [hash, args], os);
+                            notify_result(promise, scope);
+                        };
+
+                        scope.doRebase = function(os, origin, hash) {
+                            scope.error = null;
+                            var args = {
+                                "reboot" : cockpit.variant("b", true),
+                                "revision" : cockpit.variant("s", hash),
+                            };
+                            var promise = client.run_transaction("Rebase", [args, origin, []], os);
                             notify_result(promise, scope);
                         };
                     }
@@ -338,11 +504,4 @@ require([
                 return formated;
             };
         });
-
-    /* Initialize once document is loaded */
-    $(function() {
-        angular.bootstrap(document, ["ostree"], {
-            strictDi: true
-        });
-    });
-});
+}());

@@ -21,15 +21,10 @@
 import parent
 from testlib import *
 
-import os
-import unittest
-
 FP_MD5 = "93:40:9e:67:82:78:a8:99:89:39:d5:ba:e0:50:70:e1"
 FP_SHA256 = "SHA256:SRvBhCmkCEVnJ6ascVH0AoVEbS3nPbowZkNevJnXtgw"
 KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDG4iipTovcMg0xn+089QLNKVGpP2Pgq2duxHgAXre2XgA3dZL+kooioGFwBQSEjbWssKy82hKIN/W82/lQtL6krf7JQWnT3LZwD5DPsvHFKhOLghbiFzSI0uEL4NFFcZOMo5tGLrM5LsZsaIkkv5QkAE0tHIyeYinK6dQ2d8ZsfmgqxHDUQUWnz1T75X9fWQsUugSWI+8xAe0cfa4qZRz/IC+K7DEB3x4Ot5pl8FBuydJj/gb+Lwo2Vs27/d87W/0KHCqOHNwaVC8RBb1WcmXRDDetLGH1A9m5x7Ip/KU/cyvWWxw8S4VKZkTIcrGUhFYJDnjtE3Axz+D7agtps41t test-name"
 
-# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=805030
-@unittest.skipIf("debian" in os.environ.get("TEST_OS", ""), "No ssh keys on Debian (yet).")
 class TestKeys(MachineCase):
     def testAuthorizedKeys(self):
         m = self.machine
@@ -43,7 +38,7 @@ class TestKeys(MachineCase):
         self.allow_journal_messages(".*Failed to create file '/var/lib/cockpit/.*': Permission denied")
 
         # Create a user without any role
-        m.execute("useradd user -c 'User' || true")
+        m.execute("useradd user -s /bin/bash -m -c 'User' || true")
         m.execute("echo user:foobar | chpasswd")
 
         m.start_cockpit()
@@ -53,6 +48,7 @@ class TestKeys(MachineCase):
             b.wait_visible("#login")
             b.set_val("#login-user-input", user)
             b.set_val("#login-password-input", password)
+            b.set_checked("#authorized-input", True)
             b.click('#login-button')
             b.expect_load()
             b.enter_page("/system")
@@ -60,6 +56,7 @@ class TestKeys(MachineCase):
             b.wait_text('#content-user-name', user_name)
 
             b.click('#navbar-dropdown')
+            b.wait_visible('#go-account')
             b.click('#go-account')
             b.enter_page("/users")
             b.wait_text("#account-user-name", user);
@@ -71,8 +68,10 @@ class TestKeys(MachineCase):
             b.set_val("#authorized-keys-text", key)
             b.click("#add-authorized-key")
             b.wait_popdown("add-authorized-key-dialog")
+
             b.wait_in_text("#account-authorized-keys-list", comment)
 
+            b.wait_not_in_text("#account-authorized-keys-list", "no authorized public keys")
             text = b.text("#account-authorized-keys-list")
             if ("SHA256" in text):
                 self.assertIn(fp_sh256, text)
@@ -101,9 +100,10 @@ class TestKeys(MachineCase):
         b.wait_visible("#account")
         b.wait_text("#account-user-name", "admin")
 
-        # Not allowed
-        b.wait_in_text("#account-authorized-keys-list div.list-group-item:first-child", "You do not have permission")
-        b.wait_js_func("ph_count_check", "#account-authorized-keys-list div.list-group-item",  1);
+        # Not allowed, except on Ubuntu, where we can find out that ~/.ssh doesn't exist, which is shown as "no keys".
+        if not "ubuntu" in m.image and not "debian" in m.image:
+            b.wait_in_text("#account-authorized-keys-list div.list-group-item:first-child", "You do not have permission")
+            b.wait_js_func("ph_count_check", "#account-authorized-keys-list div.list-group-item",  1);
 
         b.logout()
 
@@ -161,10 +161,10 @@ class TestKeys(MachineCase):
         m = self.machine
 
         def list_keys():
-            return b.eval_js("require('base1/cockpit').spawn([ '/bin/sh', '-c', 'ssh-add -l || true' ])")
+            return b.eval_js("cockpit.spawn([ '/bin/sh', '-c', 'ssh-add -l || true' ])")
 
         # Operating systems where auto loading doesn't work
-        auto_load = "atomic" not in os.environ.get("TEST_OS", "")
+        auto_load = "atomic" not in m.image
 
         # Put all the keys in place
         m.execute("mkdir -p /home/admin/.ssh")

@@ -96,6 +96,13 @@ $ cockpit-bridge --packages
         </listitem>
       </varlistentry>
       <varlistentry>
+        <term>dashboard</term>
+        <listitem><para>An optional JSON object containing any dashboard items that this package
+          provides. These will be added into the Cockpit user interface on the top bar.
+          Each property on this object is named for the identifier of such an item, and the
+          property value is a JSON object described below.</para></listitem>
+      </varlistentry>
+      <varlistentry>
         <term>menu</term>
         <listitem><para>An optional JSON object containing any main menu items that this package
           provides. These will be added into the Cockpit user interface on the side bar.
@@ -107,6 +114,18 @@ $ cockpit-bridge --packages
         <listitem><para>An optional string that changes the name of the package. Normally
           packages derive their name from the directory that they are located in. This
           field overrides that name.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>priority</term>
+        <listitem><para>An optional number that specifies which package is prefered in cases
+          where there are conflicts. For example given two packages with the same
+          <code>name</code> a package is chosen based on its priority.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>requires</term>
+        <listitem><para>An optional JSON object that contains a <code>"cockpit"</code>
+          string version number. The package will only be usable if the Cockpit bridge
+          and javascript base are equal or newer than the given version number.</para></listitem>
       </varlistentry>
       <varlistentry>
         <term>tools</term>
@@ -127,12 +146,17 @@ $ cockpit-bridge --packages
     <variablelist>
       <varlistentry>
         <term>label</term>
-        <listitem><para>The label for the tool.</para></listitem>
+        <listitem><para>The label for the menu item or tool.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>order</term>
+        <listitem><para>An optional order number to place this menu item or tool. Lower numbers
+          are listed first.</para></listitem>
       </varlistentry>
       <varlistentry>
         <term>path</term>
         <listitem><para>The relative path to the HTML file within the package that implements
-          the tool.</para></listitem>
+          the menu item or tool.</para></listitem>
       </varlistentry>
     </variablelist>
 
@@ -141,6 +165,9 @@ $ cockpit-bridge --packages
 <programlisting>
 {
   "version": 0,
+  "require": {
+      "cockpit": "120"
+  },
   "tools": {
      "mytool": {
         "label": "My Tool",
@@ -213,14 +240,9 @@ mypackage/test.min.js.gz
     <para>Cockpit has API available for writing packages. There is no API available
       for external callers to invoke via HTTP, REST or otherwise.</para>
 
-    <warning>
-      <para>Unless an API is explicitly marked as stable, it is unstable and can
-        be changed when Cockpit is upgraded.</para>
-    </warning>
-
     <para>API from various packages can be used to implement Cockpit packages. Each package
       listed here has some API available for use. Only the API explicitly documented should
-      be used. In some cases even though the API is available it is not (yet) stable.</para>
+      be used.</para>
 
     <itemizedlist>
       <listitem><para><link linkend="development">API Listing</link></para></listitem>
@@ -228,6 +250,148 @@ mypackage/test.min.js.gz
 
     <para>To include javascript from the API, simply load it into your HTML using
       a script tag. Alternatively you can use an javascript loader.</para>
+  </section>
+
+  <section id="package-bridges">
+    <title>Bridges for specific tasks</title>
+
+    <para>On the server side the
+      <link linkend="cockpit-bridge.1"><filename>cockpit-bridge</filename></link> connects
+      to various system APIs that the front end UI requests it to. There are additional
+      bridges for specific tasks that the main <filename>cockpit-bridge</filename> cannot
+      handle. For example tasks that should be carried out with privilege escalation.</para>
+
+    <para>These additional bridges can be registered in a <code>"bridges"</code> section of a
+      package's <filename>manifest.json</filename> file. Building such a bridge is a complex tasks, and
+      we will skip over that here. However it is useful to adjust how these additional bridges
+      are called, and so we'll look at how they are registered.</para>
+
+    <para>An example <filename>manifest.json</filename> with a bridges section:</para>
+
+<programlisting>
+{
+  "bridges": [
+    {
+      "match": { "superuser": null },
+      "environ": [ "SUDO_ASKPASS=/usr/bin/my-password-tool" ],
+      "spawn: [ "/usr/bin/sudo", "-n", "cockpit-bridge", "--privileged" ],
+      "problem": "access-denied"
+    }
+  ]
+}
+</programlisting>
+
+    <para>The bridges are considered in the order they are listed in the array. Use the
+      <filename>manifest.json</filename><code>"priority"</code> field to control order between
+      packages. The bridges are registered using JSON objects that have the following
+      properties:</para>
+
+    <variablelist>
+      <varlistentry>
+        <term>environ</term>
+        <listitem><para>Optional, additional environment variables to pass to the bridge
+            command.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>match</term>
+        <listitem><para>The <code>"match"</code> object describes which channel open command
+            options need to match for a given channel to be handed over to this
+            bridge.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>problem</term>
+        <listitem><para>If a problem is specified, and this bridge fails to start up then
+            channels will be closed with this problem code. Otherwise later bridges or internal
+            handlers for the channel will be invoked.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>spawn</term>
+        <listitem><para>The command and arguments to invoke.</para></listitem>
+      </varlistentry>
+    </variablelist>
+
+    <para>The <code>spawn</code> and <code>environ</code> values can be dynamically
+    taken from a matching open command values. When a value in either the <code>spawn</code>
+    or <code>environ</code> array contains a named variable wrapped in <code>${}</code>,
+    the variable will be replaced with the value contained in the matching open command.
+    Only named variables are supported and name can only contain letters, numbers and
+    the following symbols: <code>._-</code></para>
+
+    <para>For example a bridges section like:</para>
+<programlisting>
+{
+  "bridges": [
+    {
+      "match": { "payload": "example" },
+      "environ": [ "TAG=${tag}" ],
+      "spawn: [ "/example-bridge", "--tag", "${tag}" ],
+      "problem": "access-denied"
+    }
+  ]
+}
+</programlisting>
+
+    <para>when a open command is received with a payload of <code>example</code>
+        with <code>tag</code> value of <code>tag1</code>. The following
+        command will be spawned</para>
+
+    <programlisting>TAG=tag1 /example-bridge --tag tag1</programlisting>
+
+    <para>Processes that are reused so if another open command with a "tag" of
+        <code>tag1</code> is received. The open command will be passed to
+        existing process, rather than spawning a new one. However a open command
+        with an tag of <code>tag2</code> will spawn a new command:</para>
+
+    <programlisting>TAG=tag2 /example-bridge --tag tag2</programlisting>
+
+    <para>If you need to include <code>${}</code>, as an actual value in your arguments
+    you can escape it by prefixing it with a <code>\</code></para>
+
+  </section>
+
+  <section id="package-replace">
+    <title>Replacing an existing package</title>
+
+    <para>If the functionality in a package replaces that of another package
+      then it can replace that package by claiming the same <code>name</code> and a
+      higher <code>priority</code>.</para>
+
+    <para>For example, a package in the <filename>/usr/share/cockpit/disks</filename>
+      directory could replace Cockpit's <emphasis>storage</emphasis> package with
+      a <filename>manifest.json</filename> like this:</para>
+
+<programlisting>
+{
+  "version": 0,
+  "name": "storage",
+  "priority": 10,
+  "menu": {
+     "index": {
+        "label": "Disk Storage",
+        "order": 15
+     }
+  }
+}
+</programlisting>
+
+    <para>It is also possible to hide or change labels on the menu items of an existing
+      package by including a <filename>override.json</filename> in that existing package's
+      directory.</para>
+
+    <para>For example an <filename>/usr/share/cockpit/systemd/override.json</filename> could
+      hide the <emphasis>Logs</emphasis> menu item and move the <emphasis>Services</emphasis>
+      menu item to the top of the menu.</para>
+
+<programlisting>
+{
+  "menu": {
+    "logs": null,
+    "services": {
+      "order": -1
+    }
+  }
+}
+</programlisting>
 
   </section>
 

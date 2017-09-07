@@ -15,7 +15,7 @@
       <link linkend="cockpit-grid"><code>cockpit.grid()</code></link> facilities.</para>
   </refsynopsisdiv>
 
-  <refsection>
+  <refsection id="cockpit-metrics-function">
     <title>cockpit.metrics()</title>
 <programlisting>
 metrics = cockpit.metrics(interval, options, cache)
@@ -108,6 +108,19 @@ metrics.close()
   <refsection id="cockpit-metrics-series">
     <title>metrics.series</title>
     <para>The series sink where data retrieved data will be processed.</para>
+  </refsection>
+
+  <refsection id="cockpit-metrics-meta">
+    <title>metrics.meta</title>
+    <para>The metrics meta data last received.</para>
+  </refsection>
+
+  <refsection id="cockpit-metrics-onchanged">
+    <title>metrics.onchanged</title>
+<programlisting>
+metrics.onchanged = function() { }
+</programlisting>
+    <para>An event triggered when one of the properties on this metrics object changes.</para>
   </refsection>
 
 </refentry>

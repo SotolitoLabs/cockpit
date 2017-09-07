@@ -1,11 +1,12 @@
-require([
-    'jquery',
-    'base1/cockpit',
-    'system/service',
-], function($, cockpit, service) {
+(function() {
+    "use strict";
 
-    $(function () {
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
 
+    var service = require("service");
+
+    $(function() {
         var proxy;
 
         function navigate() {
@@ -44,4 +45,4 @@ require([
         $(cockpit).on('locationchanged', navigate);
         navigate();
     });
-});
+}());

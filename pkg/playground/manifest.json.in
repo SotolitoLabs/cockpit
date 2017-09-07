@@ -1,0 +1,22 @@
+{
+    "version": "@VERSION@",
+    "requires": {
+	"cockpit": "122"
+    },
+
+    "tools": {
+        "patterns": {
+            "label": "Design Patterns",
+            "path": "jquery-patterns.html"
+        },
+        "react-patterns": {
+            "label": "React Patterns"
+        },
+        "translate": {
+            "label": "Translating"
+        },
+        "pkgs": {
+            "label": "Packages"
+        }
+    }
+}

@@ -20,15 +20,17 @@
 #include "config.h"
 
 #include "cockpitchannel.h"
+#include "cockpitstream.h"
 #include "mock-transport.h"
 
 #include "common/cockpitjson.h"
-#include "common/cockpitstream.h"
 #include "common/cockpittest.h"
 
 #include <json-glib/json-glib.h>
 
 #include <gio/gio.h>
+
+#include <string.h>
 
 extern const gchar *cockpit_bridge_local_address;
 
@@ -54,6 +56,15 @@ mock_echo_channel_recv (CockpitChannel *channel,
   cockpit_channel_send (channel, message, FALSE);
 }
 
+static gboolean
+mock_echo_channel_control (CockpitChannel *channel,
+                           const gchar *command,
+                           JsonObject *options)
+{
+  cockpit_channel_control (channel, command, options);
+  return TRUE;
+}
+
 static void
 mock_echo_channel_close (CockpitChannel *channel,
                          const gchar *problem)
@@ -74,6 +85,7 @@ mock_echo_channel_class_init (MockEchoChannelClass *klass)
 {
   CockpitChannelClass *channel_class = COCKPIT_CHANNEL_CLASS (klass);
   channel_class->recv = mock_echo_channel_recv;
+  channel_class->control = mock_echo_channel_control;
   channel_class->close = mock_echo_channel_close;
 }
 
@@ -135,7 +147,7 @@ test_recv_and_send (TestCase *tc,
   GBytes *payload;
 
   /* Ready to go */
-  cockpit_channel_ready (tc->channel);
+  cockpit_channel_ready (tc->channel, NULL);
 
   payload = g_bytes_new ("Yeehaw!", 7);
   cockpit_transport_emit_recv (COCKPIT_TRANSPORT (tc->transport), "554", payload);
@@ -152,22 +164,53 @@ test_recv_and_queue (TestCase *tc,
                      gconstpointer unused)
 {
   GBytes *payload;
+  GBytes *control;
+  const gchar *data;
   GBytes *sent;
+  JsonObject *object;
 
   payload = g_bytes_new ("Yeehaw!", 7);
   cockpit_transport_emit_recv (COCKPIT_TRANSPORT (tc->transport), "554", payload);
+
+  data = "{ \"command\": \"blah\", \"channel\": \"554\" }";
+  control = g_bytes_new_static (data, strlen (data));
+  cockpit_transport_emit_recv (COCKPIT_TRANSPORT (tc->transport), NULL, control);
 
   /* Shouldn't have received it yet */
   g_assert_cmpuint (mock_transport_count_sent (tc->transport), ==, 0);
 
   /* Ready to go */
-  cockpit_channel_ready (tc->channel);
+  cockpit_channel_ready (tc->channel, NULL);
+
+  /* The control message */
+  object = mock_transport_pop_control (tc->transport);
+  g_assert (object != NULL);
+  cockpit_assert_json_eq (object, data);
+  g_bytes_unref (control);
 
   sent = mock_transport_pop_channel (tc->transport, "554");
   g_assert (sent != NULL);
-
   g_assert (g_bytes_equal (payload, sent));
   g_bytes_unref (payload);
+}
+
+static void
+test_ready_message (TestCase *tc,
+                    gconstpointer unused)
+{
+  JsonObject *message;
+  JsonObject *sent;
+
+  message = json_object_new ();
+  json_object_set_string_member (message, "mop", "bucket");
+
+  /* Ready to go */
+  cockpit_channel_ready (tc->channel, message);
+  json_object_unref (message);
+
+  sent = mock_transport_pop_control (tc->transport);
+  cockpit_assert_json_eq (sent,
+                  "{ \"command\": \"ready\", \"channel\": \"554\", \"mop\": \"bucket\" }");
 }
 
 static void
@@ -261,7 +304,7 @@ test_close_transport (TestCase *tc,
   gchar *problem = NULL;
 
   chan = (MockEchoChannel *)tc->channel;
-  cockpit_channel_ready (tc->channel);
+  cockpit_channel_ready (tc->channel, NULL);
 
   sent = g_bytes_new ("Yeehaw!", 7);
   cockpit_transport_emit_recv (COCKPIT_TRANSPORT (tc->transport), "554", sent);
@@ -430,13 +473,53 @@ test_capable (void)
 }
 
 static void
-test_invalid_internal (void)
+test_internal_not_registered (void)
 {
   CockpitConnectable *connectable;
   JsonObject *options;
   MockTransport *transport;
   CockpitChannel *channel;
   JsonObject *sent;
+
+  cockpit_expect_message ("55: couldn't find internal address: test");
+  cockpit_channel_internal_address ("other", NULL);
+
+  options = json_object_new ();
+  json_object_set_string_member (options, "internal", "test");
+  transport = g_object_new (mock_transport_get_type (), NULL);
+
+  channel = g_object_new (mock_echo_channel_get_type (),
+                          "transport", transport,
+                          "id", "55",
+                          "options", options,
+                          NULL);
+  json_object_unref (options);
+  connectable = cockpit_channel_parse_stream (channel);
+  g_assert (connectable == NULL);
+  while (g_main_context_iteration (NULL, FALSE));
+
+  sent = mock_transport_pop_control (transport);
+  g_assert (sent != NULL);
+
+  cockpit_assert_json_eq (sent,
+                  "{ \"command\": \"close\", \"channel\": \"55\", \"problem\": \"not-found\", \"message\":\"couldn't find internal address: test\"}");
+  g_object_unref (channel);
+  g_object_unref (transport);
+  cockpit_assert_expected ();
+
+  cockpit_channel_remove_internal_address ("other");
+}
+
+static void
+test_internal_null_registered (void)
+{
+  CockpitConnectable *connectable;
+  JsonObject *options;
+  MockTransport *transport;
+  CockpitChannel *channel;
+  JsonObject *sent;
+
+  cockpit_channel_internal_address ("test", NULL);
 
   options = json_object_new ();
   json_object_set_string_member (options, "internal", "test");
@@ -460,22 +543,7 @@ test_invalid_internal (void)
   g_object_unref (channel);
   g_object_unref (transport);
   cockpit_assert_expected ();
-}
 
-static void
-test_internal_not_registered (void)
-{
-  cockpit_expect_warning ("couldn't find internal address: test");
-  cockpit_channel_internal_address ("other", NULL);
-  test_invalid_internal ();
-  cockpit_channel_remove_internal_address ("other");
-}
-
-static void
-test_internal_null_registered (void)
-{
-  cockpit_channel_internal_address ("test", NULL);
-  test_invalid_internal ();
   cockpit_channel_remove_internal_address ("test");
 }
 
@@ -598,6 +666,8 @@ main (int argc,
               setup, test_recv_and_send, teardown);
   g_test_add ("/channel/recv-queue", TestCase, NULL,
               setup, test_recv_and_queue, teardown);
+  g_test_add ("/channel/ready-message", TestCase, NULL,
+              setup, test_ready_message, teardown);
   g_test_add ("/channel/close-immediately", TestCase, NULL,
               setup, test_close_immediately, teardown);
   g_test_add ("/channel/close-option", TestCase, NULL,

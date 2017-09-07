@@ -17,14 +17,15 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "docker/util",
-    "docker/docker",
-], function($, cockpit, util, docker) {
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var util = require("./util");
+
     var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
 
     /* SEARCH DIALOG */
 
@@ -42,11 +43,14 @@ define([
 
             $(this.client).off('.containers-search-image-dialog');
             this.client = null;
+
+            this.dfd.reject();
+            this.dfd = null;
         },
 
         setup: function() {
             $("#containers-search-image-search").on('keypress', $.proxy(this, "input"));
-            $("#containers-search-image-search").attr( "placeholder", "search by name, namespace or description" );
+            $("#containers-search-image-search").attr( "placeholder", _("search by name, namespace or description"));
             $("#containers-search-download").on('click', $.proxy(this, 'start_download'));
             $('#containers-search-tag').prop('disabled', true);
             $('#containers-search-download').prop('disabled', true);
@@ -56,6 +60,7 @@ define([
 
         enter: function() {
             this.client = PageSearchImage.client;
+            this.dfd = PageSearchImage.dfd;
 
             // Clear the previous results and search string from previous time
             $('#containers-search-image-results tbody tr').remove();
@@ -83,62 +88,7 @@ define([
             var registry = $('#containers-search-download').data('registry') || undefined;
             var tag = $('#containers-search-tag').val();
 
-            $('#containers-search-tag').prop('disabled', true);
-            $('#containers-search-download').data('repo', '');
-            $('#containers-search-download').prop('disabled', true);
-
-            var tr = $('<tr id="imagedl_' + repo.replace("/", "_") + '">').append(
-                $('<td class="container-col-tags">').text(repo + ':' + tag),
-                $('<td class="container-col-created">').text('Downloading'),
-                $('<td class="image-col-size-graph">').append(
-                    $('<div class="progress progress-striped active">').append(
-                        $('<div class="progress-bar" role="progressbar" aria-valuenow="1" aria-valuemin="0" aria-valuemax="1" style="width: 100%">'))),
-                $('<td class="image-col-size-text">'),
-                $('<td class="cell-buttons">'));
-
-            util.insert_table_sorted($('#containers-images table'), tr);
-
-            var created = tr.children('td.container-col-created');
-            var size = tr.children('td.image-col-size-text');
-
-            var failed = false;
-            var layers = {};
-
-            docker.pull(repo, tag, registry).
-                progress(function(message, progress) {
-                    if("id" in progress) {
-                        var new_string = progress['status'];
-                        if(progress['status'] == 'Downloading') {
-                            new_string += ': ' + progress['progressDetail']['current'] + '/' + progress['progressDetail']['total'];
-                        }
-                        layers[progress['id']] = new_string;
-                        if(progress['status'] == 'Download complete') {
-                            // We probably don't care anymore about completed layers
-                            // This also keeps the size of the row to a minimum
-                            delete layers[progress['id']];
-                        }
-                    }
-                    var full_status = '';
-                    for(var layer in layers) {
-                        full_status += layer + ': ' + layers[layer] + '&nbsp;&nbsp;&nbsp;&nbsp;';
-                    }
-                    size.html(full_status);
-                }).
-                fail(function(ex) {
-                    console.warn("pull failed:", ex);
-                    failed = true;
-                    created.text(_('Error downloading'));
-                    size.text(ex.message).attr('title', ex.message);
-                    tr.on('click', function() {
-                        // Make the row be gone when clicking it
-                        tr.remove();
-                    });
-                }).
-                always(function() {
-                    // According to Docker, download was finished.
-                    if(!failed)
-                        tr.remove();
-                });
+            this.dfd.resolve(repo, tag, registry);
 
             $("#containers-search-image-dialog").modal('hide');
         },
@@ -194,7 +144,11 @@ define([
                         });
                     } else {
                         // No results
-                        $('#containers-search-image-no-results').html('No results for ' + term + "<br />Please try another term");
+                        $('#containers-search-image-no-results').empty().append(
+                              $("<span>").text(cockpit.format(_("No results for $0"), term)),
+                              $("<br />"),
+                              $("span>").text(_("Please try another term"))
+                        );
                         $('#containers-search-image-no-results').show();
                     }
                 });
@@ -221,17 +175,23 @@ define([
     }
 
     var dialog = new PageSearchImage();
-    dialog.setup();
 
-    $("#containers-search-image-dialog").
-        on('show.bs.modal', function () { dialog.enter(); }).
-        on('shown.bs.modal', function () { dialog.show(); }).
-        on('hidden.bs.modal', function () { dialog.leave(); });
+    $(function() {
+        dialog.setup();
+        $("#containers-search-image-dialog").
+            on('show.bs.modal', function () { dialog.enter(); }).
+            on('shown.bs.modal', function () { dialog.show(); }).
+            on('hidden.bs.modal', function () { dialog.leave(); });
+    });
 
     function search(client) {
         PageSearchImage.client = client;
+        PageSearchImage.dfd = cockpit.defer();
+
         $("#containers-search-image-dialog").modal('show');
+
+        return PageSearchImage.dfd.promise;
     }
 
-    return search;
-});
+    module.exports = search;
+}());

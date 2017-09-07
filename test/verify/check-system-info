@@ -21,8 +21,7 @@
 import parent
 from testlib import *
 import time
-import unittest
-import os
+import subprocess
 
 os_release = """
 NAME="Foobar Adventure Linux Server"
@@ -31,6 +30,19 @@ ID="foobar"
 VERSION_ID="2.0"
 PRETTY_NAME="Foobar Adventure Linux Server 2.0 (Day of Doom)"
 """
+
+def ssh_reconnect(machine, timeout_sec=120):
+    start_time = time.time()
+    error = None
+    while (time.time() - start_time) < timeout_sec:
+        try:
+            machine.execute("true", quiet=True)
+            return
+        except Exception, e:
+            error = e
+        time.sleep(0.5)
+
+    raise error
 
 class TestSystemInfo(MachineCase):
 
@@ -58,6 +70,76 @@ class TestSystemInfo(MachineCase):
         b.wait_present('#system_information_os_text')
         b.wait_visible('#system_information_os_text')
 
+        mid = m.execute("cat /etc/machine-id")
+        b.wait_present('#system_machine_id')
+        b.wait_text('#system_machine_id', mid)
+
+        # Generate a new rsa key and change the config
+        m.execute("ssh-keygen -f /etc/ssh/weirdname -t rsa -N ''")
+        m.execute("chmod 600 /etc/ssh/weirdname")
+        m.execute("restorecon /etc/ssh/weirdname || true")
+
+        supports_alt = False
+        try:
+            m.execute(command="ssh-keygen -l -f /etc/ssh/weirdname -E md5", quiet=True)
+            supports_alt = True
+        except subprocess.CalledProcessError:
+            pass
+
+        if supports_alt:
+            new_default = m.execute("ssh-keygen -l -f /etc/ssh/weirdname -E md5 | cut -d' ' -f2")
+            new_alt = m.execute("ssh-keygen -l -f /etc/ssh/weirdname -E sha256 | cut -d' ' -f2")
+            old_default = m.execute("ssh-keygen -l -f /etc/ssh/ssh_host_rsa_key -E md5 | cut -d' ' -f2")
+            old_alt = m.execute("ssh-keygen -l -f /etc/ssh/ssh_host_rsa_key -E sha256 | cut -d' ' -f2")
+        else:
+            new_default = m.execute("ssh-keygen -l -f /etc/ssh/weirdname | cut -d' ' -f2")
+            new_alt = None
+            old_default = m.execute("ssh-keygen -l -f /etc/ssh/ssh_host_rsa_key | cut -d' ' -f2")
+            old_alt = None
+
+        b.wait_present("#system-ssh-keys-link")
+        b.click("#system-ssh-keys-link")
+        b.wait_popup("system_information_ssh_keys")
+        b.wait_present("#system_information_ssh_keys .spinner")
+        b.wait_not_visible("#system_information_ssh_keys .spinner")
+        b.wait_visible("#system_information_ssh_keys .content")
+        b.wait_present("#system_information_ssh_keys .list-group")
+        b.wait_in_text("#system_information_ssh_keys .list-group", "ED25519")
+        b.wait_in_text("#system_information_ssh_keys .list-group", "RSA")
+        b.wait_in_text("#system_information_ssh_keys .list-group", "ECDSA")
+        b.wait_not_in_text("#system_information_ssh_keys .list-group", new_default)
+        b.wait_in_text("#system_information_ssh_keys .list-group", old_default)
+        if supports_alt:
+            b.wait_not_in_text("#system_information_ssh_keys .list-group", new_alt)
+            b.wait_in_text("#system_information_ssh_keys .list-group", old_alt)
+
+        b.click("#system_information_ssh_keys button")
+        b.wait_popdown("system_information_ssh_keys")
+
+        # Change ssh config and restart
+        m.execute("sed -i 's,.*HostKey *,#,' /etc/ssh/sshd_config")
+        m.execute("echo '' >> /etc/ssh/sshd_config")
+        m.execute("echo 'HostKey /etc/ssh/weirdname' >> /etc/ssh/sshd_config")
+
+        # Restart sshd but stop socket so we can make sure we are restarted
+        m.execute("( ! systemctl is-active sshd.socket || systemctl stop sshd.socket) && systemctl restart sshd.service")
+        ssh_reconnect(m)
+
+        b.click("#system-ssh-keys-link")
+        b.wait_popup("system_information_ssh_keys")
+        b.wait_present("#system_information_ssh_keys .spinner")
+        b.wait_not_visible("#system_information_ssh_keys .spinner")
+        b.wait_visible("#system_information_ssh_keys .content")
+        b.wait_present("#system_information_ssh_keys .list-group")
+        b.wait_not_in_text("#system_information_ssh_keys .list-group", "ED25519")
+        b.wait_in_text("#system_information_ssh_keys .list-group", "RSA")
+        b.wait_not_in_text("#system_information_ssh_keys .list-group", "ECDSA")
+        b.wait_in_text("#system_information_ssh_keys .list-group", new_default)
+        b.wait_not_in_text("#system_information_ssh_keys .list-group", old_default)
+        if supports_alt:
+            b.wait_not_in_text("#system_information_ssh_keys .list-group", old_alt)
+            b.wait_in_text("#system_information_ssh_keys .list-group", new_alt)
+
         b.wait_text('#system_information_os_text',
                     "Foobar Adventure Linux Server 2.0 (Day of Doom)")
 
@@ -71,7 +153,7 @@ class TestSystemInfo(MachineCase):
         b.click("#system_information_change_hostname button:contains('Change')")
         b.wait_popdown("system_information_change_hostname")
 
-        if "atomic" in m.image:
+        if m.atomic_image:
             b.wait_present('#system-ostree-version')
             b.wait_visible('#system-ostree-version')
             b.wait_text('#system-ostree-version-link', "cockpit-base.1")
@@ -98,11 +180,11 @@ class TestSystemInfo(MachineCase):
         b = self.browser
 
         network_time_prefix = "Network time on"
-        if m.image in {"rhel-7", "rhel-atomic"}:
+        if m.image in {"rhel-7", "rhel-7-4", "centos-7", "rhel-atomic", "continuous-atomic"}:
             network_time_prefix = "NTP enabled"
 
         # make sure system is on expected timezone EEST
-        m.execute("LC_ALL=C timedatectl set-timezone Europe/Helsinki")
+        m.execute("timedatectl set-timezone Europe/Helsinki")
 
         # Something gets confused when systemd-timesyncd isn't
         # available.  This is harmless.
@@ -128,9 +210,9 @@ class TestSystemInfo(MachineCase):
 
         b.wait_text("#system_information_systime_button", "2020-01-24 08:03")
 
-        self.assertIn("%s: no" % network_time_prefix, m.execute("LC_ALL=C timedatectl"))
-        self.assertIn("Fri Jan 24 08:03:", m.execute("LC_ALL=C date"))
-        self.assertIn("EET 2020\n", m.execute("LC_ALL=C date"))
+        self.assertIn("%s: no" % network_time_prefix, m.execute("timedatectl"))
+        self.assertIn("Fri Jan 24 08:03:", m.execute("date"))
+        self.assertIn("EET 2020\n", m.execute("date"))
 
         # Set to NTP
         b.click("#system_information_systime_button")
@@ -141,7 +223,7 @@ class TestSystemInfo(MachineCase):
         b.click("#systime-apply-button")
         b.wait_popdown("system_information_change_systime")
 
-        self.assertIn("%s: yes" % network_time_prefix, m.execute("LC_ALL=C timedatectl"))
+        self.assertIn("%s: yes" % network_time_prefix, m.execute("timedatectl"))
 
         # Change the date
         b.click("#system_information_systime_button")
@@ -155,12 +237,11 @@ class TestSystemInfo(MachineCase):
         b.click("#systime-apply-button")
         b.wait_popdown("system_information_change_systime")
 
-        self.assertIn("%s: no" % network_time_prefix, m.execute("LC_ALL=C timedatectl"))
-        self.assertIn("Mon Jun  4 06:34:", m.execute("LC_ALL=C date"))
-        self.assertIn("EEST 2018\n", m.execute("LC_ALL=C date"))
+        self.assertIn("%s: no" % network_time_prefix, m.execute("timedatectl"))
+        self.assertIn("Mon Jun  4 06:34:", m.execute("date"))
+        self.assertIn("EEST 2018\n", m.execute("date"))
 
-    @unittest.skipIf("rhel-7" == os.environ.get("TEST_OS", ""), "No NTP servers config on rhel-7.")
-    @unittest.skipIf("rhel-atomic" == os.environ.get("TEST_OS", ""), "No NTP servers config on rhel-atomic.")
+    @skipImage("No NTP servers config", "centos-7", "continuous-atomic", "rhel-7", "rhel-7-4", "rhel-atomic")
     def testTimeServers(self):
         m = self.machine
         b = self.browser
@@ -211,6 +292,36 @@ class TestSystemInfo(MachineCase):
         b.wait_popdown("system_information_change_systime")
 
         self.assertIn("2.pool.ntp.org", m.execute("grep '^#NTP=' %s" % conf))
+
+    def testMotd(self):
+        m = self.machine
+        b = self.browser
+
+        m.execute("rm -f /etc/motd")
+
+        self.login_and_go("/system")
+        b.wait_present('#motd-box[data-stable=yes]')
+        b.wait_not_visible('#motd-box')
+
+        m.execute("echo Hello >/etc/motd")
+        b.wait_visible('#motd-box')
+        b.wait_in_text('#motd', "Hello")
+
+        b.click('#motd-box button.close')
+        b.wait_not_visible('#motd-box')
+
+        # motd should stay dismissed after a reload
+        b.reload()
+        b.enter_page("/system")
+        b.wait_present('#motd-box[data-stable=yes]')
+        b.wait_not_visible('#motd-box')
+
+        m.execute("echo Hello again >/etc/motd")
+        b.wait_visible('#motd-box')
+        b.wait_in_text('#motd', "Hello again")
+
+        # because of the reload
+        self.allow_restart_journal_messages()
 
 if __name__ == '__main__':
     test_main()

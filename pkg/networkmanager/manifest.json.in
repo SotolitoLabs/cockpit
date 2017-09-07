@@ -1,0 +1,18 @@
+{
+    "version": "@VERSION@",
+    "name": "network",
+    "requires": {
+	"cockpit": "122"
+    },
+
+    "menu": {
+        "index": {
+            "label": "Networking",
+            "order": 40
+        }
+    },
+
+    "hacks": {
+        "with_networkmanager_needs_root": "@with_networkmanager_needs_root@"
+    }
+}

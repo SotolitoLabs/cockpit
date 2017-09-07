@@ -22,10 +22,22 @@ import parent
 from testlib import *
 import json
 import os
-import sys
-import unittest
 
 class TestDocker(MachineCase):
+    def setUp(self):
+        MachineCase.setUp(self)
+        m = self.machine
+
+        # HACK: https://github.com/docker/docker/issues/25246
+        if m.image in [ "debian-8", "debian-testing" ]:
+            m.execute("printf '\\n\\n[Service]\\nKillMode=process\\n' >> /lib/systemd/system/docker.service")
+            m.execute("systemctl daemon-reload")
+
+        m.execute("systemctl start docker || systemctl start docker-latest")
+
+        # HACK: docker fails to start a container without /etc/resolv.conf
+        m.execute("touch /etc/resolv.conf")
+
     def confirm(self):
         b = self.browser
         b.wait_popup("confirmation-dialog")
@@ -59,7 +71,7 @@ class TestDocker(MachineCase):
         b = self.browser
         m = self.machine
 
-        m.execute("systemctl start docker")
+        m.execute("systemctl start docker || systemctl start docker-latest")
 
         self.login_and_go("/docker")
         b.wait_in_text("#containers-images", "busybox:latest")
@@ -67,18 +79,20 @@ class TestDocker(MachineCase):
         message = "HelloMessage."
 
         # show all containers to interact with stopped ones
+        b.wait_visible("#containers-containers")
         b.click("#containers-containers-filter button")
         b.wait_visible("#containers-containers-filter .dropdown-menu")
-        b.click("#containers-containers-filter a[value='all']")
+        b.click("#containers-containers-filter li[data-data='all'] a")
 
         # Run it
         b.click('#containers-images tr:contains("busybox:latest") button.fa-play')
         b.wait_popup("containers_run_image_dialog")
         b.set_val("#containers-run-image-name", "PROBE1")
-        b.set_val("#containers-run-image-command", "/bin/echo '%s'" % (message))
+        b.set_val("#containers-run-image-command", """/bin/sh -c 'echo "%s"; sleep 5' """ % message)
         b.click("#containers-run-image-run");
         b.wait_popdown("containers_run_image_dialog")
         b.wait_in_text("#containers-containers", "PROBE1")
+        b.wait_in_text("#containers-containers", "busybox:latest")
 
         # Check output of the probe
         b.click('#containers-containers tr:contains("PROBE1")')
@@ -108,7 +122,7 @@ class TestDocker(MachineCase):
         b.click('#containers-images tr:contains("busybox:latest") button.fa-play')
         b.wait_popup("containers_run_image_dialog")
         b.set_val("#containers-run-image-name", "PROBE2")
-        b.set_val("#containers-run-image-command", "/bin/echo '%s'" % (message))
+        b.set_val("#containers-run-image-command", "/bin/echo -e '%s\n%s\n'" % (message, message))
         b.click("#containers-run-image-with-terminal");
         b.wait_visible("#select-linked-containers:empty");
         b.click("#link-containers");
@@ -118,6 +132,8 @@ class TestDocker(MachineCase):
         b.click("#select-linked-containers form:last-child .link-container a[value='PROBE1']")
         b.set_val("#select-linked-containers form:last-child  input[name='alias']", "alias1")
         b.click("#select-linked-containers form:last-child  button.fa-plus");
+        # new line should be the second group
+        b.wait_present("#select-linked-containers .form-group:eq(1)")
         b.click("#select-linked-containers form:last-child .link-container button")
         b.wait_visible("#select-linked-containers form:last-child .link-container a[value='PROBE1']")
         b.click("#select-linked-containers form:last-child .link-container a[value='PROBE1']")
@@ -139,24 +155,23 @@ class TestDocker(MachineCase):
                          set(["/PROBE1:/PROBE2/alias1", "/PROBE1:/PROBE2/alias2"]))
 
         # delete PROBE2 from dash
-        b.click("#container-details ol.breadcrumb a")
+        b.click("#container-details .content-filter a")
         b.wait_visible("#containers-containers")
-        b.wait_in_text('#containers-containers tbody', "PROBE2")
-        b.wait_not_visible("#containers-containers tbody tr:contains('PROBE2') button.btn-delete")
-        b.click("#containers-containers button.enable-danger")
-        b.wait_visible("#containers-containers tbody tr:contains('PROBE2') button.btn-delete")
-        b.wait_not_present("#containers-containers tbody tr:contains('PROBE2') button.btn-delete.disabled")
-        b.click("#containers-containers tbody tr:contains('PROBE2') button.btn-delete")
+        b.wait_in_text('#containers-containers', "PROBE2")
+        b.click('#containers-containers tbody tr:contains("PROBE2") td.listing-ct-toggle')
+        b.wait_visible('#containers-containers tbody tr:contains("PROBE2") + tr button.btn-delete')
+        b.click('#containers-containers tbody tr:contains("PROBE2") + tr button.btn-delete')
         with b.wait_timeout(20):
             try:
-                b.wait_not_in_text('#containers-containers tbody', "PROBE2")
+                b.wait_not_in_text('#containers-containers', "PROBE2")
             except:
                 self.confirm()
-                b.wait_not_in_text('#containers-containers tbody', "PROBE2")
+                b.wait_not_in_text('#containers-containers', "PROBE2")
 
         # Check output of PROBE1
         b.click('#containers-containers tr:contains("PROBE1")')
         b.wait_visible("#container-details")
+        b.wait_in_text('#container-details', "busybox:latest")
         self.wait_for_message(message)
         b.call_js_func("ph_count_check", ".console-ct pre",  1)
         b.click("#container-details-stop")
@@ -171,11 +186,21 @@ class TestDocker(MachineCase):
         b.click("#container-details-stop")
         b.wait_in_text("#container-details-state", "Exited")
 
-        self.del_container_from_details("PROBE1")
-
-        # Delete image
+        # Delete the container from the image-details page
+        b.wait_visible("#container-details")
+        b.click("#container-details .content-filter a")
+        b.wait_present('#containers-images tr:contains("busybox:latest")')
+        b.wait_visible('#containers-images tr:contains("busybox:latest")')
         b.click('#containers-images tr:contains("busybox:latest")')
         b.wait_visible("#image-details")
+        b.wait_present(".image-details-used")
+        b.wait_present(".image-details-used tr td")
+        b.wait_visible(".image-details-used tr td:first-child")
+        b.click(".image-details-used .enable-danger")
+        b.click(".image-details-used .btn-delete")
+        b.wait_not_present(".image-details-used tr td")
+
+        # Delete image itself
         b.click("#image-details-delete")
         self.confirm()
         b.wait_visible("#containers")
@@ -186,7 +211,7 @@ class TestDocker(MachineCase):
         m = self.machine
         self.allow_journal_messages('.*denied.*name_connect.*docker.*')
 
-        m.execute("systemctl start docker")
+        m.execute("systemctl start docker || systemctl start docker-latest")
 
         self.login_and_go("/docker")
         b.wait_in_text("#containers-images", "busybox:latest")
@@ -209,6 +234,7 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
         m.execute("rm -rf /var/tmp/container-probe")
 
         # Wait for it to appear
+        b.wait_visible("#containers-images")
         b.wait_in_text("#containers-images", image_name)
 
         nport = port + 1;
@@ -228,6 +254,7 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
                        'second_message': second_message})
         b.set_val(".containers-run-portmapping form:eq(0) input:eq(1)", port)
         b.click(".containers-run-portmapping form:eq(0) .fa-plus")
+        b.wait_present(".containers-run-portmapping form:eq(1) input:eq(0)")
         b.set_val(".containers-run-portmapping form:eq(1) input:eq(0)", nport)
         b.set_val(".containers-run-portmapping form:eq(1) input:eq(1)", nport)
 
@@ -259,14 +286,106 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
 
         self.del_container_from_details("PROBE2")
 
-    @unittest.skipIf("atomic" in os.environ.get("TEST_OS", ""), "we can't use cockpit on atomic if docker is stopped")
+    def testVolumesAndEnvironment(self):
+        b = self.browser
+        m = self.machine
+
+        m.execute("systemctl start docker || systemctl start docker-latest")
+
+        self.login_and_go("/docker")
+        b.wait_in_text("#containers-images", "busybox:latest")
+
+        # Select to view all running containers
+        b.wait_visible("#containers-containers-filter button")
+        b.click("#containers-containers-filter button")
+        b.click("#containers-containers-filter li[data-data='all'] a")
+
+        # Create an updated image, add environment variable
+        m.execute("mkdir /var/tmp/container-probe")
+        m.execute("""echo -e '
+FROM busybox
+ENV zero=GGG
+CMD ["/bin/sh"]
+' > /var/tmp/container-probe/Dockerfile""")
+        image_name = "test/container-probe"
+        m.execute("docker build -t %s /var/tmp/container-probe" % (image_name))
+        m.execute("rm -rf /var/tmp/container-probe")
+
+        # Wait for it to appear
+        b.wait_visible("#containers-images")
+        b.wait_in_text("#containers-images", image_name)
+
+        # Run it and add another environment variable via the ui
+        b.click("#containers-images tr:contains(\"%s\") button.fa-play" % (image_name))
+        b.wait_popup("containers_run_image_dialog")
+        b.set_val("#containers-run-image-name", "PROBE4")
+        b.set_val("#containers-run-image-command", "/bin/sh")
+
+        # Two environment variables
+        b.wait_val("#select-claimed-envvars form:eq(1) input:eq(0)", "zero")
+        b.wait_val("#select-claimed-envvars form:eq(1) input:eq(1)", "GGG")
+        b.click("#select-claimed-envvars form:eq(0) .fa-plus")
+        b.wait_present("#select-claimed-envvars form:eq(2) input:eq(0)")
+        b.set_val("#select-claimed-envvars form:eq(2) input:eq(0)", "SECOND")
+        b.set_val("#select-claimed-envvars form:eq(2) input:eq(1)", "marmalade")
+
+        # And a mount point
+        b.click("#mount-volumes")
+        b.wait_present("#select-mounted-volumes form:eq(0)")
+        b.set_val("#select-mounted-volumes form:eq(0) input:eq(0)", "/blah")
+        b.set_val("#select-mounted-volumes form:eq(0) input:eq(1)", "/mnt")
+        if m.image not in [ "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable" ]:
+            m.execute("chcon --dereference -HRt svirt_sandbox_file_t /mnt")
+        m.execute("touch /mnt/dripping.txt")
+
+        b.click("#containers-run-image-run");
+        b.wait_popdown("containers_run_image_dialog")
+        b.wait_in_text("#containers-containers", "PROBE4")
+
+        # Check output of the probe
+        b.wait_present('#containers-containers tr:contains("PROBE4")')
+        b.wait_visible('#containers-containers tr:contains("PROBE4")')
+        b.click('#containers-containers tr:contains("PROBE4")')
+        b.wait_visible("#container-details")
+
+        b.wait_present("#container-terminal")
+        b.wait_present("#container-terminal .console-ct")
+        b.wait_present("#container-terminal .console-ct .terminal")
+
+        b.focus('#container-terminal .console-ct .terminal')
+
+        # Wait for the container to wake up
+        try:
+            b.key_press( [ 'Return', 'Return', 'Return' ] )
+            b.wait_in_text("#container-terminal", "#")
+        except Error, ex:
+            if not ex.msg.startswith('timeout'):
+                raise
+
+        b.key_press( [ 'c', 'l', 'e', 'a', 'r', 'Return' ] )
+        b.wait_in_text("#container-terminal", "#")
+
+        b.focus('#container-terminal .console-ct .terminal')
+        b.key_press( [ 'e', 'n', 'v', 'Return' ] )
+        b.wait_in_text("#container-terminal", "zero=GGG")
+        b.wait_in_text("#container-terminal", "SECOND=marmalade")
+
+        b.focus('#container-terminal .console-ct .terminal')
+        b.key_press( [ 'l', 's', ' ', '/', 'b', 'l', 'a', 'h', '/', 'Return' ] )
+        b.wait_in_text("#container-terminal", "dripping.txt")
+
+        self.allow_journal_messages('.*denied.*name_connect.*docker.*')
+
+    @skipImage("No Cockpit on Atomic with Docker stopped", "fedora-atomic", "rhel-atomic", "continuous-atomic")
+    @skipImage("Cannot troubleshoot docker-latest", "fedora-i386")
     def testFailure(self):
         b = self.browser
         m = self.machine
 
         # Try to access docker without admin (wheel, sudo, ...) group
-        m.execute("systemctl start docker")
-        m.execute("usermod -G '' admin")
+        # also need to disable Ubuntu's legacy "admin" sudo group as it happens
+        # to have the same name as our admin test user
+        m.execute("usermod -G '' admin; sed -i '/^%admin/d' /etc/sudoers")
 
         # HACK: Logging in without the admin group will try to write to
         # /var/lib/cockpit/, but this will fail.
@@ -275,7 +394,7 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
         self.allow_journal_messages(".*Failed to create file '/var/lib/cockpit/.*': Permission denied")
         self.allow_journal_messages("http:///var/run/docker.sock/.*: couldn't connect: .*")
 
-        self.login_and_go("/docker")
+        self.login_and_go("/docker", authorized=False)
 
         # We can not become root, so we can't access docker.
         b.wait_visible("#curtain")
@@ -285,7 +404,7 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
         # Give "admin" access via the admin group and login again
         m.execute("usermod -G %s admin" % m.get_admin_group())
         m.execute("systemctl stop docker")
-        b.relogin("/docker")
+        b.relogin("/docker", authorized=True)
         self.allow_restart_journal_messages()
 
         # Now we can become root and start docker
@@ -296,17 +415,24 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
 
         self.allow_authorize_journal_messages()
         self.allow_journal_messages("cannot reauthorize identity.*:.*unix-user:root.*")
+        self.allow_journal_messages("cannot reauthorize identity.*:.*unix-user:builder.*")
 
     def testRestart(self):
         b = self.browser
         m = self.machine
 
-        m.execute("systemctl start docker")
+        # HACK: https://github.com/docker/docker/issues/25246
+        if m.image in [ "debian-stable", "debian-testing" ]:
+            m.execute("printf '\\n\\n[Service]\\nKillMode=process\\n' >> /lib/systemd/system/docker.service")
+            m.execute("systemctl daemon-reload")
+
+        m.execute("systemctl start docker || systemctl start docker-latest")
 
         self.login_and_go("/docker")
         b.wait_in_text("#containers-images", "busybox:latest")
 
         # Run one container without restarting
+        b.wait_visible("#containers-images")
         b.click('#containers-images tr:contains("busybox:latest") button.fa-play')
         b.wait_popup("containers_run_image_dialog")
         b.set_val("#containers-run-image-name", "NORESTART")
@@ -331,17 +457,166 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
         b.wait_in_text("#containers-containers", "NORESTART")
         b.wait_in_text("#containers-containers", "YAYRESTART")
 
-        # Now restart docker
+        # Restart docker, docker.socket needs special handling
         b.logout()
-        m.execute("systemctl restart docker")
+        if m.image in [ "debian-x8" ]:
+            m.execute("systemctl stop docker.socket")
+        m.execute("systemctl restart docker || systemctl restart docker-latest")
         self.login_and_go("/docker")
+
+        # show all containers to interact with stopped ones
+        b.wait_visible("#containers-containers")
+        b.click("#containers-containers-filter button")
+        b.wait_visible("#containers-containers-filter .dropdown-menu")
+        b.click("#containers-containers-filter li[data-data='all'] a")
 
         # Now check that one restarts
         b.wait_in_text("#containers-images", "busybox:latest")
-        b.wait_present("#containers-containers tr:contains(\"YAYRESTART\")")
-        b.wait_visible("#containers-containers tr:contains(\"YAYRESTART\")")
-        b.wait_present("#containers-containers tr:contains(\"NORESTART\")")
-        b.wait_not_visible("#containers-containers tr:contains(\"NORESTART\")")
+        b.wait_present('#containers-containers tr:contains("YAYRESTART") td:contains("running")')
+        b.wait_present('#containers-containers tr:contains("NORESTART") td:contains("exited")')
+
+    def testResources(self):
+        b = self.browser
+        m = self.machine
+
+        m.execute("systemctl start docker || systemctl start docker-latest")
+
+        self.login_and_go("/docker")
+        b.wait_visible("#containers-images")
+        b.wait_in_text("#containers-images", "busybox:latest")
+
+        # Run one container without restarting
+        b.click('#containers-images tr:contains("busybox:latest") button.fa-play')
+        b.wait_popup("containers_run_image_dialog")
+        b.set_val("#containers-run-image-name", "RESOURCE")
+        b.set_val("#containers-run-image-command", "/bin/sleep 1000000")
+        b.click("#containers-run-image-with-terminal");
+        b.click("#containers-run-image-memory input[type='checkbox']");
+        b.set_val("#containers-run-image-memory input.size-text-ct", "236");
+        b.click("#containers-run-image-cpu input[type='checkbox']");
+        b.set_val("#containers-run-image-cpu input.size-text-ct", "512");
+        b.click("#containers-run-image-run");
+        b.wait_popdown("containers_run_image_dialog")
+
+        # Make sure they've started
+        b.wait_in_text("#containers-containers", "RESOURCE")
+
+        # Check output of PROBE1
+        b.wait_visible('#containers-containers tr:contains("RESOURCE")')
+        b.click('#containers-containers tr:contains("RESOURCE")')
+        b.wait_visible("#container-details")
+        b.wait_in_text("#container-details-memory-row", "/ 236 MiB")
+        b.wait_in_text("#container-details-cpu-row", "512 shares")
+
+        # Now adjust things
+        b.click("#container-details-resource-row button")
+        b.wait_popup("container-resources-dialog")
+        b.set_val(".memory-slider input.size-text-ct", "246");
+        b.set_val(".cpu-slider input.size-text-ct", "256");
+        b.click("#container-resources-dialog .btn-primary")
+        b.wait_popdown("container-resources-dialog")
+
+        # This should be updated
+        b.wait_in_text("#container-details-memory-row", "/ 246")
+        b.wait_in_text("#container-details-cpu-row", "256 shares")
+
+        # Remove the restrictions
+        b.click("#container-details-resource-row button")
+        b.wait_popup("container-resources-dialog")
+        b.click(".memory-slider input[type='checkbox']");
+        b.click(".cpu-slider input[type='checkbox']");
+        b.click("#container-resources-dialog .btn-primary")
+        b.wait_popdown("container-resources-dialog")
+
+        # This should be updated
+        b.wait_in_text("#container-details-cpu-row", "1024 shares")
+
+@skipImage("Skip on systems without atomic and ones with missing deps", "centos-7", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "rhel-atomic", "fedora-atomic", "fedora-i386")
+class TestAtomicScan(MachineCase):
+    def setUp(self):
+        MachineCase.setUp(self)
+        self.machine.execute("systemctl start docker")
+
+        # HACK: docker fails to start a container without /etc/resolv.conf
+        self.machine.execute("touch /etc/resolv.conf")
+
+    def testBasic(self):
+        b = self.browser
+        m = self.machine
+
+        # HACK put scan results for one of the images into /var/lib/atomic
+        #
+        # This mimics what `atomic scan` would put there, without us having to install
+        # a known vulnerable image and initiating a scan from this test.
+
+        infos = json.loads(m.execute("docker inspect busybox"))
+        image_id = infos[0]["Id"]
+        short_id = image_id.replace("sha256:", "")
+        result_path = os.path.join("/var/lib/atomic/atomic_scan_openscap/2016-12-11-12-09-57-674487/", short_id)
+        result_filename = os.path.join(result_path, "json")
+
+        scan_summary = {
+            short_id: {
+                "Scan Type": "Standards Compliance",
+                "json_file": result_filename,
+                "Scanner": "openscap",
+                "Time": "2016-12-11T12:09:59",
+                "Vulnerable": True,
+                "UUID": short_id
+            }
+        }
+
+        scan_result = {
+            "Scanner": "openscap",
+            "Vulnerabilities": [
+                {
+                    "Description": "\nThe RPM package management system can check file access\npermissions of installed software packages, including many that are\nimportant to system security. \nAfter locating a file with incorrect permissions, run the following command to determine which package owns it:\n",
+                    "Title": "Verify and Correct File Permissions with RPM",
+                    "Custom": {
+                        "XCCDF result": "fail"
+                    },
+                    "Severity": "Low"
+                },
+                {
+                    "Description": "\nSystem executables are stored in the following directories by default:\n",
+                    "Title": "Verify that System Executables Have Restrictive Permissions",
+                    "Custom": {
+                        "XCCDF result": "fail"
+                    },
+                    "Severity": "Moderate"
+                }
+            ],
+            "Finished Time": "2016-12-11T12:10:27",
+            "UUID": "/scanin/d6fe5fdc49c2886ccad1c781d38a0c9fe679c6e7ca0297d23186c385873e86fa",
+            "Scan Type": "Standard Compliance",
+            "Time": "2016-12-11T12:09:59",
+            "Successful": "true"
+        }
+
+        m.execute("mkdir -p " + result_path)
+        m.execute("echo '%s' > /var/lib/atomic/scan_summary.json" % json.dumps(scan_summary))
+        m.execute("echo '%s' > %s" % (json.dumps(scan_result), result_filename))
+
+        self.login_and_go("/docker")
+
+        row_selector = '#containers-images tr[data-row-id="%s"]' % image_id
+
+        # warning badge should exist
+        b.wait_present(row_selector + ' td span.pficon-warning-triangle-o')
+        b.wait_visible(row_selector + ' td span.pficon-warning-triangle-o')
+
+        # Security tab should exist
+        b.click(row_selector + ' td.listing-ct-toggle')
+        b.wait_visible(row_selector + ' + tr a:contains("Security")')
+        b.click(row_selector + ' + tr a:contains("Security")')
+        b.wait_in_text(row_selector + ' + tr', 'Verify and Correct File Permissions with RPM')
+
+        # Collapse the tab and click through to the image
+        b.click(row_selector + ' td.listing-ct-toggle')
+        b.click(row_selector + ' th')
+        b.wait_visible("#image-details")
+        b.wait_in_text("#image-details", "Security")
+        b.wait_in_text("#image-details", "Verify and Correct File Permissions with RPM")
 
 
 if __name__ == '__main__':

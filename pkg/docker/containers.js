@@ -17,20 +17,26 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-require([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "docker/client",
-    "docker/overview",
-    "docker/details",
-    "docker/image",
-    "system/service",
-    "shell/po",
-], function($, cockpit, Mustache, client, overview, container_details, image_details, service, po) {
-    cockpit.locale(po);
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var Mustache = require("mustache");
+    var service = require("service");
+
+    var client = require("./client");
+    var overview = require("./overview");
+    var container_details = require("./details");
+    var image_details = require("./image");
+    var storage = require("./storage.jsx");
+
+    require("page.css");
+    require("table.css");
+    require("./docker.css");
+
     var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
 
     /* CURTAIN
      */
@@ -100,6 +106,7 @@ require([
         var overview_page;
         var container_details_page;
         var image_details_page;
+        var storage_page;
 
         function navigate() {
             var path = cockpit.location.path;
@@ -109,14 +116,22 @@ require([
             if (path.length === 0) {
                 container_details_page.hide();
                 image_details_page.hide();
+                storage_page.hide();
                 overview_page.show();
+            } else if (path.length === 1 && path[0] == "storage") {
+                overview_page.hide();
+                container_details_page.hide();
+                image_details_page.hide();
+                storage_page.show();
             } else if (path.length === 1) {
                 overview_page.hide();
                 image_details_page.hide();
+                storage_page.hide();
                 container_details_page.show(path[0]);
             } else if (path.length === 2 && path[0] == "image") {
                 overview_page.hide();
                 container_details_page.hide();
+                storage_page.hide();
                 image_details_page.show(path[1]);
             } else { /* redirect */
                 console.warn("not a containers location: " + path);
@@ -126,11 +141,12 @@ require([
 
         cockpit.translate();
 
-        docker_client = client.init();
+        docker_client = client.instance();
         init_curtain(docker_client, navigate);
         overview_page = overview.init(docker_client);
         container_details_page = container_details.init(docker_client);
         image_details_page = image_details.init(docker_client);
+        storage_page = storage.init(docker_client);
 
         show_curtain(null);
         docker_client.connect().done(navigate);
@@ -138,4 +154,4 @@ require([
     }
 
     $(init);
-});
+}());

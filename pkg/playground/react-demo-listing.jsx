@@ -16,12 +16,13 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
-define([
-    "base1/react",
-    "base1/cockpit-components-listing",
-], function(React, cockpitListing) {
 
+(function() {
     "use strict";
+
+    var React = require("react");
+
+    var cockpitListing = require("cockpit-components-listing.jsx");
 
     /* Sample tab renderer for listing pattern
      * Shows a caption and the time it was instantiated
@@ -45,9 +46,24 @@ define([
         },
     });
 
-    var showListingDemo = function(rootElement) {
+    var showListingDemo = function(rootElement, rootElementSelectable, rootElementEmptyList) {
         var navigateToItem = function(msg) {
             window.alert("navigated to item: " + msg);
+        };
+
+        var handleAddClick = function(event) {
+            if (event.button !== 0)
+                return;
+
+            window.alert('This link could open a dialog to create a new entry');
+        };
+
+        var handlePlayClick = function(event) {
+            if (event.button !== 0)
+                return;
+
+            window.alert('This is a row-specific action');
+            event.stopPropagation();
         };
 
         var tabRenderers = [
@@ -76,9 +92,18 @@ define([
             },
         ];
 
-        // create the dialog
+        var addLink = <a className="pull-right" onClick={handleAddClick}>Add Row</a>;
+
+        var rowAction = {
+            element: <button className="btn btn-default btn-control fa fa-play" onClick={handlePlayClick} />,
+            tight: true
+        };
+
+        // create the listings
         var listing = (
-            <cockpitListing.Listing title="Demo Listing Pattern with expandable rows">
+            <cockpitListing.Listing title="Demo Listing Pattern with expandable rows"
+                                    actions={addLink}
+                                    columnTitles={['Name', 'Random', 'IP', 'State']}>
                  <cockpitListing.ListingRow
                      columns={ [ { name: 'standard', 'header': true }, 'aoeuaoeu', '127.30.168.10', 'Running' ] }
                      tabRenderers={tabRenderers}
@@ -86,13 +111,36 @@ define([
                  <cockpitListing.ListingRow
                      columns={ [ { name: "can't navigate", 'header': true }, 'aoeuaoeu', '127.30.168.10', 'Running' ] }
                      tabRenderers={tabRenderers}/>
+                 <cockpitListing.ListingRow
+                     columns={ [ { name: "with button", 'header': true }, 'aoeuaoeu', '127.30.168.10', rowAction ] }
+                     tabRenderers={tabRenderers}/>
+                 <cockpitListing.ListingRow
+                     columns={ [ { name: 'nothing to expand', 'header': true }, 'some text', '127.30.168.11', 'some state' ] }/>
              </cockpitListing.Listing>
         );
         React.render(listing, rootElement);
+
+        listing = (
+            <cockpitListing.Listing title="Demo Listing Pattern with selectable rows"
+                                    actions={addLink}
+                                    columnTitles={['Name', 'Random', 'IP', 'State']}>
+                 <cockpitListing.ListingRow
+                     columns={ [ { name: 'selected by default', 'header': true }, 'aoeuaoeu', '127.30.168.10', 'Running' ] }
+                     selected={true}/>
+                 <cockpitListing.ListingRow
+                     columns={ [ { name: "not selected by default", 'header': true }, 'aoeuaoeu', '127.30.168.11', 'Running' ] }
+                     selected={false}/>
+                 <cockpitListing.ListingRow
+                     columns={ [ { name: "no selected entry", 'header': true }, 'aoeuaoeu', '127.30.168.12', rowAction ] }/>
+             </cockpitListing.Listing>
+        );
+        React.render(listing, rootElementSelectable);
+
+        var emptyListing = <cockpitListing.Listing title="Demo Empty Listing Pattern" emptyCaption="No Entries"/>;
+        React.render(emptyListing, rootElementEmptyList);
     };
 
-    return {
+    module.exports = {
         demo: showListingDemo,
     };
-
-});
+}());

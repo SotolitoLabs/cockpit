@@ -23,27 +23,35 @@
 
 #include "cockpithash.h"
 
+#include "errno.h"
+
 static GHashTable *cockpit_conf = NULL;
 static GHashTable *cached_strvs = NULL;
-const gchar *cockpit_config_file = PACKAGE_SYSCONF_DIR "/cockpit/cockpit.conf";
+
+const gchar *cockpit_config_file = "cockpit.conf";
+const gchar *cockpit_config_dirs[] = { PACKAGE_SYSCONF_DIR, NULL };
 
 static gboolean
-load_key_file (const gchar *file_path,
-                GError **error)
+load_key_file (const gchar *file_path)
 {
   GKeyFile *key_file = NULL;
   GHashTable *section;
-  GError *err = NULL;
+  GError *error = NULL;
   gchar **groups;
   gint i;
   gint j;
+  gboolean ret = TRUE;
 
   key_file = g_key_file_new ();
 
-  if (!g_key_file_load_from_file (key_file, file_path, G_KEY_FILE_NONE, error))
+  if (!g_key_file_load_from_file (key_file, file_path, G_KEY_FILE_NONE, &error))
     {
-      g_key_file_free (key_file);
-      return FALSE;
+      if (g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NOENT))
+        goto out;
+
+      g_message ("couldn't load configuration file: %s: %s", file_path, error->message);
+      ret = FALSE;
+      goto out;
     }
 
   groups = g_key_file_get_groups (key_file, NULL);
@@ -57,49 +65,65 @@ load_key_file (const gchar *file_path,
           g_hash_table_insert (cockpit_conf, g_strdup (groups[i]), section);
         }
 
-      keys = g_key_file_get_keys (key_file, groups[i], NULL, &err);
-      g_return_val_if_fail (err == NULL, FALSE);
+      keys = g_key_file_get_keys (key_file, groups[i], NULL, &error);
+      g_return_val_if_fail (error == NULL, FALSE);
 
       for (j = 0; keys[j] != NULL; j++)
         {
-          gchar *value = g_key_file_get_value (key_file, groups[i], keys[j], &err);
-          g_return_val_if_fail (err == NULL, FALSE);
+          gchar *value = g_key_file_get_value (key_file, groups[i], keys[j], &error);
+          g_return_val_if_fail (error == NULL, FALSE);
           g_hash_table_insert (section, g_strdup (keys[j]), value);
         }
       g_strfreev (keys);
     }
   g_strfreev (groups);
 
+  g_debug ("Loaded configuration from: %s", file_path);
+
+out:
+  g_clear_error (&error);
   g_key_file_free (key_file);
-  return TRUE;
+  return ret;
 }
 
 void
 cockpit_conf_init (void)
 {
-  GError *error = NULL;
+  const gchar *const *dirs;
+  gchar *file = NULL;
+  gchar *dir = NULL;
 
   cockpit_conf = g_hash_table_new_full (cockpit_str_case_hash, cockpit_str_case_equal, g_free,
                                         (GDestroyNotify)g_hash_table_unref);
   cached_strvs = g_hash_table_new_full (cockpit_str_case_hash, cockpit_str_case_equal, g_free,
                                         (GDestroyNotify)g_strfreev);
 
-  if (cockpit_config_file)
-    {
-      if (!load_key_file (cockpit_config_file, &error))
-        {
-          if (!g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NOENT))
-            {
-              g_message ("couldn't load configuration file: %s: %s",
-                         cockpit_config_file, error->message);
-            }
-          g_clear_error (&error);
-        }
 
-      g_debug ("Loaded configuration from: %s", cockpit_config_file);
+  if (!cockpit_config_file)
+    {
+      g_debug ("No configuration to load");
+      return;
+    }
+
+  dir = g_path_get_dirname (cockpit_config_file);
+  if (dir && g_strcmp0 (dir, ".") != 0)
+    {
+      load_key_file (cockpit_config_file);
     }
   else
-      g_debug ("No configuration to load");
+    {
+      dirs = cockpit_conf_get_dirs ();
+      while (dirs && dirs[0])
+        {
+          file = g_build_filename (dirs[0], "cockpit", cockpit_config_file, NULL);
+          load_key_file (file);
+          g_free (file);
+
+          dirs++;
+        }
+    }
+
+  g_free (dir);
 }
 
 
@@ -127,6 +151,18 @@ ensure_cockpit_conf (void)
     cockpit_conf_init ();
 }
 
+
+const gchar * const*
+cockpit_conf_get_dirs (void)
+{
+  const gchar *env;
+
+  env = g_getenv ("XDG_CONFIG_DIRS");
+  if (env && env[0])
+    return g_get_system_config_dirs ();
+  else
+    return cockpit_config_dirs;
+}
 
 const gchar *
 cockpit_conf_string (const gchar *section,
@@ -230,4 +266,38 @@ cockpit_conf_strv (const gchar *section,
 
   g_free (key);
   return value;
+}
+
+guint
+cockpit_conf_guint (const gchar *section,
+                    const gchar *field,
+                    guint default_value,
+                    guint64 max,
+                    guint64 min)
+{
+  guint val = default_value;
+  guint64 conf_val;
+  gchar *endptr = NULL;
+
+  const gchar* conf = cockpit_conf_string (section, field);
+  if (conf)
+    {
+      conf_val = g_ascii_strtoull (conf, &endptr, 10);
+      if ((conf_val == G_MAXUINT64 || conf_val == 0) &&
+          (errno == ERANGE || errno == EINVAL))
+        val = default_value;
+      else if (endptr && endptr[0] != '\0')
+        val = default_value;
+      else if (conf_val > max || conf_val > UINT_MAX)
+        val = (max > UINT_MAX) ? UINT_MAX : max;
+      else if (conf_val < min)
+        val = min;
+      else
+        val = (guint)conf_val;
+
+      if (conf_val != val)
+        g_message ("Invalid %s %s value '%s', setting to %u", section, field, conf, val);
+    }
+
+  return val;
 }

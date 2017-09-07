@@ -17,12 +17,13 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/term"
-], function($, cockpit, Terminal) {
+(function() {
     "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var Terminal = require("term");
 
     var docker = { };
 
@@ -134,6 +135,7 @@ define([
             screenKeys: true,
             useStyle: true,
             inlineStyle: false,
+            useFocus: false,
         });
 
         var enable_input = true;
@@ -153,6 +155,10 @@ define([
             enable_input = yes;
         };
 
+        self.focus = function focus() {
+            term.focus();
+        };
+
         /* Allows caller to cleanup nicely */
         self.close = function close() {
             term.destroy();
@@ -167,7 +173,6 @@ define([
 
         $(channel).
             on("close", function(ev, options) {
-                self.connected = false;
                 var problem = options.problem || "disconnected";
                 term.write('\x1b[31m' + problem + '\x1b[m\r\n');
                 self.typeable(false);
@@ -250,6 +255,14 @@ define([
             return at;
         };
 
+        self.focus = function() {
+            /* Nothing to do */
+        };
+
+        self.close = function() {
+            /* Nothing to do */
+        };
+
         /*
          * A raw channel over which we speak Docker's even stranger /logs
          * protocol. It starts with a HTTP GET, and then quickly
@@ -258,7 +271,6 @@ define([
         $(channel).
             on("close", function(ev, options) {
                 write(options.reason || "disconnected");
-                self.connected = false;
                 $(channel).off();
                 channel = null;
             });
@@ -305,6 +317,7 @@ define([
      */
     docker.console = function console_(container_id, command, options) {
         var self = $("<div>").addClass("console-ct");
+        self.connected = false;
         var want_typeable = false;
         var focused = false;
         var channel = null;
@@ -350,7 +363,6 @@ define([
         var prep = null;
 
         function failure(message) {
-            self.connected = false;
             if (tty)
                 view = new DockerTerminal(self, message);
             else
@@ -358,6 +370,8 @@ define([
         }
 
         function prepare() {
+            self.connected = false;
+
             /* Nothing to prepare? Connect diretly to container? */
             if (!exec) {
                 if (tty === false) {
@@ -396,8 +410,6 @@ define([
          * See: http://docs.docker.io/en/latest/reference/api/docker_remote_api_v1.8/#attach-to-a-container
          */
         function attach(request) {
-            self.connected = true;
-
             if (view)
                 view.close();
             view = null;
@@ -417,9 +429,20 @@ define([
             $(channel).
                 on("close.attach", function(ev, options) {
                     docker_debug(container_id + ": console close: ", options);
-                    self.connected = false;
                     $(channel).off(".attach");
                     channel = null;
+
+                    /*
+                     * HACK: If we're disconnected unceremoniously, try
+                     * and reconnect. Certain versions of docker do this
+                     * during container startup.
+                     */
+                    if (self.connected && !options.problem) {
+                        window.setTimeout(function() {
+                            if (self.connected && !channel)
+                                attach(request);
+                        }, 1000);
+                    }
                 });
 
             var headers = null;
@@ -468,6 +491,7 @@ define([
                 else
                     view = new DockerLogs(self, channel);
                 self.typeable(want_typeable);
+                self.connected = true;
 
                 buffer.callback = view.process;
                 var consumed = view.process(data);
@@ -477,13 +501,13 @@ define([
 
         /* Allows caller to cleanup nicely */
         self.close = function close(problem) {
+            self.connected = false;
             if (prep)
                 prep.close(problem);
-            if (self.connected)
+            if (channel)
                 channel.close(problem);
             if (view) {
-                if (view.close)
-                    view.close();
+                view.close();
                 view = null;
             }
         };
@@ -503,6 +527,7 @@ define([
             .on("focusin", function() {
                 focused = true;
                 update_typeable();
+                view.focus();
             })
             .on("focusout", function() {
                 focused = false;
@@ -628,8 +653,6 @@ define([
      */
 
     docker.quote_cmdline = function quote_cmdline(words) {
-        var text;
-
         words = words || [];
 
         function is_whitespace(c) {
@@ -725,5 +748,15 @@ define([
         return num;
     };
 
-    return docker;
-});
+    /*
+     * Returns the short id of a docker container or image id.
+     */
+    docker.truncate_id = function (id) {
+        var c = id.indexOf(':');
+        if (c >= 0)
+            id = id.slice(c + 1);
+        return id.substr(0, 12);
+    };
+
+    module.exports = docker;
+}());

@@ -1,13 +1,12 @@
-define([
-    "base1/react",
-    "base1/cockpit",
-    "base1/cockpit-components-terminal",
-    "shell/po",
-], function(React, cockpit, componentsTerminal, po) {
-
+(function() {
     "use strict";
 
-    cockpit.locale(po);
+    var cockpit = require("cockpit");
+    var _ = cockpit.gettext;
+
+    var React = require("react");
+    var componentsTerminal = require("cockpit-components-terminal.jsx");
+
     cockpit.translate();
 
     /*
@@ -67,20 +66,23 @@ define([
             var terminal;
             if (this.state.channel)
                 terminal = (<componentsTerminal.Terminal ref="terminal"
+                                                         fullscreen="true"
                                                          channel={this.state.channel}
                                                          onTitleChanged={this.onTitleChanged} />);
             else
                 terminal = <span>Loading...</span>;
 
             return (
-                <div className="panel panel-default console-ct-container">
+                <div className="console-ct-container">
                     <div className="panel-heading">
                         <tt className="terminal-title">{this.state.title}</tt>
                         <button ref="resetButton"
                                 className="btn btn-default pull-right"
-                                onClick={this.onResetClick}>Reset</button>
+                                onClick={this.onResetClick}>{_("Reset")}</button>
                     </div>
-                    {terminal}
+                    <div className="panel-body">
+                        {terminal}
+                    </div>
                 </div>
             );
         }
@@ -90,4 +92,4 @@ define([
 
     /* And show the body */
     document.body.removeAttribute("hidden");
-});
+}());

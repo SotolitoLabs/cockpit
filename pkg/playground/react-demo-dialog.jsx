@@ -17,14 +17,11 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "base1/react",
-    "base1/cockpit",
-    "base1/cockpit-components-select",
-], function(React, cockpit, Select) {
-
+(function() {
     "use strict";
-    var _ = cockpit.gettext;
+
+    var React = require("react");
+    var Select = require("cockpit-components-select.jsx");
 
     /* Sample dialog body
      */
@@ -39,7 +36,7 @@ define([
                         <tr>
                             <td className="top">
                                 <label className="control-label" for="control-1">
-                                    {_("Label")}
+                                    Label
                                 </label>
                             </td>
                             <td>
@@ -49,41 +46,53 @@ define([
                         <tr>
                             <td className="top">
                                 <label className="control-label">
-                                    {_("Select")}
+                                    Select
                                 </label>
                             </td>
                             <td>
                                 <Select.Select onChange={this.selectChanged} id="primary-select">
-                                    <Select.SelectEntry data='one'>{_("One")}</Select.SelectEntry>
-                                    <Select.SelectEntry data='two'>{_("Two")}</Select.SelectEntry>
-                                    <Select.SelectEntry>{_("Three")}</Select.SelectEntry>
+                                    <Select.SelectEntry data='one'>One</Select.SelectEntry>
+                                    <Select.SelectEntry data='two'>Two</Select.SelectEntry>
+                                    <Select.SelectEntry data='three'>Three</Select.SelectEntry>
                                     <Select.SelectEntry data='four'></Select.SelectEntry>
-                                    <Select.SelectEntry></Select.SelectEntry>
                                 </Select.Select>
                             </td>
                         </tr>
                         <tr>
                             <td className="top">
                                 <label className="control-label">
-                                    {_("Preselected")}
+                                    Preselected
                                 </label>
                             </td>
                             <td>
-                                <Select.Select initial={_("Two")}>
-                                    <Select.SelectEntry>{_("One")}</Select.SelectEntry>
-                                    <Select.SelectEntry>{_("Two")}</Select.SelectEntry>
-                                    <Select.SelectEntry>{_("Three")}</Select.SelectEntry>
+                                <Select.Select initial="two">
+                                    <Select.SelectEntry data="one">One</Select.SelectEntry>
+                                    <Select.SelectEntry data="two">Two</Select.SelectEntry>
+                                    <Select.SelectEntry data="three">Three</Select.SelectEntry>
                                 </Select.Select>
                             </td>
                         </tr>
                         <tr>
                             <td className="top">
                                 <label className="control-label">
-                                    {_("Empty Select")}
+                                    Empty Select
                                 </label>
                             </td>
                             <td>
                                 <Select.Select />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td className="top">
+                                <label className="control-label">
+                                    Nested dialog
+                                </label>
+                            </td>
+                            <td>
+                                <button id="open-nested" onClick={ this.props.clickNested }>
+                                    Try to nest dialog
+                                </button>
+                                <span>Doesn't open a dialog, only shows a warning in the console.</span>
                             </td>
                         </tr>
                     </table>
@@ -92,5 +101,5 @@ define([
         }
     });
 
-    return PatternDialogBody;
-});
+    module.exports = PatternDialogBody;
+}());

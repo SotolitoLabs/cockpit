@@ -17,32 +17,32 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "base1/mustache",
-    "system/server",
-    "shell/shell",
-    "storage/utils",
-    "storage/dialog",
-    "storage/permissions",
-    "shell/plot"
-], function($, cockpit, mustache, server, shell, utils, dialog, permissions) {
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var mustache = require("mustache");
+    var plot = require("plot");
+    var journal = require("journal");
+
+    var utils = require("./utils");
+    var dialog = require("./dialog");
+    var permissions = require("./permissions");
+
     var _ = cockpit.gettext;
     var C_ = cockpit.gettext;
 
     /* OVERVIEW PAGE
      */
 
+
     function init_overview(client, jobs) {
+        var read_series, write_series;
 
-        function update_features() {
-            $('#vgroups').toggle(client.features.lvm2);
-            $('#iscsi-sessions').toggle(client.features.iscsi);
-        }
-
-        $(client.features).on("changed", update_features);
-        update_features();
+        $('#vgroups').toggle(client.features.lvm2);
+        $('#iscsi-sessions').toggle(client.features.iscsi);
 
         var mdraids_tmpl = $("#mdraids-tmpl").html();
         mustache.parse(mdraids_tmpl);
@@ -108,24 +108,22 @@ define([
         mustache.parse(iscsi_sessions_tmpl);
 
         function render_iscsi_sessions() {
-            function cmp_session(path_a, path_b) {
-                var session_a = client.iscsi_sessions[path_a];
-                var session_b = client.iscsi_sessions[path_b];
-                return session_a.target_name.localeCompare(session_b.target_name);
+            function cmp_session(a, b) {
+                return a.Name.localeCompare(b.Name);
             }
 
             function make_session(path) {
                 var session = client.iscsi_sessions[path];
                 return {
                     path: path,
-                    Name: session.data["target_name"],
+                    Name: session.data["target_name"] || "",
                     Tpgt: session.data["tpgt"],
                     Address: session.data["persistent_address"],
                     Port: session.data["persistent_port"]
                 };
             }
 
-            var s = Object.keys(client.iscsi_sessions).sort(cmp_session).map(make_session);
+            var s = Object.keys(client.iscsi_sessions).map(make_session).sort(cmp_session);
             $('#iscsi-sessions').amend(mustache.render(iscsi_sessions_tmpl,
                                                        { Sessions: s,
                                                          HasSessions: s.length > 0
@@ -241,7 +239,8 @@ define([
                         block.CryptoBackingDevice == "/" &&
                         block.MDRaid == "/" &&
                         (!block_lvm2 || block_lvm2.LogicalVolume == "/") &&
-                        !block.HintIgnore);
+                        !block.HintIgnore &&
+                        block.Size > 0);
             }
 
             function make_other(path) {
@@ -334,7 +333,7 @@ define([
                     axes.yaxis.options.max = null;
                 axes.yaxis.options.min = 0;
 
-                $(unit).text(shell.bytes_per_sec_tick_unit(axes.yaxis));
+                $(unit).text(plot.bytes_per_sec_tick_unit(axes.yaxis));
             };
         }
 
@@ -351,17 +350,17 @@ define([
             threshold: 1000
         };
 
-        var read_plot_options = shell.plot_simple_template();
-        $.extend(read_plot_options.yaxis, { ticks: shell.memory_ticks,
-                                            tickFormatter: shell.format_bytes_per_sec_tick_no_unit
+        var read_plot_options = plot.plot_simple_template();
+        $.extend(read_plot_options.yaxis, { ticks: plot.memory_ticks,
+                                            tickFormatter: plot.format_bytes_per_sec_tick_no_unit
                                           });
         $.extend(read_plot_options.grid,  { hoverable: true,
                                             autoHighlight: false
                                           });
         read_plot_options.setup_hook = make_plot_setup("#storage-reading-unit");
-        var read_plot = shell.plot($("#storage-reading-graph"), 300);
+        var read_plot = plot.plot($("#storage-reading-graph"), 300);
         read_plot.set_options(read_plot_options);
-        var read_series = read_plot.add_metrics_stacked_instances_series(read_plot_data, { });
+        read_series = read_plot.add_metrics_stacked_instances_series(read_plot_data, { });
         read_plot.start_walking();
         $(read_series).on('hover', highlight_drive);
 
@@ -373,17 +372,17 @@ define([
             threshold: 1000
         };
 
-        var write_plot_options = shell.plot_simple_template();
-        $.extend(write_plot_options.yaxis, { ticks: shell.memory_ticks,
-                                             tickFormatter: shell.format_bytes_per_sec_tick_no_unit
+        var write_plot_options = plot.plot_simple_template();
+        $.extend(write_plot_options.yaxis, { ticks: plot.memory_ticks,
+                                             tickFormatter: plot.format_bytes_per_sec_tick_no_unit
                                            });
         $.extend(write_plot_options.grid,  { hoverable: true,
                                              autoHighlight: false
                                            });
         write_plot_options.setup_hook = make_plot_setup("#storage-writing-unit");
-        var write_plot = shell.plot($("#storage-writing-graph"), 300);
+        var write_plot = plot.plot($("#storage-writing-graph"), 300);
         write_plot.set_options(write_plot_options);
-        var write_series = write_plot.add_metrics_stacked_instances_series(write_plot_data, { });
+        write_series = write_plot.add_metrics_stacked_instances_series(write_plot_data, { });
         write_plot.start_walking();
         $(write_series).on('hover', highlight_drive);
 
@@ -392,7 +391,7 @@ define([
             write_plot.resize();
         });
 
-        var plot_controls = shell.setup_plot_controls($('#storage'), $('#storage-graph-toolbar'));
+        var plot_controls = plot.setup_plot_controls($('#storage'), $('#storage-graph-toolbar'));
         plot_controls.reset([ read_plot, write_plot ]);
 
         render_mdraids();
@@ -404,7 +403,7 @@ define([
         render_jobs();
 
         $('#storage-log').append(
-            server.logbox([ "_SYSTEMD_UNIT=storaged.service", "+",
+            journal.logbox([ "_SYSTEMD_UNIT=storaged.service", "+",
                             "_SYSTEMD_UNIT=udisks2.service", "+",
                             "_SYSTEMD_UNIT=dm-event.service", "+",
                             "_SYSTEMD_UNIT=smartd.service", "+",
@@ -448,9 +447,8 @@ define([
                               },
                               { SelectMany: "disks",
                                 Title: _("Disks"),
-                                Options: utils.get_free_blockdevs(client).map(function (b) {
-                                    return { value: b.path, Title: b.Name + " " + b.Description };
-                                }),
+                                Options: utils.get_available_spaces(client).map(utils.available_space_to_option),
+                                EmptyWarning: _("No disks are available."),
                                 validate: function (disks, vals) {
                                     var disks_needed = vals.level == "raid6"? 4 : 2;
                                     if (disks.length < disks_needed)
@@ -462,26 +460,44 @@ define([
                           Action: {
                               Title: _("Create"),
                               action: function (vals) {
-                                  return client.manager.MDRaidCreate(vals.disks, vals.level,
-                                                                     vals.name, (vals.chunk || 0) * 1024,
-                                                                     { });
+                                  return utils.prepare_available_spaces(client, vals.disks).then(function () {
+                                      var paths = Array.prototype.slice.call(arguments);
+                                      return client.manager.MDRaidCreate(paths, vals.level,
+                                                                         vals.name, (vals.chunk || 0) * 1024,
+                                                                         { });
+                                  });
                               }
                           }
                         });
         });
 
         $('#create-volume-group').on('click', function () {
+            function find_vgroup(name) {
+                for (var p in client.vgroups) {
+                    if (client.vgroups[p].Name == name)
+                        return client.vgroups[p];
+                }
+                return null;
+            }
+
+            var name;
+            for (var i = 0; i < 1000; i++) {
+                name = "vgroup" + i.toFixed();
+                if (!find_vgroup(name))
+                    break;
+            }
+
             dialog.open({ Title: _("Create Volume Group"),
                           Fields: [
                               { TextInput: "name",
                                 Title: _("Name"),
+                                Value: name,
                                 validate: utils.validate_lvm2_name
                               },
                               { SelectMany: "disks",
                                 Title: _("Disks"),
-                                Options: utils.get_free_blockdevs(client).map(function (b) {
-                                    return { value: b.path, Title: b.Name + " " + b.Description };
-                                }),
+                                Options: utils.get_available_spaces(client).map(utils.available_space_to_option),
+                                EmptyWarning: _("No disks are available."),
                                 validate: function (disks) {
                                     if (disks.length === 0)
                                         return _("At least one disk is needed.");
@@ -491,7 +507,10 @@ define([
                           Action: {
                               Title: _("Create"),
                               action: function (vals, dialog) {
-                                  return client.manager_lvm2.VolumeGroupCreate(vals.name, vals.disks, { });
+                                  return utils.prepare_available_spaces(client, vals.disks).then(function () {
+                                      var paths = Array.prototype.slice.call(arguments);
+                                      return client.manager_lvm2.VolumeGroupCreate(vals.name, paths, { });
+                                  });
                               }
                           }
                         });
@@ -504,15 +523,15 @@ define([
                                 Title: _("Server Address"),
                                 validate: function (val) {
                                     if (val === "")
-                                        return _("Server address can not be empty.");
+                                        return _("Server address cannot be empty.");
                                 }
                               },
                               { TextInput: "username",
-                                Title: "Username"
+                                Title: _("Username")
 
                               },
                               { PassInput: "password",
-                                Title: "Password"
+                                Title: _("Password")
                               }
                           ],
                           Action: {
@@ -628,14 +647,14 @@ define([
         }
 
         function iscsi_add_with_creds(discover_vals, login_vals) {
-            dialog.open({ Title: "Authentication required",
+            dialog.open({ Title: _("Authentication required"),
                           Fields: [
                               { TextInput: "username",
-                                Title: "Username",
+                                Title: _("Username"),
                                 Value: discover_vals.username
                               },
                               { PassInput: "password",
-                                Title: "Password",
+                                Title: _("Password"),
                                 Value: discover_vals.password
                               }
                           ],
@@ -731,7 +750,7 @@ define([
         };
     }
 
-    return {
+    module.exports = {
         init: init_overview
     };
-});
+}());

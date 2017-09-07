@@ -22,27 +22,30 @@ Tools for writing Cockpit test cases.
 """
 
 from time import sleep
-from urlparse import urlparse
 
 import argparse
+import errno
 import subprocess
 import os
-import atexit
 import select
 import shutil
+import socket
 import sys
 import traceback
-import exceptions
 import random
 import re
 import json
-import shutil
-import subprocess
 import tempfile
 import time
 import unittest
 
-import testinfra
+import tap
+import testvm
+
+TEST_DIR = os.path.normpath(os.path.dirname(os.path.realpath(os.path.join(__file__, ".."))))
+BOTS_DIR = os.path.normpath(os.path.join(TEST_DIR, "..", "bots"))
+
+os.environ["PATH"] = "{0}:{1}:{2}".format(os.environ.get("PATH"), BOTS_DIR, TEST_DIR)
 
 __all__ = (
     # Test definitions
@@ -50,10 +53,13 @@ __all__ = (
     'arg_parser',
     'Browser',
     'MachineCase',
+    'skipImage',
+    'Error',
 
     'sit',
     'wait',
     'opts',
+    'TEST_DIR',
 )
 
 # Command line options
@@ -64,6 +70,7 @@ opts.attachments = None
 opts.revision = None
 opts.address = None
 opts.jobs = 1
+opts.fetch = True
 
 def attach(filename):
     if not opts.attachments:
@@ -73,18 +80,23 @@ def attach(filename):
         shutil.move(filename, dest)
 
 class Browser:
-    def __init__(self, address, label, port=9090):
+    def __init__(self, address, label, port=None):
+        if ":" in address:
+            (self.address, unused, self.port) = address.rpartition(":")
+        else:
+            self.address = address
+            self.port = 9090
+        if port is not None:
+            self.port = port
         self.default_user = "admin"
-        self.address = address
         self.label = label
         self.phantom = Phantom("en_US.utf8")
-        self.port = port
         self.password = "foobar"
 
     def title(self):
         return self.phantom.eval('document.title')
 
-    def open(self, href):
+    def open(self, href, cookie=None):
         """
         Load a page into the browser.
 
@@ -103,6 +115,8 @@ class Browser:
         def tryopen(hard=False):
             try:
                 self.phantom.kill()
+                if cookie is not None:
+                    self.phantom.cookies(cookie)
                 self.phantom.open(href)
                 return True
             except:
@@ -227,6 +241,9 @@ class Browser:
     def wait_val(self, selector, val):
         return self.wait_js_func('ph_has_val', selector, val)
 
+    def wait_not_val(self, selector, val):
+        return self.wait_js_func('!ph_has_val', selector, val)
+
     def wait_attr(self, selector, attr, val):
         return self.wait_js_func('ph_has_attr', selector, attr, val)
 
@@ -317,7 +334,7 @@ class Browser:
                 self.wait_visible("iframe.container-frame[name='%s']" % frame)
                 break
             except Error, ex:
-                if reconnect and ex.msg == 'timeout':
+                if reconnect and ex.msg.startswith('timeout'):
                     reconnect = False
                     if self.is_present("#machine-reconnect"):
                         self.click("#machine-reconnect", True)
@@ -344,7 +361,7 @@ class Browser:
         else:
             self.click(sel + ' button:first-child');
 
-    def login_and_go(self, path=None, user=None, host=None):
+    def login_and_go(self, path=None, user=None, host=None, authorized=True):
         if user is None:
             user = self.default_user
         href = path
@@ -356,6 +373,8 @@ class Browser:
         self.wait_visible("#login")
         self.set_val('#login-user-input', user)
         self.set_val('#login-password-input', self.password)
+        self.set_checked('#authorized-input', authorized)
+
         self.click('#login-button')
         self.expect_load()
         self.wait_present('#content')
@@ -366,17 +385,20 @@ class Browser:
     def logout(self):
         self.switch_to_top()
         self.wait_present("#navbar-dropdown")
+        self.wait_visible("#navbar-dropdown")
         self.click("#navbar-dropdown")
         self.click('#go-logout')
         self.expect_load()
 
-    def relogin(self, path=None, user=None):
+    def relogin(self, path=None, user=None, authorized=None):
         if user is None:
             user = self.default_user
         self.logout()
         self.wait_visible("#login")
         self.set_val("#login-user-input", user)
         self.set_val("#login-password-input", self.password)
+        if authorized is not None:
+            self.set_checked('#authorized-input', authorized)
         self.click('#login-button')
         self.expect_load()
         self.wait_present('#content')
@@ -389,76 +411,96 @@ class Browser:
             self.enter_page(path.split("#")[0], host=host)
 
     def snapshot(self, title, label=None):
-        """Take a snapshot of the current screen and save it as a PNG.
+        """Take a snapshot of the current screen and save it as a PNG and HTML.
 
         Arguments:
             title: Used for the filename.
         """
-        if self.phantom:
+        if self.phantom and self.phantom.valid:
             filename = "{0}-{1}.png".format(label or self.label, title)
             self.phantom.show(filename)
+            attach(filename)
+            filename = "{0}-{1}.html".format(label or self.label, title)
+            self.phantom.dump(filename)
+            attach(filename)
+
+    def copy_js_log(self, title, label=None):
+        """Copy the current javascript log"""
+        if self.phantom and self.phantom.valid:
+            filename = "{0}-{1}.js.log".format(label or self.label, title)
+            self.phantom.dump_log(filename)
             attach(filename)
 
     def kill(self):
         self.phantom.kill()
 
-class InterceptResult(object):
-    def __init__(self, original, func):
-        self.original = original
-        self.func = func
-
-    def __getattr__(self, name):
-        return getattr(self.original, name)
-
-    def addError(self, test, err):
-        func = self.func
-        func(test, self._exc_info_to_string(err, test))
-        self.original.addError(test, err)
-
-    def addFailure(self, test, err):
-        func = self.func
-        func(test, self._exc_info_to_string(err, test))
-        self.original.addFailure(test, err)
-
-    def addUnexpectedSuccess(self, test):
-        func = self.func
-        func(test, "Unexpected success: " + str(test))
-        self.original.addFailure(test, err)
 
 class MachineCase(unittest.TestCase):
+    image = testvm.DEFAULT_IMAGE
     runner = None
     machine = None
+    machines = { }
     machine_class = None
     browser = None
-    machines = [ ]
+    network = None
+
+    # provision is a dictionary of dictionaries, one for each additional machine to be created, e.g.:
+    # provision = { 'openshift' : { 'image': 'openshift', 'memory_mb': 1024 } }
+    # These will be instantiated during setUp, and replaced with machine objects
+    provision = None
 
     def label(self):
         (unused, sep, label) = self.id().partition(".")
         return label.replace(".", "-")
 
-    def new_machine(self, image=None):
+    def new_machine(self, image=None, forward={ }, **kwargs):
         import testvm
         machine_class = self.machine_class
+        if image is None:
+            image = self.image
         if opts.address:
-            if machine_class:
+            if machine_class or forward:
                 raise unittest.SkipTest("Cannot run this test when specific machine address is specified")
-            if len(self.machines) != 0:
-                raise unittest.SkipTest("Cannot run multiple machines if a specific machine address is specified")
-            machine = testvm.Machine(address=opts.address, image=image, verbose=opts.trace, label=self.label())
+            machine = testvm.Machine(address=opts.address, image=image, verbose=opts.trace)
             self.addCleanup(lambda: machine.disconnect())
         else:
             if not machine_class:
                 machine_class = testvm.VirtMachine
-            machine = machine_class(verbose=opts.trace, image=image, label=self.label())
+            if not self.network:
+                network = testvm.VirtNetwork()
+                self.addCleanup(lambda: network.kill())
+                self.network = network
+            networking = self.network.host(restrict=True, forward=forward)
+            machine = machine_class(verbose=opts.trace, networking=networking, image=image, **kwargs)
+            if opts.fetch and not os.path.exists(machine.image_file):
+                machine.pull(machine.image_file)
             self.addCleanup(lambda: machine.kill())
-
-        self.machines.append(machine)
         return machine
 
-    def new_browser(self, address=None, port=9090):
-        browser = Browser(address = address or self.machine.address, label=self.label(), port=port)
+    def new_browser(self, machine=None):
+        if machine is None:
+            machine = self.machine
+        label = self.label() + "-" + machine.label
+        browser = Browser(machine.web_address, label=label, port=machine.web_port)
         self.addCleanup(lambda: browser.kill())
         return browser
+
+    def checkSuccess(self):
+        if not self.currentResult:
+            return False
+        for error in self.currentResult.errors:
+            if self == error[0]:
+                return False
+        for failure in self.currentResult.failures:
+            if self == failure[0]:
+                return False
+        for success in self.currentResult.unexpectedSuccesses:
+            if self == success:
+                return False
+        for skipped in self.currentResult.skipped:
+            if self == skipped[0]:
+                return False
+        return True
 
     def run(self, result=None):
         orig_result = result
@@ -470,18 +512,26 @@ class MachineCase(unittest.TestCase):
             if startTestRun is not None:
                 startTestRun()
 
-        def intercept(test, err):
-            self.failed = True
-            self.snapshot("FAIL")
-            self.copy_journal("FAIL")
-            if opts.sit:
-                print >> sys.stderr, err
-                if self.machine:
-                    print >> sys.stderr, "ADDRESS: %s" % self.machine.address
-                sit()
+        self.currentResult = result
 
-        intercept = InterceptResult(result, intercept)
-        super(MachineCase, self).run(intercept)
+        # Here's the loop to actually retry running the test. It's an awkward
+        # place for this loop, since it only applies to MachineCase based
+        # TestCases. However for the time being there is no better place for it.
+        #
+        # Policy actually dictates retries.  The number here is an upper bound to
+        # prevent endless retries if Policy.check_retry is buggy.
+        max_retry_hard_limit = 10
+        for retry in range(0, max_retry_hard_limit):
+            try:
+                super(MachineCase, self).run(result)
+            except RetryError, ex:
+                assert retry < max_retry_hard_limit
+                sys.stderr.write("{0}\n".format(ex))
+                sleep(retry * 10)
+            else:
+                break
+
+        self.currentResult = None
 
         # Standard book keeping that we have to do
         if orig_result is None:
@@ -489,25 +539,72 @@ class MachineCase(unittest.TestCase):
             if stopTestRun is not None:
                 stopTestRun()
 
-    def setUp(self, macaddr=None, memory_mb=None, cpus=None):
-        self.machines = [ ]
-        self.machine = self.new_machine()
-        self.machine.start(macaddr=macaddr, memory_mb=memory_mb, cpus=cpus)
-        if not opts.address:
+    def setUp(self):
+        if opts.address and self.provision is not None:
+            raise unittest.SkipTest("Cannot provision multiple machines if a specific machine address is specified")
+
+        self.machine = None
+        self.browser = None
+        self.machines = { }
+        provision = self.provision or { 'machine1': { } }
+
+        # First create all machines, wait for them later
+        for key in sorted(provision.keys()):
+            options = provision[key].copy()
+            if 'address' in options:
+                del options['address']
+            if 'dns' in options:
+                del options['dns']
+            if 'dhcp' in options:
+                del options['dhcp']
+            machine = self.new_machine(**options)
+            self.machines[key] = machine
+            if not self.machine:
+                self.machine = machine
             if opts.trace:
-                print "starting machine %s" % (self.machine.address)
-            self.machine.wait_boot()
-        self.browser = self.new_browser()
+                print "Starting {0} {1}".format(key, machine.label)
+            machine.start()
+
+        def sitter():
+            if opts.sit and not self.checkSuccess():
+                self.currentResult.printErrors()
+                sit(self.machines)
+        self.addCleanup(sitter)
+
+        # Now wait for the other machines to be up
+        for key in self.machines.keys():
+            machine = self.machines[key]
+            machine.wait_boot()
+            address = provision[key].get("address")
+            if address is not None:
+                machine.set_address(address)
+            dns = provision[key].get("dns")
+            if address or dns:
+                machine.set_dns(dns)
+            dhcp = provision[key].get("dhcp", False)
+            if dhcp:
+                machine.dhcp_server()
+
+        if self.machine:
+            self.browser = self.new_browser()
         self.tmpdir = tempfile.mkdtemp()
 
+        def intercept():
+            if not self.checkSuccess():
+                self.snapshot("FAIL")
+                self.copy_js_log("FAIL")
+                self.copy_journal("FAIL")
+                self.copy_cores("FAIL")
+        self.addCleanup(intercept)
+
     def tearDown(self):
-        if not getattr(self, "failed", False) and self.machine.address:
+        if self.checkSuccess() and self.machine.ssh_reachable:
             self.check_journal_messages()
         shutil.rmtree(self.tmpdir)
 
-    def login_and_go(self, path=None, user=None, host=None):
+    def login_and_go(self, path=None, user=None, host=None, authorized=True):
         self.machine.start_cockpit(host)
-        self.browser.login_and_go(path, user=user, host=host)
+        self.browser.login_and_go(path, user=user, host=host, authorized=authorized)
 
     allowed_messages = [
         # This is a failed login, which happens every time
@@ -515,8 +612,11 @@ class MachineCase(unittest.TestCase):
 
         # Reauth stuff
         '.*Reauthorizing unix-user:.*',
-        '.*user .* was reauthorized',
-        'cockpit-polkit helper exited with status: 0',
+        '.*user .* was reauthorized.*',
+
+        # Happens when the user logs out during reauthorization
+        "Error executing command as another user: Not authorized",
+        "This incident has been reported.",
 
         # Reboots are ok
         "-- Reboot --",
@@ -532,21 +632,50 @@ class MachineCase(unittest.TestCase):
         # pam_lastlog outdated complaints
         ".*/var/log/lastlog: No such file or directory",
 
+        # ssh messages may be dropped when closing
+        '10.*: dropping message while waiting for child to exit',
+
         # SELinux messages to ignore
         "(audit: )?type=1403 audit.*",
         "(audit: )?type=1404 audit.*",
 
         # https://bugzilla.redhat.com/show_bug.cgi?id=1298157
-        "type=1400 .*granted.*comm=\"tuned\".*",
+        "(audit: )?type=1400 .*granted.*comm=\"tuned\".*",
 
         # https://bugzilla.redhat.com/show_bug.cgi?id=1298171
-        "type=1400 .*denied.*comm=\"iptables\".*name=\"xtables.lock\".*",
+        "(audit: )?type=1400 .*denied.*comm=\"iptables\".*name=\"xtables.lock\".*",
 
-        # https://bugzilla.redhat.com/show_bug.cgi?id=1299054
-        "type=1400 .*denied.*comm=\"rhsmcertd-worke\".*name=\".dbenv.lock\".*",
+        # https://bugzilla.redhat.com/show_bug.cgi?id=1386624
+        ".*type=1400 .*denied  { name_bind } for.*dhclient.*",
+
+        # https://bugzilla.redhat.com/show_bug.cgi?id=1419263
+        ".*type=1400 .*denied  { write } for.*firewalld.*__pycache__.*",
+
+        # https://bugzilla.redhat.com/show_bug.cgi?id=1242656
+        "(audit: )?type=1400 .*denied.*comm=\"cockpit-ws\".*name=\"unix\".*dev=\"proc\".*",
+        "(audit: )?type=1400 .*denied.*comm=\"ssh-transport-c\".*name=\"unix\".*dev=\"proc\".*",
+        "(audit: )?type=1400 .*denied.*comm=\"cockpit-ssh\".*name=\"unix\".*dev=\"proc\".*",
+
+        # https://bugzilla.redhat.com/show_bug.cgi?id=1374820
+        "(audit: )?type=1400 .*denied.*comm=\"systemd\" path=\"/run/systemd/inaccessible/blk\".*",
 
         # SELinux fighting with systemd: https://bugzilla.redhat.com/show_bug.cgi?id=1253319
         "(audit: )?type=1400 audit.*systemd-journal.*path=2F6D656D66643A73642D73797374656D642D636F726564756D202864656C6574656429",
+
+        # SELinux and plymouth: https://bugzilla.redhat.com/show_bug.cgi?id=1427884
+        "(audit: )?type=1400 audit.*connectto.*plymouth.*unix_stream_socket.*",
+
+        # SELinux and nfs-utils fighting: https://bugzilla.redhat.com/show_bug.cgi?id=1447854
+        ".*type=1400 .*denied  { execute } for.*sm-notify.*init_t.*",
+
+        # SELinux prevents agetty from being executed by systemd: https://bugzilla.redhat.com/show_bug.cgi?id=1449569
+        ".*type=1400 .*denied  { execute } for.*agetty.*init_t.*",
+
+        # apparmor loading
+        "(audit: )?type=1400.*apparmor=\"STATUS\".*",
+
+        # apparmor noise
+        "(audit: )?type=1400.*apparmor=\"ALLOWED\".*",
 
         # Messages from systemd libraries when they are in debug mode
         'Successfully loaded SELinux database in.*',
@@ -557,6 +686,13 @@ class MachineCase(unittest.TestCase):
         # HACK: https://github.com/systemd/systemd/pull/1758
         'Error was encountered while opening journal files:.*',
         'Failed to get data: Cannot assign requested address',
+
+        # HACK https://bugzilla.redhat.com/show_bug.cgi?id=1461893
+        # selinux errors while logging in via ssh
+        'type=1401 audit(.*): op=security_compute_av reason=bounds .* tclass=process perms=transition.*',
+
+        # Various operating systems see this from time to time
+        "Journal file.*truncated, ignoring file.",
     ]
 
     def allow_journal_messages(self, *patterns):
@@ -566,6 +702,7 @@ class MachineCase(unittest.TestCase):
 
     def allow_hostkey_messages(self):
         self.allow_journal_messages('.*: .* host key for server is not known: .*',
+                                    '.*: refusing to connect to unknown host: .*',
                                     '.*: failed to retrieve resource: hostkey-unknown')
 
     def allow_restart_journal_messages(self):
@@ -573,31 +710,39 @@ class MachineCase(unittest.TestCase):
                                     ".*Broken pipe.*",
                                     "g_dbus_connection_real_closed: Remote peer vanished with error: Underlying GIOStream returned 0 bytes on an async read \\(g-io-error-quark, 0\\). Exiting.",
                                     "connection unexpectedly closed by peer",
+                                    "peer did not close io when expected",
                                     # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
                                     "localhost: bridge program failed: Child process killed by signal 9",
                                     "request timed out, closing",
                                     "PolicyKit daemon disconnected from the bus.",
+                                    ".*couldn't create polkit session subject: No session for pid.*",
                                     "We are no longer a registered authentication agent.",
                                     ".*: failed to retrieve resource: terminated",
                                     # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1253319
                                     'audit:.*denied.*2F6D656D66643A73642D73797374656D642D636F726564756D202864656C.*',
-                                    # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1317389
-                                    'audit:.*denied.*systemd-logind.*nologin.*',
                                     'audit:.*denied.*comm="systemd-user-se".*nologin.*',
 
                                     'localhost: dropping message while waiting for child to exit',
                                     '.*: GDBus.Error:org.freedesktop.PolicyKit1.Error.Failed: .*',
+                                    '.*g_dbus_connection_call_finish_internal.*G_IS_DBUS_CONNECTION.*',
                                     )
 
     def allow_authorize_journal_messages(self):
         self.allow_journal_messages("cannot reauthorize identity.*:.*unix-user:admin.*",
-                                    "Error executing command as another user: Not authorized",
-                                    "This incident has been reported.",
+                                    ".*: pam_authenticate failed: Authentication failure",
+                                    ".*is not in the sudoers file.  This incident will be reported.",
                                     ".*: a password is required",
                                     "user user was reauthorized",
-                                    ".*: sorry, you must have a tty to run sudo"
-                                    )
-
+                                    "sudo: unable to resolve host .*",
+                                    ".*: sorry, you must have a tty to run sudo",
+                                    ".*/pkexec: bridge exited",
+                                    "We trust you have received the usual lecture from the local System",
+                                    "Administrator. It usually boils down to these three things:",
+                                    "#1\) Respect the privacy of others.",
+                                    "#2\) Think before you type.",
+                                    "#3\) With great power comes great responsibility.",
+                                    ".*Sorry, try again.",
+                                    ".*incorrect password attempt.*")
 
     def check_journal_messages(self, machine=None):
         """Check for unexpected journal entries."""
@@ -622,7 +767,9 @@ class MachineCase(unittest.TestCase):
                 if not first:
                     first = m
         if not all_found:
+            self.copy_js_log("FAIL")
             self.copy_journal("FAIL")
+            self.copy_cores("FAIL")
             raise Error(first)
 
     def snapshot(self, title, label=None):
@@ -634,14 +781,31 @@ class MachineCase(unittest.TestCase):
         if self.browser is not None:
             self.browser.snapshot(title, label)
 
+    def copy_js_log(self, title, label=None):
+        if self.browser is not None:
+            self.browser.copy_js_log(title, label)
+
     def copy_journal(self, title, label=None):
-        for m in self.machines:
-            if m.address:
-                log = "%s-%s-%s.log" % (label or self.label(), m.address, title)
+        for name, m in self.machines.iteritems():
+            if m.ssh_reachable:
+                log = "%s-%s-%s.log" % (label or self.label(), m.label, title)
                 with open(log, "w") as fp:
                     m.execute("journalctl", stdout=fp)
                     print "Journal extracted to %s" % (log)
                     attach(log)
+
+    def copy_cores(self, title, label=None):
+        for name, m in self.machines.iteritems():
+            if m.ssh_reachable:
+                directory = "%s-%s-%s.core" % (label or self.label(), m.label, title)
+                dest = os.path.abspath(directory)
+                m.download_dir("/var/lib/systemd/coredump", dest)
+                try:
+                    os.rmdir(dest)
+                except OSError, ex:
+                    if ex.errno == errno.ENOTEMPTY:
+                        print "Core dumps downloaded to %s" % (dest)
+                        attach(dest)
 
 some_failed = False
 
@@ -653,6 +817,7 @@ class Phantom:
     def __init__(self, lang=None):
         self.lang = lang
         self.timeout = 60
+        self.valid = False
         self._driver = None
 
     def __getattr__(self, name):
@@ -672,6 +837,9 @@ class Phantom:
         }).replace("\n", " ") + "\n"
         self._driver.stdin.write(line)
         line = self._driver.stdout.readline()
+        if not line:
+            self.kill()
+            raise Error("PhantomJS or driver broken")
         try:
             res = json.loads(line)
         except:
@@ -695,152 +863,129 @@ class Phantom:
         command = [
             "%s/phantom-command" % path,
             "%s/phantom-driver.js" % path,
+            "%s/sizzle.js" % path,
             "%s/phantom-lib.js" % path
         ]
+        self.valid = True
         self._driver = subprocess.Popen(command, env=environ,
                                         stdout=subprocess.PIPE,
                                         stdin=subprocess.PIPE, close_fds=True)
 
-    def quit(self):
-        self._invoke("ping")
-        self._driver.stdin.close()
-        self._driver.wait()
-        self._driver = None
-
     def kill(self):
+        self.valid = False
         if self._driver:
             self._driver.terminate()
             self._driver.wait()
             self._driver = None
 
-def list_directories(dirs):
-    result = [ ];
-    for d in dirs:
-        for f in os.listdir(d):
-            result.append(os.path.join(d, f))
-    return result
+def skipImage(reason, *args):
+    if testvm.DEFAULT_IMAGE in args:
+        return unittest.skip("{0}: {1}".format(testvm.DEFAULT_IMAGE, reason))
+    return lambda func: func
 
-class Naughty(object):
+class Policy(object):
+    def __init__(self, retryable=True):
+        self.retryable = retryable
+
     def normalize_traceback(self, trace):
         # All file paths converted to basename
         return re.sub(r'File "[^"]*/([^/"]+)"', 'File "\\1"', trace.strip())
 
-    def post_github(self, number, err):
-        github = testinfra.GitHub()
-
-        # Ignore this if we were not given a token
-        if not github.available:
-            return False
-
-        context = "verify/{0}".format(testinfra.DEFAULT_IMAGE)
-
-        # Lookup the link being logged to
-        link = None
-        revision = os.environ.get("TEST_REVISION", None)
-        if revision:
-            link = "revision {0}".format(revision)
-            statuses = github.get("commits/{0}/statuses".format(revision))
-            if statuses:
-                for status in statuses:
-                    if status["context"] == context:
-                        link = "revision {0}, [logs]({1})".format(revision, status["target_url"])
-                        break
-        github.update_known_issue(number, err, link, context)
-        return True
-
     def check_issue(self, trace):
-        directories =  [ os.path.join(testinfra.TEST_DIR, "verify", "naughty") ]
-        image_naughty = os.path.join(testinfra.TEST_DIR, "verify", "naughty-" + testinfra.DEFAULT_IMAGE)
-        if os.path.exists(image_naughty):
-            directories.append(image_naughty)
-        trace = self.normalize_traceback(trace)
-        number = 0
-        for naughty in list_directories(directories):
-            (prefix, unused, name) = os.path.basename(naughty).partition("-")
-            try:
-                n = int(prefix)
-            except:
-                continue
-            with open(naughty, "r") as fp:
-                contents = self.normalize_traceback(fp.read())
-            if contents in trace:
-                number = n
-        if not number:
+        cmd = [ "image-naughty", testvm.DEFAULT_IMAGE ]
+
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            (output, error) = proc.communicate(str(trace))
+        except OSError, ex:
+            if getattr(ex, 'errno', 0) != errno.ENOENT:
+                sys.stderr.write("Couldn't check known issue: {0}\n".format(str(ex)))
+            output = ""
+
+        return output
+
+    def check_retry(self, trace, tries):
+        # Never try more than five times
+        if not self.retryable or tries >= 5:
             return False
 
-        sys.stderr.write("Ignoring known issue #{0}\n{1}\n".format(number, trace))
-        try:
-            self.post_github(number, trace)
-        except:
-            sys.stderr.write("Failed to post known issue to GitHub\n")
-            traceback.print_exc()
-        return True
+        # We check for persistent but test harness or framework specific
+        # failures that otherwise cause flakiness and false positives.
+        #
+        # The things we check here must:
+        #  * have no impact on users of Cockpit in the real world
+        #  * be things we tried to resolve in other ways. This is a last resort
+        #
+        trace = self.normalize_traceback(trace)
 
-class TapResult(unittest.TestResult):
-    def __init__(self, stream, descriptions, verbosity):
-        self.offset = 0
-        self.naughty = None
-        super(TapResult, self).__init__(stream, descriptions, verbosity)
-
-    def ok(self, test):
-        data = "ok {0} {1}\n".format(self.offset, str(test))
-        sys.stdout.write(data)
-
-    def not_ok(self, test, err):
-        data = "not ok {0} {1}\n".format(self.offset, str(test))
-        if err:
-            data += self._exc_info_to_string(err, test)
-        sys.stdout.write(data)
-
-    def skip(self, test, reason):
-        sys.stdout.write("ok {0} {1} # SKIP {2}\n".format(self.offset, str(test), reason))
-
-    def known_issue(self, test, err):
-        string = self._exc_info_to_string(err, test)
-        if self.naughty and self.naughty.check_issue(string):
-            self.addSkip(test, "Known issue")
+        # HACK: An issue in phantomjs and QtWebkit
+        # http://stackoverflow.com/questions/35337304/qnetworkreply-network-access-is-disabled-in-qwebview
+        # https://github.com/owncloud/client/issues/3600
+        # https://github.com/ariya/phantomjs/issues/14789
+        if "PhantomJS or driver broken" in trace:
             return True
+
+        # HACK: A race issue in phantomjs that happens randomly
+        # https://github.com/ariya/phantomjs/issues/12750
+        if "Resource Error: Operation canceled" in trace:
+            return True
+
+        # HACK: Interacting with sshd during boot is not always predictable
+        # We're using an implementation detail of the server as our "way in" for testing.
+        # This often has to do with sshd being restarted for some reason
+        if "SSH master process exited with code: 255" in trace:
+            return True
+
+        # HACK: Intermittently the new libvirt machine won't get an IP address
+        # or SSH will completely fail to start. We've tried various approaches
+        # to minimize this, but it happens every 100,000 tests or so
+        if "Failure: Unable to reach machine " in trace:
+            return True
+
+        # HACK: For when the verify machine runs out of available processes
+        # We should retry this test process
+        if "self.pid = os.fork()\nOSError: [Errno 11] Resource temporarily unavailable" in trace:
+            return True
+
         return False
 
-    def stop(self):
-        sys.stdout.write("Bail out!\n")
-        super(TapResult, self).stop()
+class TestResult(tap.TapResult):
+    def __init__(self, stream, descriptions, verbosity):
+        self.policy = None
+        super(TestResult, self).__init__(verbosity)
 
-    def startTest(self, test):
-        self.offset += 1
-        sys.stdout.write("# {0}\n# {1}\n#\n".format('-' * 70, str(test)))
-        super(TapResult, self).startTest(test)
-
-    def stopTest(self, test):
-        test.result = None
-        sys.stdout.write("\n")
-        super(TapResult, self).stopTest(test)
+    def maybeIgnore(self, test, err):
+        string = self._exc_info_to_string(err, test)
+        if self.policy:
+            issue = self.policy.check_issue(string)
+            if issue:
+                self.addSkip(test, "Known issue #{0}".format(issue))
+                return True
+            tries = getattr(test, "retryCount", 1)
+            if self.policy.check_retry(string, tries):
+                self.offset -= 1
+                setattr(test, "retryCount", tries + 1)
+                test.doCleanups()
+                raise RetryError("Retrying due to failure of test harness or framework")
+        return False
 
     def addError(self, test, err):
-        if not self.known_issue(test, err):
-            self.not_ok(test, err)
-            super(TapResult, self).addError(test, err)
+        if not self.maybeIgnore(test, err):
+            super(TestResult, self).addError(test, err)
 
     def addFailure(self, test, err):
-        if not self.known_issue(test, err):
-            self.not_ok(test, err)
-            super(TapResult, self).addError(test, err)
+        if not self.maybeIgnore(test, err):
+            super(TestResult, self).addError(test, err)
 
-    def addSuccess(self, test):
-        self.ok(test)
-        super(TapResult, self).addSuccess(test)
+    def startTest(self, test):
+        sys.stdout.write("# {0}\n# {1}\n#\n".format('-' * 70, str(test)))
+        sys.stdout.flush()
+        super(TestResult, self).startTest(test)
 
-    def addSkip(self, test, reason):
-        self.skip(test, reason)
-        super(TapResult, self).addSkip(test, reason)
-
-    def addExpectedFailure(self, test, err):
-        self.ok(test)
-        super(TapResult, self).addExpectedFailure(test, err)
-
-    def addUnexpectedSuccess(self, test):
-        self.not_ok(test, None)
-        super(TapResult, self).addUnexpectedSuccess(test)
+    def stopTest(self, test):
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        super(TestResult, self).stopTest(test)
 
 class OutputBuffer(object):
     def __init__(self):
@@ -880,7 +1025,7 @@ class OutputBuffer(object):
         return buffer
 
 class TapRunner(object):
-    resultclass = TapResult
+    resultclass = TestResult
 
     def __init__(self, verbosity=1, jobs=1, thorough=False):
         self.stream = unittest.runner._WritelnDecorator(sys.stderr)
@@ -888,10 +1033,26 @@ class TapRunner(object):
         self.thorough = thorough
         self.jobs = jobs
 
+    def runOne(self, test, offset):
+        result = TestResult(self.stream, False, self.verbosity)
+        result.offset = offset
+        if not self.thorough:
+            result.policy = Policy()
+        try:
+            test(result)
+        except KeyboardInterrupt:
+            return False
+        except:
+            sys.stderr.write("Unexpected exception while running {0}\n".format(test))
+            traceback.print_exc(file=sys.stderr)
+            return False
+        else:
+            result.printErrors()
+            return result.wasSuccessful()
+
     def run(self, testable):
+        tap.TapResult.plan(testable)
         count = testable.countTestCases()
-        sys.stdout.write("1..{0}\n".format(count))
-        sys.stdout.flush()
 
         # For statistics
         start = time.time()
@@ -909,7 +1070,10 @@ class TapRunner(object):
             while len(pids) > n:
                 if buffer:
                     buffer.drain()
-                (pid, code) = os.waitpid(-1, options)
+                try:
+                    (pid, code) = os.waitpid(-1, options)
+                except KeyboardInterrupt:
+                    sys.exit(255)
                 if pid:
                     if buffer:
                         sys.stdout.write(buffer.pop(pid))
@@ -931,26 +1095,14 @@ class TapRunner(object):
             sys.stderr.flush()
             pid = os.fork()
             if not pid:
-                try:
-                    if buffer:
-                        os.dup2(wfd, 1)
-                        os.dup2(wfd, 2)
-                    random.seed()
-                    result = TapResult(self.stream, False, self.verbosity)
-                    if not self.thorough:
-                        result.naughty = Naughty()
-                    result.offset = offset
-                    test(result)
-                    result.printErrors()
-                except:
-                    sys.stderr.write("Unexpected exception while running {0}\n".format(test))
-                    traceback.print_exc(file=sys.stderr)
-                    sys.exit(1)
+                if buffer:
+                    os.dup2(wfd, 1)
+                    os.dup2(wfd, 2)
+                random.seed()
+                if self.runOne(test, offset):
+                    sys.exit(0)
                 else:
-                    if result.wasSuccessful():
-                        sys.exit(0)
-                    else:
-                        sys.exit(1)
+                    sys.exit(1)
 
             # The parent process
             pids.add(pid)
@@ -964,7 +1116,8 @@ class TapRunner(object):
 
         # Report on the results
         duration = int(time.time() - start)
-        details = "[{0}s on {1}]".format(duration, testinfra.HOSTNAME)
+        hostname = socket.gethostname().split(".")[0]
+        details = "[{0}s on {1}]".format(duration, hostname)
         count = failures["count"]
         if count:
             sys.stdout.write("# {0} TESTS FAILED {1}\n".format(count, details))
@@ -986,9 +1139,11 @@ def arg_parser():
                         help='Thorough mode, no skipping known issues')
     parser.add_argument('-s', "--sit", dest='sit', action='store_true',
                         help="Sit and wait after test failure")
+    parser.add_argument('--nonet', dest="fetch", action="store_false",
+                        help="Don't go online to download images or data")
     parser.add_argument('tests', nargs='*')
 
-    parser.set_defaults(verbosity=1)
+    parser.set_defaults(verbosity=1, fetch=True)
     return parser
 
 def test_main(options=None, suite=None, attachments=None, **kwargs):
@@ -1045,6 +1200,9 @@ class Error(Exception):
     def __str__(self):
         return self.msg
 
+class RetryError(Error):
+    pass
+
 def wait(func, msg=None, delay=1, tries=60):
     """
     Wait for FUNC to return something truthy, and return that.
@@ -1059,8 +1217,8 @@ def wait(func, msg=None, delay=1, tries=60):
       msg: A error message to use when the timeout occurs.  Defaults
         to a generic message.
       delay: How long to wait between calls to FUNC, in seconds.
-        Defaults to 0.2.
-      tries: How often to call FUNC.  Defaults to 20.
+        Defaults to 1.
+      tries: How often to call FUNC.  Defaults to 60.
 
     Raises:
       Error: When a timeout occurs.
@@ -1081,11 +1239,13 @@ def wait(func, msg=None, delay=1, tries=60):
         sleep(delay)
     raise Error(msg or "Condition did not become true.")
 
-def sit():
+def sit(machines={ }):
     """
     Wait until the user confirms to continue.
 
     The current test case is suspended so that the user can inspect
     the browser.
     """
+    for (name, machine) in machines.items():
+        sys.stderr.write(machine.diagnose())
     raw_input ("Press RET to continue... ")

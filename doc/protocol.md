@@ -83,6 +83,8 @@ The following fields are defined:
  * "host": The host being communicated with.
  * "problem": A problem occurred during init.
  * "csrf-token": The web service will send a csrf-token for external channels.
+ * "os-release": The bridge sends fields from /etc/os-release which identify the system.
+ * "packages": The bridge sends a list of package names on the system.
 
 If a problem occurs that requires shutdown of a transport, then the "problem"
 field can be set to indicate why the shutdown will be shortly occurring.
@@ -97,18 +99,17 @@ The "open" command opens a new channel for payload.
 
 The following fields are defined:
 
- * "binary": If present, either "base64" or "raw"
+ * "binary": If present set to "raw"
  * "channel": A uniquely chosen channel id
  * "payload": A payload type, see below
  * "host": The destination host for the channel, defaults to "localhost"
  * "user": Optional alternate user for authenticating with host
  * "superuser": Optional. Use "require" to run as root, or "try" to attempt to run as root.
- * "group": A group that can later be used with the "kill" command.
+ * "group": An optional channel group
  * "capabilities": Optional, array of capability strings required from the bridge
+ * "session": Optional, set to "private" or "shared". Defaults to "shared"
 
-If "binary" is set then this channel transfers binary messages. If "binary"
-is set to "base64" then messages in the channel are encoded using "base64",
-otherwise if it's set to "raw" they are transferred directly.
+If "binary" is set to "raw" then this channel transfers binary messages.
 
 After the command is sent, then the channel is assumed to be open. No response
 is sent. If for some reason the channel shouldn't or cannot be opened, then
@@ -127,6 +128,12 @@ An example of an open:
 
 This message is sent to the cockpit-bridge.
 
+The caller can control whether to open a new bridge session or not by setting
+the "session" field to "private" or "shared". A "private" session will always
+start another bridge just for this channel. If this option is not specified
+then typically the channel will share an already existing session. There are
+certain heuristics for compatibility, where it defaults to private.
+
 The open fields are also used with external channels. External channels are
 channels that have their payload sent via a separate HTTP request or another
 WebSocket. In this case the "channel" field must not be present, and an
@@ -135,6 +142,47 @@ WebSocket. In this case the "channel" field must not be present, and an
  * "content-disposition": a Content-Disposition header for GET responses
  * "content-type": a Content-Type header for GET responses
  * "protocols": an array of possible protocols for a WebSocket
+
+Channel "group" fields can be used to group channels into groups. You should
+prefix your groups with a reverse domain name so they don't conflict with
+other or Cockpit's group names. Group names without any punctuation are
+reserved.
+
+One such special group name is "default", which contains all channels which
+were opened without specifying a group.
+
+Another one is the "fence" group. While any channels are open in the "fence"
+group, any channels opened after that point will be blocked and wait until all
+channels in the "fence" group are closed before resuming.
+
+**Host values**
+
+Because the host parameter is how cockpit maps url requests to the correct bridge,
+cockpit may need to additional information to route the message correctly.
+For example you want to connect to a container ```my-container``` running
+on "my.host".
+
+To allow this the host parameter can encode a key/value pair that will
+be expanded in the open command json. The format is host+key+value. For example
+
+    {
+        "command": "open",
+        "channel": "a4",
+        "payload": "stream",
+        "host": "my.host+container+my-container"
+    }
+
+will be expanded to
+
+    {
+        "command": "open",
+        "channel": "a4",
+        "payload": "stream",
+        "host": "my.host",
+        "host-container": "my-container",
+        "host": "my.host"
+    }
+
 
 Command: close
 --------------
@@ -247,20 +295,18 @@ Any protocol participant can send this message, but it is not responded to.
 Command: authorize
 ------------------
 
-The "authorize" command is for communication of reauthorization challenges
-and responses between cockpit-bridge and cockpit-ws.
+The "authorize" command is for communication of authentication and
+authorization challenges and responses between cockpit-bridge and
+cockpit-ws. Despite the name this is also used for authentication.
 
-The following fields are defined:
+For challenge/response authentication, the following fields are defined:
 
- * "cookie": an string sent with a challenge, that must be present in
-   the corresponding response.
- * "challenge": a challenge string from the reauthorize component, present
-   in messages from cockpit-bridge to cockpit-ws
- * "response": a response string from the reauthorize component, present
-   in messages from cockpit-ws to cockpit-bridge
-
-The contents of the "challenge" and "response" fields are defined and
-documented in the reauthorize component.
+ * "cookie": a unique string sent with a challenge that must be
+   present in the corresponding response.
+ * "challenge": a challenge string present in messages from a bridge
+   to cockpit-ws
+ * "response": a response string present in messages from cockpit-ws
+   to a bridge
 
 Example authorize challenge and response messages:
 
@@ -276,6 +322,28 @@ Example authorize challenge and response messages:
         "response": "crypt1:$6$r0oetn2039ntoen..."
     }
 
+Authorize messages are used during authentication by authentication
+commands (ei: cockpit-session, cockpit-ssh) to obtain the users credentials
+from cockpit-ws. An authentication command can send a authorize message
+with a response but no cookie. For example
+
+    {
+        "command": "authorize",
+        "response": "Basic ..."
+    }
+
+In that case cockpit-ws will store the response and use it in a reply
+to a subsequent challenge.
+
+For credential cache authorization, the following fields are defined:
+
+ * "credential": Empty or "password"
+
+When set to "password" then a "password" field should also be present
+which represents a new password to cache, which replaces any current
+passwords. If no password field is present then the passwords are cleared.
+
+
 Command: kill
 -------------
 
@@ -287,9 +355,7 @@ The following fields are defined:
  * "host": optional string kills channels with the given host
  * "group": optional string to select only channels opened with the given "group"
 
-If no fields are specified then all channels are terminated. The "kill" command
-is not forwarded.
-
+If no fields are specified then all channels are terminated.
 
 Command: logout
 ---------------
@@ -309,6 +375,13 @@ Example logout message:
     }
 
 The "logout" command is broadcast to all bridge instances.
+
+
+Command: hint
+-------------
+
+The "hint" command provides hints to other components about the state of things
+or what's going to happen next. The remainder of the fields are extensible.
 
 
 Payload: null
@@ -337,8 +410,9 @@ type:
  * "bus": The DBus bus to connect to either "session", "system" or "none".
    Defaults to "system" if not present. If set to "none" you must also
    provide the address parameter.
- * "name": A service name of the DBus service to communicate with. Set to
-   null if "bus" is "none".
+ * "name": A service name of the DBus service to communicate with by default.
+   Always omit this field if "bus" is "none". If omitted and "bus" is not
+   "none" then a "name" field must be specified explicitly on other messages.
  * "address": A dbus supported address to connect to. This option is only
    used when bus is set to "none". Accepts any valid DBus address or
    "internal" to communicate with the internal bridge DBus connection.
@@ -361,8 +435,13 @@ with parameters in this order: path, interface, method, in arguments.
 All the various parameters must be valid for their use. arguments may be
 null if no DBus method call body is expected. If a "type" field is specified
 then it is expected to be the DBus method type signature (no tuple). If a
-"flags" field is a string, then this includes message flags. None are
-defined yet.
+"flags" field is a string, then this includes message flags. The default flags
+option has the "i" flag set:
+
+ * "i": Allow interactive authentication.
+
+If no "name" field was specified in the "open" call, indicating which DBus
+service to talk to, then one must be specified here along with the "call".
 
 If a DBus method call fails an "error" message will be sent back. An error
 will also be sent back in parameters or arguments in the "call" message are
@@ -371,9 +450,13 @@ invalid.
 An optional "id" field indicates that a response is desired, which will be
 sent back in a "reply" or "error" message with the same "id" field.
 
+If an interface has been exported, then the bridge will send "call" messages
+in its direction for calls received for on that interface.
+
 Method reply messages are JSON objects with a "reply" field whose value is
 an array, the array contains another array of out arguments, or null if
 the DBus reply had no body.
+
     {
         "reply": [ [ "arg0", 1, 2 ] ],
         "id": "cookie"
@@ -414,12 +497,17 @@ a "protocol-error".
 
     {
         "add-match": {
+            "name": "org.the.Name",
             "path": "/the/path",
             "interface": "org.Interface",
             "member": "SignalName",
             "arg0": "first argument",
         }
     }
+
+If the "name" field is omitted, it will be populated from the "open" message.
+If no "name" was specified in the "open" message, then DBus messages from any
+bus name will be matched.
 
 To unsubscribe from DBus signals, use the "remove-match" message. If a
 match was added more than once, it must be removed the same number of
@@ -429,6 +517,7 @@ The form of "remove-match" is identical to "add-match".
 
     {
         "remove-match": {
+            "name": "org.the.Name",
             "path": "/the/path",
             "interface": "org.Interface",
             "member": "SignalName",
@@ -444,6 +533,17 @@ may be null if the DBus signal had no body.
         "signal": [ "/the/path", "org.Interface", "SignalName", [ "arg0", 1, 2 ] ]
     }
 
+If a signal message is sent to the bridge, the signal will be emitted.
+In addition a "destination" field may be present to indicate whether
+the signal should be broadcast or not.
+
+    {
+        "signal": [ "/the/path", "org.Interface", "SignalName", [ "arg0", 1, 2 ] ]
+    }
+
+If the bus name of the sender of the signal does not match the "name" field of
+the "open" message, then a "name" field will be included with the "signal" message.
+
 Properties can be watched with the "watch" request. Either a "path" or
 "path_namespace" can be watched. Property changes are listened for with
 DBus PropertiesChanged signals.  If a "path_namespace" is watched and
@@ -454,6 +554,7 @@ the watch has sent "notify" messages about the things being watched.
 
     {
         "watch": {
+            "name": "org.the.Name",
 	    "path": "/the/path/to/watch",
             "interface": org.Interface
         }
@@ -468,6 +569,9 @@ request.
             "path": "/the/path/to/watch"
         }
     }
+
+If the "name" field is omitted, it will be populated from the "open" message.
+Either a "name" field must be specified here or in the "open" message.
 
 Property changes will be sent using a "notify" message. This includes
 addition of interfaces without properties, which will be an empty
@@ -489,6 +593,9 @@ changes since the last "notify" message will be sent.
         }
     }
 
+If the bus name of the sender of the signal does not match the "name" field of
+the "open" message, then a "name" field will be included with the "notify" message.
+
 Interface introspection data is sent using "meta" message. Before the
 first time an interface is sent using a "notify" message, a "meta"
 will be sent with that interface introspection info. Additional fields
@@ -509,13 +616,37 @@ will be defined here, but this is it for now.
         }
     }
 
-When the owner of the DBus name changes an "owner" message is sent.
-The owner value will be the id of the owner or null if the name is unowned.
+If the bus name of the sender of the signal does not match the "name" field of
+the "open" message, then a "name" field will be included with the "meta" message.
+Such meta information can also be sent to the bridge, in order to populate the
+cache of introspection data for the channel.
+
+When the owner of the DBus "name" (specified in the open message) changes an "owner"
+message is sent. The owner value will be the id of the owner or null if the name
+is unowned.
 
     {
         "owner": "1:"
     }
 
+A "publish" message can be used to export DBus interfaces on the bus. The bridge
+will then send "call" messages back to the frontend for each method invocation
+on the published interface and object path. The interface must first be described
+with DBus meta information. If a cookie is specified then a reply will be sent
+when the interface is published. If the interface is already published at the given
+path, it will be replaced.
+
+   {
+       "publish": [ "/a/path", "org.Interface" ],
+       "id": "cookie"
+   }
+
+An "unpublish" message will unexport a DBus interface on the bus. It is not an
+error if no such interface has been published.
+
+   {
+       "unpublish": [ "/a/path", "org.Interface" ],
+   }
 
 DBus types are encoded in various places in these messages, such as the
 arguments. These types are encoded as follows:
@@ -537,13 +668,16 @@ arguments. These types are encoded as follows:
        "t": "s"
    }
 
-Payload: http-stream1
+Payload: http-stream2
 ---------------------
 
-This channel replesents a single HTTP request and response. The first payload
-message in each direction are the HTTP headers. The remaining messages make up
-the HTTP request and response bodies. When the channel is in text mode, the
-response body is automatically coerced to UTF-8.
+This channel replesents a single HTTP request and response. The request
+HTTP headers are sent in the "open" message, and response headers are
+returned in a "response" control message.
+
+The remaining messages make up the HTTP request and response bodies.
+When the channel is in text mode, the response body is automatically
+coerced to UTF-8.
 
 The following HTTP methods are not permitted:
 
@@ -651,13 +785,16 @@ following options can be specified:
    spawned process. The variables are in the form of "NAME=VALUE". The default
    environment is inherited from cockpit-bridge.
  * "pty": Execute the command as a terminal pty.
+ * "window": An object containing "rows" and "cols" properties, which set the
+   size of the terminal window. Values must be integers between 0 and 0xffff.
+   This option is only valid if "pty" is true.
 
 If an "done" is sent to the bridge on this channel, then the socket and/or pipe
 input is shutdown. The channel will send an "done" when the output of the socket
 or pipe is done.
 
 Additionally, a "options" control message may be sent in this channel
-to change the "batch" and "latency" options.
+to change the "batch", "latency", and "window" options.
 
 Payload: fswatch1
 -----------------

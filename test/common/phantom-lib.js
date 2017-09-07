@@ -5,17 +5,10 @@
  * for routine operations.
  */
 
-localStorage.clear();
-
 function ph_select(sel) {
-    var list, i, els = [];
-    if (window.jQuery)
-        list = window.jQuery(sel);
-    else
-        list = document.querySelectorAll(sel);
-    for (i = 0; i < list.length; i++)
-        els.push(list[i]);
-    return els;
+    if (!window.Sizzle)
+        throw "Sizzle was not properly loaded"
+    return window.Sizzle(sel);
 }
 
 function ph_only(els, sel)

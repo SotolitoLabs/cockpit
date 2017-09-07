@@ -2,17 +2,26 @@
 
 set -ex
 
-# Install packages without dependencies
-if [ -z "$VERSION" ] && [ -z "$OFFLINE" ]; then
-    eval $(/container/scripts/get-version-env.sh)
+if [ -z "$INSTALLER" ]; then
+    INSTALLER="dnf"
 fi
 
-/container/scripts/install-rpms.sh -a noarch --nodeps cockpit-shell-
-/container/scripts/install-rpms.sh cockpit-ws-
-/container/scripts/install-rpms.sh --nodeps cockpit-kubernetes-
+if [ -z "$OFFLINE" ]; then
+    "$INSTALLER" -y update
+fi
+
+# Install packages without dependencies
+/container/scripts/install-rpms.sh cockpit-ws cockpit-dashboard
+/container/scripts/install-rpms.sh --nodeps cockpit-bridge
+/container/scripts/install-rpms.sh -a noarch --nodeps cockpit-system
+/container/scripts/install-rpms.sh --nodeps cockpit-kubernetes
 
 # Remove unwanted packages
-rm -rf /usr/share/cockpit/realmd/ /usr/share/cockpit/system/ /usr/share/cockpit/tuned/ /usr/share/cockpit/users/ /usr/share/cockpit/dashboard/
+rm -rf /usr/share/cockpit/realmd/ /usr/share/cockpit/systemd/ /usr/share/cockpit/tuned/ /usr/share/cockpit/users/ /usr/share/cockpit/dashboard/
+
+# Remove unwanted cockpit-bridge binaries
+rm -rf /usr/bin/cockpit-bridge
+rm -rf /usr/libexec/cockpit-askpass
 
 rm -rf /container/scripts
 rm -rf /container/rpms
@@ -29,4 +38,7 @@ chmod 775 /usr/share/cockpit/shell
 chmod 775 /usr/share/cockpit/kubernetes
 
 # Move kubernetes index file away so we only link it when we want it
-mv /usr/share/cockpit/kubernetes/index.min.html.gz /usr/share/cockpit/kubernetes/original-index.gz
+mv /usr/share/cockpit/kubernetes/index.html.gz /usr/share/cockpit/kubernetes/original-index.gz || true
+mv /usr/share/cockpit/kubernetes/index.min.html.gz /usr/share/cockpit/kubernetes/original-index.gz || true
+
+"$INSTALLER" clean all

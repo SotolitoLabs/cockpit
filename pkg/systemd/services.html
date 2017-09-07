@@ -4,21 +4,40 @@
     <title translatable="yes">Services</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="../base1/cockpit.css" type="text/css" rel="stylesheet">
-    <link href="journal.css" type="text/css" rel="stylesheet">
-    <script data-main="system/init" src="../base1/bundle.js"></script>
-    <script src="bundle.js"></script>
+    <link href="../base1/patternfly.css" type="text/css" rel="stylesheet">
+    <link href="system.css" type="text/css" rel="stylesheet">
+    <script src="../base1/jquery.js"></script>
+    <script src="../base1/cockpit.js"></script>
+    <script src="../*/po.js"></script>
 </head>
-<body hidden>
+<body id="services-page" hidden>
 
   <script id="services-units-tmpl" type="x-template/mustache">
     <div class="panel panel-default">
       <div class="panel-heading">{{heading}}</div>
       <table class="table table-hover">
+        {{#table_head}}
+          <thead>
+            <tr>
+              <th class="service-unit-description">{{Description}}</th>
+              <th>{{Id}}</th>
+              {{#is_timer}}
+                <th>{{Next_Run_Time}}</th>
+                <th>{{Last_Trigger_Time}}</th>
+              {{/is_timer}}
+              <th class="service-unit-data {{#HasFailed}}service-unit-failed{{/HasFailed}}">{{Current_State}}</th>
+            </tr>
+          </thead>
+        {{/table_head}}
+
         {{#units}}
         <tr data-goto-unit="{{Id}}">
           <td class="service-unit-description">{{Description}}</td>
           <td>{{Id}}</td>
+          {{#is_timer}}
+            <td>{{#NextRunTime}}{{NextRunTime}}{{/NextRunTime}}</td>
+            <td>{{#LastTriggerTime}}{{LastTriggerTime}}{{/LastTriggerTime}}</td>
+          {{/is_timer}}
           <td class="service-unit-data {{#HasFailed}}service-unit-failed{{/HasFailed}}">
             {{CombinedState}}
           </td>
@@ -36,6 +55,7 @@
         <button class="btn btn-default" data-pattern="\.timer$" translatable="yes">Timers</button>
         <button class="btn btn-default" data-pattern="\.path$" translatable="yes">Paths</button>
       </div>
+      <button id="create-timer" data-toggle="#timer-dialog" data-target="#timer-dialog" class="btn btn-primary pull-right" translate>Create Timer</button>
     </div>
 
     <div class="container-fluid">
@@ -102,6 +122,23 @@
             {{/TemplateDescription}}
           </table>
         </div>
+        {{#NotMetConditions.length}}
+        <div class="list-group-item cond-fail">
+          <table>
+            <tr>
+              <td>
+                <span translate>Condition failed</span>
+                <ul>
+                {{#NotMetConditions}}
+                  <li>{{.}}</li>
+                {{/NotMetConditions}}
+               </ul>
+             </td>
+             <td></td>
+            </tr>
+          </table>
+        </div>
+        {{/NotMetConditions.length}}
       </div>
     </div>
   </script>
@@ -111,11 +148,140 @@
       <div class="panel-heading">{{Description}}</div>
       <div class="list-group">
         <div class="list-group-item">
-          <input></input>
+          <input/>
           <button translatable="yes">Instantiate</button>
         </div>
       </div>
     </div>
+  </script>
+
+  <script id="repeat-hourly-tmpl" type="x-template/mustache">
+  {{#repeat}}
+    <div class="form-inline">
+      <input type="text" value="{{hours}}" data-index="{{index}}" data-content="hours" class="form-control" disabled>
+      <div class="position-colon">:</div>
+      <input type="text" value="{{minutes}}" data-index="{{index}}" data-content="minutes" class="form-control">
+      <button class="btn btn-default dropdown-toggle fa fa-plus" data-content="add" data-index="{{index}}" type="button" ></button>
+      <button class="btn btn-default dropdown-toggle pficon-close" data-content="close" data-index="{{index}}" type="button" {{close}}></button>
+      <div data-content="min-error" class="repeat-error" data-index="{{index}}"></div>
+    </div>
+  {{/repeat}}
+  </script>
+
+  <script id="repeat-daily-tmpl" type="x-template/mustache">
+  {{#repeat}}
+    <div class="form-inline">
+      <input type="text" value="{{hours}}" data-index="{{index}}" data-content="hours" class="form-control" >
+      <div class="position-colon">:</div>
+      <input type="text" data-index="{{index}}" data-content="minutes" value="{{minutes}}" class="form-control">
+      <button class="btn btn-default dropdown-toggle fa fa-plus" data-content="add" data-index="{{index}}" type="button" ></button>
+      <button class="btn btn-default dropdown-toggle pficon-close" data-content="close" data-index="{{index}}" type="button" {{close}}></button>
+      <div data-content="hr-error" class="repeat-error" data-index="{{index}}"></div>
+      <div data-content="min-error" class="repeat-error" data-index="{{index}}"></div>
+    </div>
+  {{/repeat}}
+  </script>
+
+  <script id="repeat-weekly-tmpl" type="x-template/mustache">
+  {{#repeat}}
+    <div class="form-inline">
+      <div class="btn-group bootstrap-select form-control dropdown " data-index="{{index}}" data-content="week-days">
+        <button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown" aria-expanded="false">
+          <span class="pull-left" value="{{days_value}}">{{days_text}}</span>
+          <span class="caret"></span>
+        </button>
+        <ul class="dropdown-menu">
+          <li value="1"><a translate>Monday</a></li>
+          <li value="2"><a translate>Tuesday</a></li>
+          <li value="3"><a translate>Wednesday</a></li>
+          <li value="4"><a translate>Thursday</a></li>
+          <li value="5"><a translate>Friday</a></li>
+          <li value="6"><a translate>Saturday</a></li>
+          <li value="7"><a translate>Sunday</a></li>
+        </ul>
+      </div>
+      <input type="text" value="{{hours}}" data-index="{{index}}" data-content="hours" class="form-control" >
+      <div class="position-colon">:</div>
+      <input type="text" data-index="{{index}}" data-content="minutes" value="{{minutes}}" class="form-control">
+      <button class="btn btn-default dropdown-toggle fa fa-plus" data-content="add" data-index="{{index}}" type="button" ></button>
+      <button class="btn btn-default dropdown-toggle pficon-close" data-content="close" data-index="{{index}}" type="button" {{close}}></button>
+      <div data-content="hr-error" class="repeat-error" data-index="{{index}}"></div>
+      <div data-content="min-error" class="repeat-error" data-index="{{index}}"></div>
+    </div>
+  {{/repeat}}
+  </script>
+
+  <script id="repeat-monthly-tmpl" type="x-template/mustache">
+  {{#repeat}}
+    <div class="form-inline">
+      <div class="btn-group bootstrap-select dropdown form-control" data-index="{{index}}" data-content="month-days">
+        <button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown" aria-expanded="false">
+          <span class="pull-left" value="{{days_value}}">{{days_text}}</span>
+          <span class="caret"></span>
+        </button>
+        <ul class="dropdown-menu vertical-scroll">
+          <li value="1"><a translate>1st</a></li>
+          <li value="2"><a translate>2nd</a></li>
+          <li value="3"><a translate>3rd</a></li>
+          <li value="4"><a translate>4th</a></li>
+          <li value="5"><a translate>5th</a></li>
+          <li value="6"><a translate>6th</a></li>
+          <li value="7"><a translate>7th</a></li>
+          <li value="8"><a translate>8th</a></li>
+          <li value="9"><a translate>9th</a></li>
+          <li value="10"><a translate>10th</a></li>
+          <li value="11"><a translate>11th</a></li>
+          <li value="12"><a translate>12th</a></li>
+          <li value="13"><a translate>13th</a></li>
+          <li value="14"><a translate>14th</a></li>
+          <li value="15"><a translate>15th</a></li>
+          <li value="16"><a translate>16th</a></li>
+          <li value="17"><a translate>17th</a></li>
+          <li value="18"><a translate>18th</a></li>
+          <li value="19"><a translate>19th</a></li>
+          <li value="20"><a translate>20th</a></li>
+          <li value="21"><a translate>21st</a></li>
+          <li value="22"><a translate>22nd</a></li>
+          <li value="23"><a translate>23rd</a></li>
+          <li value="24"><a translate>24th</a></li>
+          <li value="25"><a translate>25th</a></li>
+          <li value="26"><a translate>26th</a></li>
+          <li value="27"><a translate>27th</a></li>
+          <li value="28"><a translate>28th</a></li>
+          <li value="29"><a translate>29th</a></li>
+          <li value="30"><a translate>30th</a></li>
+          <li value="31"><a translate>31st</a></li>
+        </ul>
+      </div>
+      <input type="text" value="{{hours}}" data-index="{{index}}" data-content="hours" class="form-control" >
+      <div class="position-colon">:</div>
+      <input type="text" data-index="{{index}}" data-content="minutes" value="{{minutes}}" class="form-control">
+      <button class="btn btn-default dropdown-toggle fa fa-plus" data-content="add" data-index="{{index}}" type="button" ></button>
+      <button class="btn btn-default dropdown-toggle pficon-close" data-content="close" data-index="{{index}}" type="button" {{close}}></button>
+      <div data-content="hr-error" class="repeat-error" data-index="{{index}}"></div>
+      <div data-content="min-error" class="repeat-error" data-index="{{index}}"></div>
+      <div data-content="day-error" class="repeat-error" data-index="{{index}}"></div>
+    </div>
+  {{/repeat}}
+  </script>
+
+  <script id="repeat-yearly-tmpl" type="x-template/mustache">
+  {{#repeat}}
+    <div class="form-inline">
+      <div data-content="datepicker" data-index="{{index}}" class="input-group date">
+        <input type="text" value="{{date}}" data-index="{{index}}" class="form-control bootstrap-datepicker" >
+        <span class="input-group-addon"><span class="fa fa-calendar"></span></span>
+      </div>
+      <input type="text" value="{{hours}}" data-index="{{index}}" data-content="hours" class="form-control" >
+      <div class="position-colon">:</div>
+      <input type="text" data-index="{{index}}" data-content="minutes" value="{{minutes}}" class="form-control">
+      <button class="btn btn-default dropdown-toggle fa fa-plus" data-content="add" data-index="{{index}}" type="button" ></button>
+      <button class="btn btn-default dropdown-toggle pficon-close" data-content="close" data-index="{{index}}" type="button" {{close}}></button>
+      <div data-content="hr-error" class="repeat-error" data-index="{{index}}"></div>
+      <div data-content="min-error" class="repeat-error" data-index="{{index}}"></div>
+      <div data-content="date-error" class="repeat-error" data-index="{{index}}"></div>
+    </div>
+  {{/repeat}}
   </script>
 
   <div id="service" class="container-fluid" hidden>
@@ -150,8 +316,7 @@
           <h4 class="modal-title" translatable="yes">Note</h4>
         </div>
         <div class="modal-body">
-          <p translatable="yes">This unit is not designed to be enabled explicitly.
-          </p>
+          <p translatable="yes">This unit is not designed to be enabled explicitly.</p>
         </div>
         <div class="modal-footer">
           <button class="btn btn-primary" data-dismiss="modal" translatable="yes">Close</button>
@@ -178,5 +343,148 @@
     </div>
   </div>
 
+  <div class="modal" id="timer-dialog"
+     tabindex="-1" role="dialog"
+     data-backdrop="static">
+    <div class="modal-dialog cockpit-timer-modal-md">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h4 class="modal-title" translatable="yes">Create Timers</h4>
+        </div>
+        <div class="modal-body">
+          <table class="form-table-ct">
+            <tr id="servicename-row">
+              <td>
+                <label class="control-label" for="servicename" translatable="yes">Service name</label>
+              </td>
+              <td>
+                <input type="text" id="servicename" class="form-control">
+              </td>
+            </tr>
+            <tr id="servicename-error-row" class="has-error">
+              <td></td>
+              <td>
+                <span id="servicename-error" class="help-block"></span>
+              </td>
+            </tr>
+            <tr id="description-row" >
+              <td>
+                <label class="control-label" for="description" translatable="yes">Description</label>
+              </td>
+              <td>
+                <input type="text" id="description" class="form-control">
+              </td>
+            </tr>
+            <tr id="description-error-row" class="has-error">
+              <td></td>
+              <td>
+                <span id="description-error" class="help-block"></span>
+              </td>
+            </tr>
+            <tr id="command-row" >
+              <td>
+                <label class="control-label" for="command" translatable="yes">Command</label>
+              </td>
+              <td>
+                <input type="text" data-placement="bottom" id="command" class="form-control">
+              </td>
+            </tr>
+            <tr id="command-error-row" class="has-error">
+              <td></td>
+              <td>
+                <span id="command-error" class="help-block"></span>
+              </td>
+            </tr>
+            <tr id="boot-specific-row">
+              <td>
+                <label class="control-label" for="boot-or-specific-time" translatable="yes">Run</label>
+              </td>
+              <td>
+                <div class="btn-group bootstrap-select dropdown form-control" id="boot-or-specific-time">
+                  <button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown" aria-expanded="false">
+                    <span class="pull-left" value="1" translatable="yes">After system boot</span>
+                    <span class="caret"></span>
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li value="1"><a translatable="yes">After system boot</a></li>
+                    <li value="2"><a translatable="yes">At specific time</a></li>
+                  </ul>
+                </div>
+                <div id="boot">
+                  <label class="control-label" id="boot-label" for="boot-time" translate>After</label>
+                  <input type="text" id="boot-time" value="00" class="form-control">
+                  <div class="btn-group bootstrap-select dropdown form-control" id="drop-time">
+                    <button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown" aria-expanded="false">
+                      <span class="pull-left" value="1" translatable="yes">Seconds</span>
+                      <span class="caret"></span>
+                    </button>
+                    <ul class="dropdown-menu">
+                      <li value="1"><a translatable="yes">Seconds</a></li>
+                      <li value="60"><a translatable="yes">Minutes</a></li>
+                      <li value="3600"><a translatable="yes">Hours</a></li>
+                      <li value="604800"><a translatable="yes">Weeks</a></li>
+                    </ul>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr id="boot-error-row" class="has-error">
+              <td></td>
+              <td>
+                <span id="boot-error" class="help-block"></span>
+              </td>
+            </tr>
+            <tr id="repeat-options" hidden>
+              <td></td>
+              <td>
+                <div class="btn-group bootstrap-select dropdown form-control" id="drop-repeat">
+                  <button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown" aria-expanded="false">
+                    <span class="pull-left" value="0" translatable="yes">Don't Repeat</span>
+                    <span class="caret"></span>
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li value="0"><a translatable="yes">Don't Repeat</a></li>
+                    <li value="60"><a translatable="yes">Repeat Hourly</a></li>
+                    <li value="1440"><a translatable="yes">Repeat Daily</a></li>
+                    <li value="10080"><a translatable="yes">Repeat Weekly</a></li>
+                    <li value="44640"><a translatable="yes">Repeat Monthly</a></li>
+                    <li value="525600"><a translatable="yes">Repeat Yearly</a></li>
+                  </ul>
+                </div>
+              </td>
+            </tr>
+            <tr id="specific-time-without-repeat" hidden>
+              <td>
+                <label for="specific-time-without-repeat" class="control-label" translatable="yes">Hour : Minute</label>
+              </td>
+              <td>
+                <input type="text" value="00" id="hr" class="hr form-control">
+                <div class="position-colon">:</div>
+                <input type="text" value="00" id="min" class="min form-control">
+              </td>
+            </tr>
+            <tr id="specific-time-error-row" class="has-error">
+              <td></td>
+              <td>
+                <span id="min-error" class="help-block"></span>
+                <span id="hr-error" class="help-block"></span>
+              </td>
+            </tr>
+            <tr id="repeat-time-option">
+              <td></td>
+              <td id="repeat-time">
+              </td>
+            </tr>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="timer-cancel-button" class="btn btn-default" data-dismiss="modal" translatable="yes">Cancel</button>
+          <button type="button" id="timer-save-button" class="btn btn-primary" translatable="yes">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="services.js"></script>
 </body>
 </html>

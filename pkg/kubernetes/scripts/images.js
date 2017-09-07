@@ -20,6 +20,25 @@
 (function() {
     "use strict";
 
+    var angular = require('angular');
+    require("angular-route");
+    require('angular-dialog.js');
+
+    require('./kube-client');
+    require('./date');
+    require('./tags');
+    require('./policy');
+
+    require('registry-image-widgets/dist/image-widgets.js');
+
+    require('../views/images-page.html');
+    require('../views/imagestream-page.html');
+    require('../views/image-page.html');
+    require('../views/imagestream-delete.html');
+    require('../views/imagestream-modify.html');
+    require('../views/imagestream-modify.html');
+    require('../views/image-delete.html');
+
     /*
      * Executes callback for each stream.status.tag[x].item[y]
      * in a stream. Similar behavior to angular.forEach()
@@ -34,14 +53,20 @@
         }
     }
 
+    function identifier(imagestream, tag) {
+        var id = imagestream.metadata.namespace + "/" + imagestream.metadata.name;
+        if (tag)
+            id += ":" + tag.name;
+        return id;
+    }
+
     angular.module('registry.images', [
         'ngRoute',
         'ui.cockpit',
         'kubeClient',
         'kubernetes.date',
-        'kubernetes.listing',
-        'registry.layers',
         'registry.tags',
+        'registryUI.images',
     ])
 
     .config([
@@ -65,32 +90,91 @@
         }
     ])
 
+    .factory('registryListingScopeSetup', [
+        'imageData',
+        'imageActions',
+        'projectData',
+        'kubeSelect',
+        '$location',
+        function (data, actions, projectData, select, $location) {
+            return function($scope, inPage) {
+                function imageByTag (tag) {
+                    if (tag && tag.items && tag.items.length)
+                        return select().kind("Image").name(tag.items[0].image).one();
+                }
+
+                function deleteImageStream(stream) {
+                    var promise = actions.deleteImageStream(stream);
+
+                    /* If the promise is successful, redirect to another page */
+                    promise.then(function() {
+                        $location.path($scope.viewUrl('images'));
+                    });
+
+                    return promise;
+                }
+
+                function deleteTag(stream, tag) {
+                    var promise = actions.deleteTag(stream, tag);
+
+                    /* If the promise is successful, redirect to another page */
+                    promise.then(function() {
+                        var parts = [ "images", stream.metadata.namespace, stream.metadata.name ];
+                        $location.path("/" + parts.map(encodeURIComponent).join("/"));
+                    });
+
+                    return promise;
+                }
+
+                /* All the actions available on the $scope */
+                angular.extend($scope, actions);
+                angular.extend($scope, data);
+
+                $scope.sharedImages = projectData.sharedImages;
+                $scope.imageTagNames = data.imageTagNames;
+                $scope.imageByTag = imageByTag;
+
+                if (inPage) {
+                    $scope.deleteTag = deleteTag;
+                    $scope.deleteImageStream = deleteImageStream;
+                }
+
+                $scope.actions = {
+                    modifyImageStream: $scope.modifyImageStream,
+                    deleteImageStream: $scope.deleteImageStream,
+                    deleteTag: $scope.deleteTag,
+                    modifyProject: $scope.modifyProject,
+                };
+            };
+        }
+    ])
+
     .controller('ImagesCtrl', [
         '$scope',
         '$location',
         'imageData',
         'imageActions',
-        'ListingState',
         'projectData',
+        'kubeLoader',
+        'registryListingScopeSetup',
         'filterService',
-        function($scope, $location, data, actions, ListingState, projectData) {
-            $scope.imagestreams = data.allStreams;
+        function($scope, $location, data, actions, projectData, loader, registryListingScopeSetup) {
             $scope.sharedImages = projectData.sharedImages;
 
-            angular.extend($scope, data);
-
-            $scope.listing = new ListingState($scope);
-
             /* Watch all the images in current namespace */
-            data.watchImages();
+            data.watchImages($scope);
 
-            $scope.$on("activate", function(ev, id) {
+            $scope.imagestreams = data.allStreams();
+            loader.listen(function() {
+                $scope.imagestreams = data.allStreams();
+            }, $scope);
+
+            $scope.$on("activate", function(ev, imagestream, tag) {
                 ev.preventDefault();
-                $location.path('/images/' + id);
+                $location.path('/images/' + identifier(imagestream, tag));
             });
 
-            /* All the actions available on the $scope */
-            angular.extend($scope, actions);
+            registryListingScopeSetup($scope, false);
         }
     ])
 
@@ -110,11 +194,13 @@
         '$routeParams',
         'kubeSelect',
         'kubeLoader',
+        'KubeDiscoverSettings',
         'imageData',
         'imageActions',
-        'ListingState',
         'projectData',
-        function($scope, $location, $routeParams, select, loader, data, actions, ListingState, projectData) {
+        'projectPolicy',
+        'registryListingScopeSetup',
+        function($scope, $location, $routeParams, select, loader, discoverSettings, data, actions, projectData, projectPolicy, registryListingScopeSetup) {
             var target = $routeParams["target"] || "";
             var pos = target.indexOf(":");
 
@@ -131,11 +217,12 @@
                 tagname = target.substr(pos + 1);
             }
 
+            registryListingScopeSetup($scope, true);
+
             /* There's no way to watch a single item ... so watch them all :( */
-            data.watchImages();
+            data.watchImages($scope);
 
-
-            var c = loader.listen(function() {
+            loader.listen(function() {
                 $scope.stream = select().kind("ImageStream").namespace(namespace).name(name).one();
                 $scope.image = $scope.config = $scope.layers = $scope.labels = $scope.tag = null;
 
@@ -144,169 +231,54 @@
                         $scope.tag = tag;
                 });
 
-
                 if ($scope.tag)
-                    $scope.image = select().kind("Image").taggedFirst($scope.tag).one();
+                    $scope.image = $scope.imageByTag($scope.tag);
                 if ($scope.image) {
                     $scope.names = data.imageTagNames($scope.image);
                     $scope.config = data.imageConfig($scope.image);
                     $scope.layers = data.imageLayers($scope.image);
                     $scope.labels = data.imageLabels($scope.image);
                 }
-            });
+            }, $scope);
 
-            $scope.listing = new ListingState($scope);
-            $scope.listing.inline = true;
-
-            /* So we can use the same imageListing directive */
-            $scope.imagestreams = function() {
-                if ($scope.stream)
-                    return { "/": $scope.stream };
-                return { };
-            };
-
-            $scope.$on("$destroy", function() {
-                c.cancel();
-            });
-
-            /* All the data actions available on the $scope */
-            angular.extend($scope, data);
-            angular.extend($scope, actions);
-            $scope.sharedImages = projectData.sharedImages;
-
-            /* But special case a few */
-            $scope.deleteImageStream = function(stream) {
-                var promise = actions.deleteImageStream(stream);
-
-                /* If the promise is successful, redirect to another page */
-                promise.then(function() {
-                    $location.path($scope.viewUrl('images'));
-                });
-
-                return promise;
-            };
-
-            $scope.$on("activate", function(ev, id) {
+            $scope.$on("activate", function(ev, imagestream, tag) {
                 ev.preventDefault();
-                $location.path('/images/' + id);
+                $location.path('/images/' + identifier(imagestream, tag));
             });
 
-            $scope.deleteTag = function(stream, tag) {
-                var promise = actions.deleteTag(stream, tag);
-
-                /* If the promise is successful, redirect to another page */
-                promise.then(function() {
-                    var parts = [ "images", stream.metadata.namespace, stream.metadata.name ];
-                    $location.path("/" + parts.map(encodeURIComponent).join("/"));
+            function updateShowDockerPushCommands() {
+                discoverSettings().then(function(settings) {
+                    projectPolicy.subjectAccessReview(namespace, settings.currentUser, 'update', 'imagestreamimages')
+                       .then(function(allowed) {
+                            if (allowed != $scope.showDockerPushCommands) {
+                                $scope.showDockerPushCommands = allowed;
+                                $scope.$applyAsync();
+                            }
+                       });
                 });
+            }
 
-                return promise;
-            };
+            // watch for project changes to update showDockerPushCommands, and initialize it
+            $scope.$on("$routeUpdate", updateShowDockerPushCommands);
+            updateShowDockerPushCommands();
         }
     ])
-
-    .directive('imagePanel', [
-        'kubeLoader',
-        'imageData',
-        function(loader, data) {
-            return {
-                restrict: 'A',
-                scope: true,
-                link: function(scope, element, attrs) {
-                    var tab = 'main';
-                    scope.tab = function(name, ev) {
-                        if (ev) {
-                            tab = name;
-                            ev.stopPropagation();
-                        }
-                        return tab === name;
-                    };
-
-                    var c = loader.listen(function() {
-                        scope.names = scope.config = scope.layers = scope.labels = null;
-                        if (scope.image) {
-                            scope.names = data.imageTagNames(scope.image);
-                            scope.config = data.imageConfig(scope.image);
-                            scope.layers = data.imageLayers(scope.image);
-                            scope.labels = data.imageLabels(scope.image);
-                        }
-                    });
-
-                    scope.$on("$destroy", function() {
-                        c.cancel();
-                    });
-                },
-                templateUrl: "views/image-panel.html"
-            };
-        }
-    ])
-
-    .directive('imageBody',
-        function() {
-            return {
-                restrict: 'A',
-                templateUrl: 'views/image-body.html'
-            };
-        }
-    )
-
-    .directive('imageConfig',
-        function() {
-            return {
-                restrict: 'A',
-                templateUrl: 'views/image-config.html'
-            };
-        }
-    )
-
-    .directive('imageMeta',
-        function() {
-            return {
-                restrict: 'A',
-                templateUrl: 'views/image-meta.html'
-            };
-        }
-    )
-
-    .directive('imagestreamBody',
-        function() {
-            return {
-                restrict: 'A',
-                templateUrl: 'views/imagestream-body.html'
-            };
-        }
-    )
-
-    .directive('imagestreamMeta',
-        function() {
-            return {
-                restrict: 'A',
-                templateUrl: 'views/imagestream-meta.html'
-            };
-        }
-    )
-
-    .directive('imageListing',
-        function() {
-            return {
-                restrict: 'A',
-                templateUrl: 'views/image-listing.html'
-            };
-        }
-    )
 
     .factory("imageData", [
         'kubeSelect',
         'kubeLoader',
         function(select, loader) {
+            var watching = false;
 
             /* Called when we have to load images via imagestreams */
-            function handle_imagestreams(objects) {
+            loader.listen(function(objects) {
                 for (var link in objects) {
                     if (objects[link].kind === "ImageStream")
                         handle_imagestream(objects[link]);
+                    if (objects[link].kind === "Image")
+                        handle_image(objects[link]);
                 }
-            }
+            });
 
             function handle_imagestream(imagestream) {
                 var meta = imagestream.metadata || { };
@@ -330,25 +302,55 @@
                             if (image) {
                                 image.kind = "Image";
                                 loader.handle(image);
+                                handle_image(image);
                             }
                         }, function(response) {
-                            console.warn("couldn't load image: " + response.statusText);
+                            var message = response.statusText || response.message || String(response);
+                            console.warn("couldn't load image: " + message);
                             interim.metadata.resourceVersion = "invalid";
                         });
                     });
                 });
             }
 
-            /* Load images, but fallback to loading individually */
-            var watching = null;
-            function watchImages() {
-                loader.watch("images");
-                if (!watching)
-                    watching = loader.watch("imagestreams");
-                return watching;
+            /*
+             * Create a pseudo-item with kind DockerImageManifest for
+             * each image with a dockerImageManifest that we see. Identical
+             * name to the image itself.
+             */
+            function handle_image(image) {
+                var item, manifest = image.dockerImageManifest;
+                if (manifest) {
+                    manifest = JSON.parse(manifest);
+                    angular.forEach(manifest.history || [], function(item) {
+                        if (typeof item.v1Compatibility == "string")
+                            item.v1Compatibility = JSON.parse(item.v1Compatibility);
+                    });
+                    item = {
+                        kind: "DockerImageManifest",
+                        metadata: {
+                            name: image.metadata.name,
+                            selfLink: "/internal/manifests/" + image.metadata.name
+                        },
+                        manifest: manifest,
+                    };
+                    loader.handle(item);
+                }
             }
 
-            loader.listen(handle_imagestreams);
+            /* Load images, but fallback to loading individually */
+            function watchImages(until) {
+                watching = true;
+                var a = loader.watch("images", until);
+                var b = loader.watch("imagestreams", until);
+
+                return {
+                    cancel: function() {
+                        a.cancel();
+                        b.cancel();
+                    }
+                };
+            }
 
             /*
              * Filters selection to those with names that is
@@ -369,7 +371,7 @@
              * item in the given TagEvent.
              */
             select.register("taggedFirst", function(tag) {
-                var len, results = { };
+                var results = { };
                 if (!tag.items)
                     return select(null);
                 if (tag.items.length)
@@ -404,27 +406,6 @@
                     });
                 });
                 return names;
-            });
-
-            /*
-             * Filter that gets docker image manifests for each of the
-             * images selected. Objects without a manifest will be
-             * dropped from the results.
-             */
-            select.register("dockerImageManifest", function() {
-                var results = { };
-                angular.forEach(this, function(image, key) {
-                    var history, manifest = image.dockerImageManifest;
-                    if (manifest) {
-                        manifest = JSON.parse(manifest);
-                        angular.forEach(manifest.history || [], function(item) {
-                            if (typeof item.v1Compatibility == "string")
-                                item.v1Compatibility = JSON.parse(item.v1Compatibility);
-                        });
-                        results[key] = manifest;
-                    }
-                });
-                return select(results);
             });
 
             /*
@@ -471,10 +452,12 @@
             function imageLayers(image) {
                 if (!image)
                     return null;
-                var manifest = select(image).dockerImageManifest().one();
-                if (!manifest || manifest.schemaVersion !== 1)
-                    return null;
-                return manifest.history;
+                var item = select().kind("DockerImageManifest").name(image.metadata.name).one();
+                if (item && item.manifest && item.manifest.schemaVersion === 1)
+                    return item.manifest.history;
+                if (image.dockerImageLayers)
+                    return image.dockerImageLayers;
+                return null;
             }
 
             /* HACK: We really want a metadata index here */
@@ -498,9 +481,6 @@
                 allStreams: function allStreams() {
                     return select().kind("ImageStream");
                 },
-                imageByTag: function imageByTag(tag) {
-                    return select().kind("Image").taggedFirst(tag);
-                },
                 imageLayers: imageLayers,
                 imageConfig: function imageConfig(image) {
                     return select(image).dockerImageConfig().one() || { };
@@ -521,7 +501,8 @@
 
     .factory('imageActions', [
         '$modal',
-        function($modal) {
+        '$location',
+        function($modal, $location) {
             function deleteImageStream(stream) {
                 return $modal.open({
                     animation: false,
@@ -576,11 +557,17 @@
                 return modal.result;
             }
 
+            function modifyProject(project) {
+                $location.path("/projects/" + project);
+                return false;
+            }
+
             return {
                 createImageStream: createImageStream,
                 modifyImageStream: modifyImageStream,
                 deleteImageStream: deleteImageStream,
                 deleteTag: deleteTag,
+                modifyProject: modifyProject,
             };
         }
     ])
@@ -606,10 +593,12 @@
         "imageTagData",
         "kubeMethods",
         "filterService",
-        function($scope, $instance, dialogData, tagData, methods, filter) {
+        "gettextCatalog",
+        function($scope, $instance, dialogData, tagData, methods, filter, gettextCatalog) {
             var stream = dialogData.stream || { };
             var meta = stream.metadata || { };
             var spec = stream.spec || { };
+            var _ = gettextCatalog.getString.bind(gettextCatalog);
 
             var populate = "none";
             if (spec.dockerImageRepository)
@@ -629,15 +618,17 @@
             $scope.fields = fields;
             $scope.labels = {
                 populate: {
-                    none: "Don't pull images automatically",
-                    pull: "Sync all tags from a remote image repository",
-                    tags: "Pull specific tags from another image repository",
+                    none: _("Don't pull images automatically"),
+                    pull: _("Sync all tags from a remote image repository"),
+                    tags: _("Pull specific tags from another image repository"),
                 }
             };
 
+            $scope.placeholder = _("eg: my-image-stream");
+
             /* During creation we have a different label */
             if (!dialogData.stream)
-                $scope.labels.populate.none = "Create empty image stream";
+                $scope.labels.populate.none = _("Create empty image stream");
 
             function performModify() {
                 var data = { spec: { dockerImageRepository: null, tags: null } };

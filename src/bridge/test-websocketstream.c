@@ -84,7 +84,9 @@ on_socket_close (WebSocketConnection *ws,
 
 static gboolean
 handle_socket (CockpitWebServer *server,
+               const gchar *original_path,
                const gchar *path,
+               const gchar *method,
                GIOStream *io_stream,
                GHashTable *headers,
                GByteArray *input,
@@ -97,6 +99,8 @@ handle_socket (CockpitWebServer *server,
 
   if (!g_str_equal (path, "/socket"))
     return FALSE;
+  /* HEAD on a socket makes little sense, we don't test it */
+  g_assert (g_strcmp0 (method, "GET") == 0);
 
   origins[0] = test->origin;
   ws = web_socket_server_new_for_stream (test->url, (const gchar **)origins,
@@ -112,7 +116,7 @@ static void
 setup (TestCase *test,
        gconstpointer data)
 {
-  test->server = cockpit_web_server_new (0, NULL, NULL, NULL, NULL);
+  test->server = cockpit_web_server_new (NULL, 0, NULL, NULL, NULL);
   test->port = cockpit_web_server_get_port (test->server);
   test->transport = mock_transport_new ();
   test->ws_closed = FALSE;
@@ -228,7 +232,7 @@ setup_tls (TestTls *test,
   test->certificate = g_tls_certificate_new_from_files (SRCDIR "/src/bridge/mock-server.crt",
                                                         SRCDIR "/src/bridge/mock-server.key", &error);
   g_assert_no_error (error);
-  test->server = cockpit_web_server_new (0, test->certificate, NULL, NULL, &error);
+  test->server = cockpit_web_server_new (NULL, 0, test->certificate, NULL, &error);
   g_assert_no_error (error);
 
   test->port = cockpit_web_server_get_port (test->server);
@@ -319,7 +323,6 @@ test_tls_authority_bad (TestTls *test,
   JsonObject *resp;
   gchar *expected_pem = NULL;
   gchar *expected_json = NULL;
-  const gchar *expected_fmt;
 
   g_object_get (test->certificate, "certificate-pem", &expected_pem, NULL);
   g_assert_true (expected_pem != NULL);
@@ -348,8 +351,8 @@ test_tls_authority_bad (TestTls *test,
     g_main_context_iteration (NULL, TRUE);
 
   resp = mock_transport_pop_control (test->transport);
-  expected_fmt = "{\"command\":\"close\",\"channel\":\"444\",\"problem\":\"unknown-hostkey\", \"rejected-certificate\":\"%s\"}";
-  expected_json = g_strdup_printf (expected_fmt, expected_pem);
+  expected_json = g_strdup_printf ("{\"command\":\"close\",\"channel\":\"444\",\"problem\":\"unknown-hostkey\", "
+                                   " \"rejected-certificate\":\"%s\"}", expected_pem);
   cockpit_assert_json_eq (resp, expected_json);
 
   g_object_unref (channel);

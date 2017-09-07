@@ -48,10 +48,11 @@ struct _CockpitWebServer {
   GObject parent_instance;
 
   gint port;
+  GInetAddress *address;
   gboolean socket_activated;
   GTlsCertificate *certificate;
-  gchar **document_roots;
   GString *ssl_exception_prefix;
+  GString *url_root;
   gint request_timeout;
   gint request_max;
   gboolean redirect_tls;
@@ -65,7 +66,9 @@ struct _CockpitWebServerClass {
   GObjectClass parent_class;
 
   gboolean (* handle_stream)   (CockpitWebServer *server,
+                                const gchar *original_path,
                                 const gchar *path,
+                                const gchar *method,
                                 GIOStream *io_stream,
                                 GHashTable *headers,
                                 GByteArray *input);
@@ -80,11 +83,12 @@ enum
 {
   PROP_0,
   PROP_PORT,
+  PROP_ADDRESS,
   PROP_CERTIFICATE,
-  PROP_DOCUMENT_ROOTS,
   PROP_SSL_EXCEPTION_PREFIX,
   PROP_SOCKET_ACTIVATED,
-  PROP_REDIRECT_TLS
+  PROP_REDIRECT_TLS,
+  PROP_URL_ROOT,
 };
 
 static gint sig_handle_stream = 0;
@@ -110,19 +114,9 @@ cockpit_web_server_init (CockpitWebServer *server)
                                             cockpit_request_free, NULL);
   server->main_context = g_main_context_ref_thread_default ();
   server->ssl_exception_prefix = g_string_new ("");
+  server->url_root = g_string_new ("");
   server->redirect_tls = TRUE;
-}
-
-static void
-cockpit_web_server_constructed (GObject *object)
-{
-  CockpitWebServer *server = COCKPIT_WEB_SERVER (object);
-  static gchar *default_roots[] = { ".", NULL };
-
-  G_OBJECT_CLASS (cockpit_web_server_parent_class)->constructed (object);
-
-  if (server->document_roots == NULL)
-    server->document_roots = g_strdupv (default_roots);
+  server->address = NULL;
 }
 
 static void
@@ -140,12 +134,13 @@ cockpit_web_server_finalize (GObject *object)
 {
   CockpitWebServer *server = COCKPIT_WEB_SERVER (object);
 
+  g_clear_object (&server->address);
   g_clear_object (&server->certificate);
-  g_strfreev (server->document_roots);
   g_hash_table_destroy (server->requests);
   if (server->main_context)
     g_main_context_unref (server->main_context);
   g_string_free (server->ssl_exception_prefix, TRUE);
+  g_string_free (server->url_root, TRUE);
   g_clear_object (&server->socket_service);
 
   G_OBJECT_CLASS (cockpit_web_server_parent_class)->finalize (object);
@@ -169,12 +164,16 @@ cockpit_web_server_get_property (GObject *object,
       g_value_set_object (value, server->certificate);
       break;
 
-    case PROP_DOCUMENT_ROOTS:
-      g_value_set_boxed (value, cockpit_web_server_get_document_roots (server));
-      break;
-
     case PROP_SSL_EXCEPTION_PREFIX:
       g_value_set_string (value, server->ssl_exception_prefix->str);
+      break;
+
+    case PROP_URL_ROOT:
+      if (server->url_root->len)
+        g_value_set_string (value, server->url_root->str);
+      else
+        g_value_set_string (value, NULL);
+      break;
 
     case PROP_SOCKET_ACTIVATED:
       g_value_set_boolean (value, server->socket_activated);
@@ -190,50 +189,6 @@ cockpit_web_server_get_property (GObject *object,
     }
 }
 
-static gchar **
-filter_document_roots (const gchar **input)
-{
-  GPtrArray *roots;
-  char *path;
-  gint i;
-
-  roots = g_ptr_array_new ();
-  for (i = 0; input && input[i]; i++)
-    {
-      path = realpath (input[i], NULL);
-      if (path == NULL)
-        g_debug ("couldn't resolve document root: %s: %m", input[i]);
-      else
-        g_ptr_array_add (roots, path);
-    }
-  g_ptr_array_add (roots, NULL);
-  return (gchar **)g_ptr_array_free (roots, FALSE);
-}
-
-gchar **
-cockpit_web_server_resolve_roots (const gchar *root,
-                                  ...)
-{
-  gchar **resolved;
-  GPtrArray *input;
-  va_list va;
-
-  input = g_ptr_array_new ();
-
-  va_start (va, root);
-  while (root != NULL)
-    {
-      g_ptr_array_add (input, (gchar *)root);
-      root = va_arg (va, const gchar *);
-    }
-  va_end (va);
-
-  g_ptr_array_add (input, NULL);
-  resolved = filter_document_roots ((const gchar **)input->pdata);
-  g_ptr_array_free (input, TRUE);
-  return resolved;
-}
-
 static void
 cockpit_web_server_set_property (GObject *object,
                                  guint prop_id,
@@ -241,6 +196,8 @@ cockpit_web_server_set_property (GObject *object,
                                  GParamSpec *pspec)
 {
   CockpitWebServer *server = COCKPIT_WEB_SERVER (object);
+  GString *str;
+  const gchar *address = NULL;
 
   switch (prop_id)
     {
@@ -248,16 +205,42 @@ cockpit_web_server_set_property (GObject *object,
       server->port = g_value_get_int (value);
       break;
 
+    case PROP_ADDRESS:
+      address = g_value_get_string (value);
+      if (address)
+        {
+          server->address = g_inet_address_new_from_string (address);
+          if (!server->address)
+            g_warning ("Couldn't parse IP address from: %s", address);
+        }
+      break;
+
     case PROP_CERTIFICATE:
       server->certificate = g_value_dup_object (value);
       break;
 
-    case PROP_DOCUMENT_ROOTS:
-      server->document_roots = filter_document_roots (g_value_get_boxed (value));
-      break;
-
     case PROP_SSL_EXCEPTION_PREFIX:
       g_string_assign (server->ssl_exception_prefix, g_value_get_string (value));
+      break;
+
+    case PROP_URL_ROOT:
+      str = g_string_new (g_value_get_string (value));
+
+      while (str->str[0] == '/')
+        g_string_erase (str, 0, 1);
+
+      if (str->len)
+        {
+          while (str->str[str->len - 1] == '/')
+            g_string_truncate (str, str->len - 1);
+        }
+
+      if (str->len)
+        g_string_printf (server->url_root, "/%s", str->str);
+      else
+        g_string_assign (server->url_root, str->str);
+
+      g_string_free (str, TRUE);
       break;
 
     case PROP_REDIRECT_TLS:
@@ -308,7 +291,9 @@ on_web_response_done (CockpitWebResponse *response,
 
 static gboolean
 cockpit_web_server_default_handle_stream (CockpitWebServer *self,
+                                          const gchar *original_path,
                                           const gchar *path,
+                                          const gchar *method,
                                           GIOStream *io_stream,
                                           GHashTable *headers,
                                           GByteArray *input)
@@ -328,7 +313,8 @@ cockpit_web_server_default_handle_stream (CockpitWebServer *self,
     }
 
   /* TODO: Correct HTTP version for response */
-  response = cockpit_web_response_new (io_stream, path, pos, headers);
+  response = cockpit_web_response_new (io_stream, original_path, path, pos, headers);
+  cockpit_web_response_set_method (response, method);
   g_signal_connect_data (response, "done", G_CALLBACK (on_web_response_done),
                          g_object_ref (self), (GClosureNotify)g_object_unref, 0);
 
@@ -380,10 +366,7 @@ cockpit_web_server_default_handle_resource (CockpitWebServer *self,
                                             GHashTable *headers,
                                             CockpitWebResponse *response)
 {
-  if (self->document_roots)
-    cockpit_web_response_file (response, path, (const gchar **)self->document_roots);
-  else
-    cockpit_web_response_error (response, 404, NULL, NULL);
+  cockpit_web_response_error (response, 404, NULL, NULL);
   return TRUE;
 }
 
@@ -396,7 +379,6 @@ cockpit_web_server_class_init (CockpitWebServerClass *klass)
   klass->handle_resource = cockpit_web_server_default_handle_resource;
 
   gobject_class = G_OBJECT_CLASS (klass);
-  gobject_class->constructed = cockpit_web_server_constructed;
   gobject_class->dispose = cockpit_web_server_dispose;
   gobject_class->finalize = cockpit_web_server_finalize;
   gobject_class->set_property = cockpit_web_server_set_property;
@@ -412,6 +394,13 @@ cockpit_web_server_class_init (CockpitWebServerClass *klass)
                                                      G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
+                                   PROP_ADDRESS,
+                                   g_param_spec_string ("address", NULL, NULL, NULL,
+                                                        G_PARAM_WRITABLE |
+                                                        G_PARAM_CONSTRUCT_ONLY |
+                                                        G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class,
                                    PROP_CERTIFICATE,
                                    g_param_spec_object ("certificate", NULL, NULL,
                                                         G_TYPE_TLS_CERTIFICATE,
@@ -420,17 +409,12 @@ cockpit_web_server_class_init (CockpitWebServerClass *klass)
                                                         G_PARAM_CONSTRUCT_ONLY |
                                                         G_PARAM_STATIC_STRINGS));
 
-  g_object_class_install_property (gobject_class,
-                                   PROP_DOCUMENT_ROOTS,
-                                   g_param_spec_boxed ("document-roots", NULL, NULL,
-                                                        G_TYPE_STRV,
-                                                        G_PARAM_READABLE |
-                                                        G_PARAM_WRITABLE |
-                                                        G_PARAM_CONSTRUCT_ONLY |
-                                                        G_PARAM_STATIC_STRINGS));
-
   g_object_class_install_property (gobject_class, PROP_SSL_EXCEPTION_PREFIX,
                                    g_param_spec_string ("ssl-exception-prefix", NULL, NULL, "",
+                                                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_URL_ROOT,
+                                   g_param_spec_string ("url-root", NULL, NULL, "",
                                                         G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class, PROP_SOCKET_ACTIVATED,
@@ -449,7 +433,9 @@ cockpit_web_server_class_init (CockpitWebServerClass *klass)
                                     NULL, /* accu_data */
                                     g_cclosure_marshal_generic,
                                     G_TYPE_BOOLEAN,
-                                    4,
+                                    6,
+                                    G_TYPE_STRING,
+                                    G_TYPE_STRING,
                                     G_TYPE_STRING,
                                     G_TYPE_IO_STREAM,
                                     G_TYPE_HASH_TABLE,
@@ -470,9 +456,9 @@ cockpit_web_server_class_init (CockpitWebServerClass *klass)
 }
 
 CockpitWebServer *
-cockpit_web_server_new (gint port,
+cockpit_web_server_new (const gchar *address,
+                        gint port,
                         GTlsCertificate *certificate,
-                        const gchar **document_roots,
                         GCancellable *cancellable,
                         GError **error)
 {
@@ -481,8 +467,8 @@ cockpit_web_server_new (gint port,
                              cancellable,
                              error,
                              "port", port,
+                             "address", address,
                              "certificate", certificate,
-                             "document-roots", document_roots,
                              NULL);
   if (initable != NULL)
     return COCKPIT_WEB_SERVER (initable);
@@ -496,12 +482,6 @@ gboolean
 cockpit_web_server_get_socket_activated (CockpitWebServer *self)
 {
   return self->socket_activated;
-}
-
-const gchar **
-cockpit_web_server_get_document_roots (CockpitWebServer *self)
-{
-  return (const gchar **)self->document_roots;
 }
 
 gint
@@ -542,7 +522,10 @@ cockpit_web_server_parse_cookie (GHashTable *headers,
   const gchar *pos;
   const gchar *value;
   const gchar *end;
+  gboolean at_start = TRUE;
   gchar *decoded;
+  gint diff;
+  gint offset;
 
   header = g_hash_table_lookup (headers, "Cookie");
   if (!header)
@@ -551,11 +534,27 @@ cockpit_web_server_parse_cookie (GHashTable *headers,
   for (;;)
     {
       pos = strstr (header, name);
-      if (!pos || (pos != header && *(pos - 1) != ';' && !g_ascii_isspace (*(pos - 1))))
+      if (!pos)
         return NULL;
 
+      if (pos != header)
+        {
+          diff = strlen (header) - strlen (pos);
+          offset = 1;
+          at_start = FALSE;
+          while (offset < diff)
+            {
+              if (!g_ascii_isspace (*(pos - offset)))
+                {
+                  at_start = *(pos - offset) == ';';
+                  break;
+                }
+              offset++;
+            }
+        }
+
       pos += strlen (name);
-      if (*pos == '=')
+      if (*pos == '=' && at_start)
         {
           value = pos + 1;
           end = strchr (value, ';');
@@ -568,7 +567,10 @@ cockpit_web_server_parse_cookie (GHashTable *headers,
 
           return decoded;
         }
-
+      else
+        {
+          at_start = FALSE;
+        }
       header = pos;
     }
 }
@@ -608,7 +610,7 @@ cockpit_web_server_parse_languages (GHashTable *headers,
   if (defawlt)
     {
       lang = g_new0 (Language, 1);
-      lang->qvalue = 1;
+      lang->qvalue = 0.1;
       lang->value = defawlt;
       g_ptr_array_add (langs, lang);
     }
@@ -813,7 +815,7 @@ process_delayed_reply (CockpitRequest *request,
 
   g_assert (request->delayed_reply > 299);
 
-  response = cockpit_web_response_new (request->io, NULL, NULL, headers);
+  response = cockpit_web_response_new (request->io, NULL, NULL, NULL, headers);
   g_signal_connect_data (response, "done", G_CALLBACK (on_web_response_done),
                          g_object_ref (request->web_server), (GClosureNotify)g_object_unref, 0);
 
@@ -854,10 +856,18 @@ path_has_prefix (const gchar *path,
 
 static void
 process_request (CockpitRequest *request,
+                 const gchar *method,
                  const gchar *path,
                  GHashTable *headers)
 {
   gboolean claimed = FALSE;
+  const gchar *actual_path;
+
+  if (request->web_server->url_root->len &&
+      !path_has_prefix (path, request->web_server->url_root))
+    {
+      request->delayed_reply = 404;
+    }
 
   /*
    * If redirecting to TLS, check the path. Certain paths
@@ -875,17 +885,21 @@ process_request (CockpitRequest *request,
       return;
     }
 
+  actual_path = path + request->web_server->url_root->len;
+
   /* See if we have any takers... */
   g_signal_emit (request->web_server,
                  sig_handle_stream, 0,
                  path,
+                 actual_path,
+                 method,
                  request->io,
                  headers,
                  request->buffer,
                  &claimed);
 
   if (!claimed)
-    g_critical ("no handler responded to request: %s", path);
+    g_critical ("no handler responded to request: %s", actual_path);
 }
 
 static gboolean
@@ -968,7 +982,7 @@ parse_and_process_request (CockpitRequest *request)
       goto out;
     }
 
-  if (!g_str_equal (method, "GET"))
+  if (!g_str_equal (method, "GET") && !g_str_equal (method, "HEAD"))
     {
       g_message ("received unsupported HTTP method");
       request->delayed_reply = 405;
@@ -982,7 +996,7 @@ parse_and_process_request (CockpitRequest *request)
     }
 
   g_byte_array_remove_range (request->buffer, 0, off1 + off2);
-  process_request (request, path, headers);
+  process_request (request, method, path, headers);
 
 out:
   if (headers)
@@ -1072,7 +1086,11 @@ start_request_input (CockpitRequest *request)
 
   if (!poll_in || !g_pollable_input_stream_can_poll (poll_in))
     {
-      g_critical ("cannot use a non-pollable input stream: %s", G_OBJECT_TYPE_NAME (in));
+      if (in)
+        g_critical ("cannot use a non-pollable input stream: %s", G_OBJECT_TYPE_NAME (in));
+      else
+        g_critical ("no input stream available");
+
       cockpit_request_finish (request);
       return;
     }
@@ -1280,6 +1298,9 @@ cockpit_web_server_initable_init (GInitable *initable,
                                   GError **error)
 {
   CockpitWebServer *server = COCKPIT_WEB_SERVER (initable);
+  GSocketAddress *socket_address = NULL;
+  GSocketAddress *result_address = NULL;
+
   gboolean ret = FALSE;
   gboolean failed = FALSE;
   int n, fd;
@@ -1330,8 +1351,27 @@ cockpit_web_server_initable_init (GInitable *initable,
     }
   else
     {
+      if (server->address)
+        {
+          socket_address = g_inet_socket_address_new (server->address, server->port);
+          if (socket_address)
+            {
+              failed = !g_socket_listener_add_address (G_SOCKET_LISTENER (server->socket_service),
+                                                      socket_address, G_SOCKET_TYPE_STREAM,
+                                                      G_SOCKET_PROTOCOL_DEFAULT,
+                                                      NULL, &result_address,
+                                                      error);
+              if (!failed)
+                {
+                  server->port = g_inet_socket_address_get_port (G_INET_SOCKET_ADDRESS (result_address));
+                  g_object_unref (result_address);
+                }
+              g_object_unref (socket_address);
+            }
+        }
+
       /* No fds passed in, let's listen on our own. */
-      if (server->port == 0)
+      else if (server->port == 0)
         {
           server->port = g_socket_listener_add_any_inet_port (G_SOCKET_LISTENER (server->socket_service),
                                                               NULL, error);

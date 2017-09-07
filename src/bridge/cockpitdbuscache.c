@@ -86,6 +86,8 @@ struct _CockpitDBusCache {
   GQueue *batches;
   GQueue *barriers;
   guint number;
+  gboolean barrier_progressing;
+  guint barrier_progressing_rounds;
   GHashTable *update;
 
   /* Interned strings */
@@ -96,7 +98,7 @@ enum {
   PROP_CONNECTION = 1,
   PROP_NAME,
   PROP_LOGNAME,
-  PROP_NAME_OWNER
+  PROP_INTERFACE_INFO
 };
 
 static guint signal_meta;
@@ -150,25 +152,54 @@ barrier_progress (CockpitDBusCache *self)
   BarrierData *barrier;
   BatchData *batch;
 
-  batch = g_queue_peek_head (self->batches);
-
-  for (;;)
+  if (self->barrier_progressing)
     {
-      barrier = g_queue_peek_head (self->barriers);
-      if (!barrier)
-        return;
-
-      /*
-       * If there is a batch being processed, we must block
-       * barriers that have an equal or later batch number.
+      /* It might happen that barrier_progress is called
+       * recursively, while one of the barrier callbacks is
+       * running.  We need to detect this and avoid calling the
+       * next barrier callback while there is already one
+       * running.  Allowing it might violate the ordering
+       * guarantees if the running callback is doing more work
+       * after causing the recursive call to barrier_progress.
+       *
+       * Concretely, process_interfaces below can cause
+       * recursive calls in the middle of its work when it
+       * processes multiple interfaces.
        */
-      if (batch && batch->number <= barrier->number)
-        return;
 
-      g_queue_pop_head (self->barriers);
-      (barrier->callback) (self, barrier->user_data);
-      g_slice_free (BarrierData, barrier);
+      self->barrier_progressing_rounds += 1;
+      return;
     }
+
+  self->barrier_progressing = TRUE;
+  self->barrier_progressing_rounds = 1;
+
+  while (self->barrier_progressing_rounds > 0)
+    {
+      self->barrier_progressing_rounds -= 1;
+
+      batch = g_queue_peek_head (self->batches);
+
+      for (;;)
+        {
+          barrier = g_queue_peek_head (self->barriers);
+          if (!barrier)
+            break;
+
+          /*
+           * If there is a batch being processed, we must block
+           * barriers that have an equal or later batch number.
+           */
+          if (batch && batch->number <= barrier->number)
+            break;
+
+          g_queue_pop_head (self->barriers);
+          (barrier->callback) (self, barrier->user_data);
+          g_slice_free (BarrierData, barrier);
+        }
+    }
+
+  self->barrier_progressing = FALSE;
 }
 
 static void
@@ -321,10 +352,6 @@ cockpit_dbus_cache_init (CockpitDBusCache *self)
 
   self->cancellable = g_cancellable_new ();
 
-  /* The key is owned by the value */
-  self->introspected = g_hash_table_new_full (g_str_hash, g_str_equal, NULL,
-                                              (GDestroyNotify)g_dbus_interface_info_unref);
-
   self->managed = cockpit_paths_new ();
 
   /* Becomes a whole tree of hash tables */
@@ -335,7 +362,7 @@ cockpit_dbus_cache_init (CockpitDBusCache *self)
   self->rules = cockpit_dbus_rules_new ();
 
   self->introspects = g_queue_new ();
-  self->introsent = g_hash_table_new (g_direct_hash, g_direct_equal);
+  self->introsent = g_hash_table_new (g_str_hash, g_str_equal);
 
   self->batches = g_queue_new ();
   self->barriers = g_queue_new ();
@@ -370,7 +397,7 @@ introspect_complete (CockpitDBusCache *self,
 
   if (id->interface)
     {
-      iface = g_hash_table_lookup (self->introspected, id->interface);
+      iface = cockpit_dbus_interface_info_lookup (self->introspected, id->interface);
       if (!iface)
         {
           g_debug ("%s: introspect interface %s didn't work", self->logname, id->interface);
@@ -383,11 +410,11 @@ introspect_complete (CockpitDBusCache *self,
            */
 
           iface = g_new0 (GDBusInterfaceInfo, 1);
-          iface->ref_count = -1;
-          iface->name = (gchar *)id->interface;
+          iface->ref_count = 1;
+          iface->name = g_strdup (id->interface);
 
-          self->trash = g_list_prepend (self->trash, iface);
-          g_hash_table_replace (self->introspected, iface->name, iface);
+          cockpit_dbus_interface_info_push (self->introspected, iface);
+          g_dbus_interface_info_unref (iface);
         }
     }
 
@@ -460,15 +487,16 @@ on_introspect_reply (GObject *source,
   GVariant *retval;
   const gchar *xml;
 
-  /* Has been freed due to flush */
-  if (g_cancellable_is_cancelled (self->cancellable))
+  /* All done with this introspect */
+  id = g_queue_pop_head (self->introspects);
+
+  /* Introspects have been flushed */
+  if (!id)
     {
       g_object_unref (self);
       return;
     }
 
-  /* All done with this introspect */
-  id = g_queue_pop_head (self->introspects);
   g_assert (id->introspecting);
 
   retval = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
@@ -543,7 +571,7 @@ introspect_flush (CockpitDBusCache *self)
       for (;;)
         {
           id = g_queue_pop_tail (self->introspects);
-          if (!id || id->introspecting)
+          if (!id)
             break;
           g_queue_push_head (queue, id);
         }
@@ -602,7 +630,7 @@ introspect_maybe (CockpitDBusCache *self,
   g_assert (path);
   g_assert (interface);
 
-  iface = g_hash_table_lookup (self->introspected, interface);
+  iface = cockpit_dbus_interface_info_lookup (self->introspected, interface);
   if (iface)
     {
       (callback) (self, iface, user_data);
@@ -723,6 +751,7 @@ ensure_properties (CockpitDBusCache *self,
 {
   GHashTable *interfaces;
   GHashTable *properties;
+  const gchar *name;
 
   interfaces = ensure_interfaces (self, path);
   properties = g_hash_table_lookup (interfaces, iface->name);
@@ -736,9 +765,10 @@ ensure_properties (CockpitDBusCache *self,
       emit_change (self, path, iface, NULL, NULL);
     }
 
-  if (!g_hash_table_lookup (self->introsent, iface))
+  name = intern_string (self, iface->name);
+  if (!g_hash_table_lookup (self->introsent, name))
     {
-      g_hash_table_add (self->introsent, iface);
+      g_hash_table_add (self->introsent, (gpointer)name);
       g_signal_emit (self, signal_meta, 0, iface);
     }
 
@@ -1198,6 +1228,9 @@ cockpit_dbus_cache_constructed (GObject *object)
 
   g_return_if_fail (self->connection != NULL);
 
+  if (!self->introspected)
+    self->introspected = cockpit_dbus_interface_info_new ();
+
   self->subscribe_properties = g_dbus_connection_signal_subscribe (self->connection,
                                                                    self->name,
                                                                    "org.freedesktop.DBus.Properties",
@@ -1239,6 +1272,9 @@ cockpit_dbus_cache_set_property (GObject *obj,
         break;
       case PROP_LOGNAME:
         self->logname = g_value_dup_string (value);
+        break;
+      case PROP_INTERFACE_INFO:
+        self->introspected = g_value_dup_boxed (value);
         break;
       default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (obj, prop_id, pspec);
@@ -1284,6 +1320,7 @@ cockpit_dbus_cache_finalize (GObject *object)
   g_queue_free (self->batches);
   g_queue_free (self->barriers);
 
+  g_assert (self->introspects->head == NULL);
   g_queue_free (self->introspects);
 
   g_hash_table_unref (self->introsent);
@@ -1326,6 +1363,9 @@ cockpit_dbus_cache_class_init (CockpitDBusCacheClass *klass)
   g_object_class_install_property (gobject_class, PROP_LOGNAME,
        g_param_spec_string ("logname", "logname", "logname", "internal",
                             G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_INTERFACE_INFO,
+       g_param_spec_boxed ("interface-info", NULL, NULL, G_TYPE_HASH_TABLE,
+                           G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
 }
 
 static GHashTable *
@@ -1639,15 +1679,14 @@ process_introspect_node (CockpitDBusCache *self,
         }
 
       /* Cache this interface for later use elsewhere */
-      prev = g_hash_table_lookup (self->introspected, iface->name);
+      prev = cockpit_dbus_interface_info_lookup (self->introspected, iface->name);
       if (prev)
         {
           iface = prev;
         }
       else
         {
-          g_hash_table_replace (self->introspected, iface->name,
-                                g_dbus_interface_info_ref (iface));
+          cockpit_dbus_interface_info_push (self->introspected, iface);
         }
 
       /* Skip these interfaces */
@@ -1980,11 +2019,40 @@ cockpit_dbus_cache_poke (CockpitDBusCache *self,
 CockpitDBusCache *
 cockpit_dbus_cache_new (GDBusConnection *connection,
                         const gchar *name,
-                        const gchar *logname)
+                        const gchar *logname,
+                        GHashTable *interface_info)
 {
   return g_object_new (COCKPIT_TYPE_DBUS_CACHE,
                        "connection", connection,
                        "name", name,
                        "logname", logname,
+                       "interface-info", interface_info,
                        NULL);
+}
+
+GHashTable *
+cockpit_dbus_interface_info_new (void)
+{
+  /* The key is owned by the value */
+  return g_hash_table_new_full (g_str_hash, g_str_equal, NULL,
+                                (GDestroyNotify)g_dbus_interface_info_unref);
+}
+
+GDBusInterfaceInfo *
+cockpit_dbus_interface_info_lookup (GHashTable *interface_info,
+                                    const gchar *interface_name)
+{
+  g_return_val_if_fail (interface_info != NULL, NULL);
+  g_return_val_if_fail (interface_name != NULL, NULL);
+  return g_hash_table_lookup (interface_info, interface_name);
+}
+
+void
+cockpit_dbus_interface_info_push (GHashTable *interface_info,
+                                  GDBusInterfaceInfo *iface)
+{
+  g_return_if_fail (interface_info != NULL);
+  g_return_if_fail (iface != NULL);
+  g_hash_table_replace (interface_info, iface->name,
+                        g_dbus_interface_info_ref (iface));
 }

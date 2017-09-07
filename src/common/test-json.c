@@ -23,12 +23,13 @@
 
 #include "common/cockpittest.h"
 
-#include "string.h"
+#include <math.h>
+#include <string.h>
 
 static const gchar *test_data =
   "{"
   "   \"string\": \"value\","
-  "   \"number\": 55,"
+  "   \"number\": 55.4,"
   "   \"array\": [ \"one\", \"two\", \"three\" ],"
   "   \"object\": { \"test\": \"one\" },"
   "   \"bool\": true,"
@@ -112,6 +113,31 @@ test_get_int (TestCase *tc,
   g_assert (ret == FALSE);
 
   ret = cockpit_json_get_int (tc->root, "string", 66, NULL);
+  g_assert (ret == FALSE);
+}
+
+static void
+test_get_double (TestCase *tc,
+                 gconstpointer data)
+{
+  gboolean ret;
+  gdouble value;
+
+  ret = cockpit_json_get_double (tc->root, "number", 0, &value);
+  g_assert (ret == TRUE);
+  g_assert_cmpfloat (value, ==, 55.4);
+
+  ret = cockpit_json_get_double (tc->root, "number", 0, NULL);
+  g_assert (ret == TRUE);
+
+  ret = cockpit_json_get_double (tc->root, "unknown", 66.4, &value);
+  g_assert (ret == TRUE);
+  g_assert_cmpfloat (value, ==, 66.4);
+
+  ret = cockpit_json_get_double (tc->root, "string", 66.4, &value);
+  g_assert (ret == FALSE);
+
+  ret = cockpit_json_get_double (tc->root, "string", 66.4, NULL);
   g_assert (ret == FALSE);
 }
 
@@ -269,6 +295,44 @@ test_get_object (TestCase *tc,
   g_assert (ret == FALSE);
 
   json_object_unref (defawlt);
+}
+
+static void
+test_hashtable_objects (void)
+{
+  JsonObject *object = json_object_new ();
+  GHashTable *ht = NULL;
+  const gchar *fields[] = {
+    "test",
+    "test2",
+    "test4",
+    "test5",
+    NULL,
+  };
+
+  json_object_set_string_member (object, "test", "one");
+  json_object_set_string_member (object, "test2", "two");
+  json_object_set_string_member (object, "test3", "three");
+  json_object_set_null_member (object, "test4");
+  json_object_set_string_member (object, "test5", "five");
+
+  ht = cockpit_json_to_hash_table (object, fields);
+  g_assert_cmpstr (g_hash_table_lookup (ht, "test"), ==, "one");
+  g_assert_cmpstr (g_hash_table_lookup (ht, "test2"), ==, "two");
+  g_assert_cmpstr (g_hash_table_lookup (ht, "test5"), ==, "five");
+  g_assert_false (g_hash_table_contains (ht, "test3"));
+  g_assert_false (g_hash_table_contains (ht, "test4"));
+  json_object_unref (object);
+
+  object = cockpit_json_from_hash_table (ht, fields);
+  g_assert_cmpstr (json_object_get_string_member (object, "test"), ==, "one");
+  g_assert_cmpstr (json_object_get_string_member (object, "test2"), ==, "two");
+  g_assert_cmpstr (json_object_get_string_member (object, "test5"), ==, "five");
+  g_assert_false (json_object_has_member (object, "test3"));
+  g_assert_true (json_object_get_null_member (object, "test4"));
+
+  json_object_unref (object);
+  g_hash_table_unref (ht);
 }
 
 static void
@@ -590,6 +654,28 @@ test_patch (gconstpointer data)
   json_object_unref (with);
 }
 
+static void
+test_write_infinite_nan (void)
+{
+  JsonArray *array;
+  gchar *string;
+  JsonNode *node;
+
+  array = json_array_new ();
+  json_array_add_double_element (array, 3.0); /* number */
+  json_array_add_double_element (array, 1.0/0.0); /* INFINITY */
+  json_array_add_double_element (array, sqrt (-1)); /* NaN */
+
+  node = json_node_new (JSON_NODE_ARRAY);
+  json_node_take_array (node, array);
+  string = cockpit_json_write (node, NULL);
+
+  g_assert_cmpstr (string, ==, "[3,null,null]");
+
+  json_node_free (node);
+  g_free (string);
+}
+
 int
 main (int argc,
       char *argv[])
@@ -609,6 +695,8 @@ main (int argc,
               setup, test_get_string, teardown);
   g_test_add ("/json/get-int", TestCase, NULL,
               setup, test_get_int, teardown);
+  g_test_add ("/json/get-double", TestCase, NULL,
+              setup, test_get_double, teardown);
   g_test_add ("/json/get-bool", TestCase, NULL,
               setup, test_get_bool, teardown);
   g_test_add ("/json/get-null", TestCase, NULL,
@@ -645,6 +733,9 @@ main (int argc,
       g_test_add_data_func (name, patch_fixtures + i, test_patch);
       g_free (name);
     }
+
+  g_test_add_func ("/json/write/infinite-nan", test_write_infinite_nan);
+  g_test_add_func ("/json/hashtable-objects", test_hashtable_objects);
 
 
   return g_test_run ();

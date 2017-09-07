@@ -35,9 +35,9 @@ extern gsize cockpit_webserver_request_maximum;
 
 GType              cockpit_web_server_get_type      (void) G_GNUC_CONST;
 
-CockpitWebServer * cockpit_web_server_new           (gint port,
+CockpitWebServer * cockpit_web_server_new           (const gchar *address,
+                                                     gint port,
                                                      GTlsCertificate *certificate,
-                                                     const gchar **document_roots,
                                                      GCancellable *cancellable,
                                                      GError **error);
 
@@ -56,14 +56,9 @@ gchar **           cockpit_web_server_parse_languages (GHashTable *headers,
 gboolean           cockpit_web_server_parse_encoding  (GHashTable *headers,
                                                        const gchar *encoding);
 
-gchar **           cockpit_web_server_resolve_roots (const gchar *root,
-                                                     ...) G_GNUC_NULL_TERMINATED;
-
 gboolean           cockpit_web_server_get_socket_activated (CockpitWebServer *self);
 
 gint               cockpit_web_server_get_port             (CockpitWebServer *self);
-
-const gchar **     cockpit_web_server_get_document_roots   (CockpitWebServer *self);
 
 void               cockpit_web_server_set_redirect_tls     (CockpitWebServer *self,
                                                             gboolean          redirect_tls);

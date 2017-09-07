@@ -17,19 +17,25 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-require([
-    "jquery",
-    "base1/cockpit",
-    "storage/client",
-    "storage/jobs",
-    "storage/overview",
-    "storage/details",
-    "storage/utils",
-    "shell/po",
-], function($, cockpit, client, jobs, overview, details, utils, po) {
-    cockpit.locale(po);
+(function() {
+    "use strict";
+
+    var $ = require("jquery");
+    var cockpit = require("cockpit");
+
+    var client = require("./client");
+    var jobs = require("./jobs");
+    var overview = require("./overview");
+    var details = require("./details.jsx");
+    var utils = require("./utils");
+
+    require("page.css");
+    require("table.css");
+    require("plot.css");
+    require("journal.css");
+    require("./storage.css");
+
     var _ = cockpit.gettext;
-    var C_ = cockpit.gettext;
 
     /* INITIALIZATION AND NAVIGATION
      */
@@ -117,4 +123,4 @@ require([
     }
 
     $(init);
-});
+}());

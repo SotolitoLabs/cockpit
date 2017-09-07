@@ -21,12 +21,35 @@
 
 #include <glib/gstdio.h>
 
+#include <systemd/sd-login.h>
+
 #include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+/* Used to override from tests */
+const gchar *cockpit_system_proc_base = "/proc";
+
+static const gchar *os_release_fields[] = {
+  "NAME",
+  "VERSION",
+  "ID",
+  "VERSION_ID",
+  "PRETTY_NAME",
+  "VARIANT",
+  "VARIANT_ID",
+  "CPE_NAME",
+  NULL
+};
+
+const gchar **
+cockpit_system_os_release_fields (void)
+{
+  return os_release_fields;
+}
 
 GHashTable *
 cockpit_system_load_os_release (void)
@@ -90,43 +113,87 @@ cockpit_system_load_os_release (void)
   return result;
 }
 
-GBytes *
-cockpit_system_random_nonce (gsize length)
+guint64
+cockpit_system_process_start_time (void)
 {
-  GByteArray *key;
-  gint fd;
-  gint read_bytes;
-  gint read_result;
+  GError *error = NULL;
+  gchar *filename = NULL;
+  gchar *contents = NULL;
+  gchar **tokens = NULL;
+  gchar *endp = NULL;
+  size_t length;
+  guint num_tokens;
+  gchar *p;
 
-  fd = g_open ("/dev/urandom", O_RDONLY, 0);
-  if (fd < 0)
-    return NULL;
+  guint64 start_time = 0;
 
-  key = g_byte_array_new ();
-  g_byte_array_set_size (key, length);
-  read_bytes = 0;
-  do
+  filename = g_strdup_printf ("%s/%d/stat", cockpit_system_proc_base, getpid ());
+  if (!g_file_get_contents (filename, &contents, &length, &error))
     {
-      errno = 0;
-      read_result = read (fd, key->data + read_bytes, key->len - read_bytes);
-      if (read_result <= 0)
-        {
-          if (errno == EAGAIN || errno == EINTR)
-              continue;
-          break;
-        }
-      read_bytes += read_result;
+      g_warning ("couldn't read start time: %s", error->message);
+      goto out;
     }
-  while (read_bytes < key->len);
-  close (fd);
 
-  if (read_bytes < length)
+  /*
+   * Start time is the token at index 19 after the '(process name)' entry - since only this
+   * field can contain the ')' character, search backwards for this
+   */
+  p = strrchr (contents, ')');
+  if (p == NULL)
     {
-      g_byte_array_free (key, TRUE);
-      return NULL;
+      g_warning ("error parsing stat command: %s", filename);
+      goto out;
+    }
+  p += 2; /* skip ') ' */
+  if (p - contents >= (int) length)
+    {
+      g_warning ("error parsing stat command: %s", filename);
+      goto out;
+    }
+
+  tokens = g_strsplit (p, " ", 0);
+  num_tokens = g_strv_length (tokens);
+  if (num_tokens < 20)
+    {
+      g_warning ("error parsing stat tokens: %s", filename);
+      goto out;
+    }
+
+  start_time = g_ascii_strtoull (tokens[19], &endp, 10);
+  if (!endp || endp == tokens[19] || *endp)
+    {
+      start_time = 0;
+      g_warning ("error parsing start time: %s'", filename);
+      goto out;
+    }
+
+out:
+  if (error)
+    g_error_free (error);
+  g_strfreev (tokens);
+  g_free (filename);
+  g_free (contents);
+
+  return start_time;
+}
+
+char *
+cockpit_system_session_id (void)
+{
+  char *session_id;
+  pid_t pid;
+  int res;
+
+  pid = getppid ();
+  res = sd_pid_get_session (pid, &session_id);
+  if (res == 0)
+    {
+      return session_id;
     }
   else
     {
-      return g_byte_array_free_to_bytes (key);
+      if (res != -ENODATA && res != -ENXIO)
+        g_message ("could not look up session id for bridge process: %u: %s", pid, g_strerror (-res));
+      return NULL;
     }
 }

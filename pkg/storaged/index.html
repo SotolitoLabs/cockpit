@@ -23,17 +23,13 @@
     <title translatable="yes">Storage</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="../base1/cockpit.css" type="text/css" rel="stylesheet">
-    <link href="../system/journal.css" type="text/css" rel="stylesheet">
-    <link href="../shell/plot.css" type="text/css" rel="stylesheet">
+    <link href="../base1/patternfly.css" type="text/css" rel="stylesheet">
     <link href="storage.css" type="text/css" rel="stylesheet">
-    <script src="../base1/bundle.js"></script>
-    <script src="../system/bundle.js"></script>
-    <script src="../shell/shell.js"></script>
-    <script src="bundle.js"></script>
-    <!-- debug:start -->
-    <script src="devices.js"></script>
-    <!-- debug:end -->
+    <script src="../base1/jquery.js"></script>
+    <script src="../base1/cockpit.js"></script>
+    <script src="../manifests.js"></script>
+    <script src="../*/po.js"></script>
+    <script src="storage.js"></script>
 </head>
 <body hidden>
 
@@ -52,9 +48,7 @@
       <span class="pficon pficon-error-circle-o"></span>
       <button id="activate-multipath" translatable="yes"
               class="btn btn-default pull-right">Start Multipath</button>
-      <span class="alert-message" translatable="yes">
-        There are devices with multiple paths on the system, but the multipath service is not running.
-      </span>
+      <span class="alert-message" translatable="yes">There are devices with multiple paths on the system, but the multipath service is not running.</span>
     </div>
   </div>
 
@@ -148,7 +142,7 @@
           <td class="row">
             <span class="col-md-12">{{Name}}</span>
             <br>
-            <span class="col-md-12 col-lg-5" translatable="yes">{{Address}}:{{Port}}</span>
+            <span class="col-md-12 col-lg-5">{{Address}}:{{Port}}</span>
           </td>
           <td class="storage-icon">
             <button class="btn btn-danger pficon pficon-delete btn-delete needs-arming"
@@ -368,8 +362,9 @@
       </button>
       <ul class="dropdown-menu action-dropdown-menu" role="menu">
         {{#actions}}
-        <li class="presentation {{#disabled}}disabled{{/disabled}}">
-          <a class=" storage-privileged" data-action="{{action}}" data-arg="{{arg}}" role="menuitem">{{title}}</a>
+        <li class="presentation">
+          <a class="{{#disabled}}disabled{{/disabled}}"
+             data-action="{{action}}" data-arg="{{arg}}" role="menuitem">{{title}}</a>
         </li>
         {{/actions}}
       </ul>
@@ -526,7 +521,6 @@
         </table>
       </div>
     </div>
-    {{{Content}}}
   </script>
 
   <script id="mdraid-detail-tmpl" type="x-template/mustache">
@@ -538,7 +532,7 @@
     {{/MDRaid.Degraded}}
     <div class="panel panel-default">
       <div class="panel-heading">
-        <span translatable="yes">RAID Device</span>
+        {{#MDRaid}}<span>{{Name}}</span> {{/MDRaid}}<span translatable="yes">RAID Device</span>
         <span class="pull-right">{{{MDRaidButton}}}</span>
       </div>
       {{#MDRaid}}
@@ -546,10 +540,6 @@
         <tr>
           <td translatable="yes" context="storage">Device</td>
           <td>{{Block.Device}}</td>
-        </tr>
-        <tr>
-          <td translatable="yes" context="storage">Name</td>
-          <td>{{Name}}</td>
         </tr>
         <tr>
           <td translatable="yes" context="storage">UUID</td>
@@ -578,70 +568,22 @@
         <tr>
           <td translatable="yes" context="storage">State</td>
           <td>
-            {{#SyncAction}}
-            <div>
-              {{Progress}}
-            </div>
-            {{/SyncAction}}
-            <div>
-              {{State}}
-            </div>
+            {{State}}
           </td>
         </tr>
       </table>
       {{/MDRaid}}
     </div>
-    <div class="panel panel-default" id="disks">
-      <div class="panel-heading">
-        <span translatable="yes">Disks</span>
-        {{#DynamicMembers}}
-        <button class="btn btn-default storage-privileged pull-right"
-                data-action="mdraid_add_disk" data-arg="{{MDRaid.dbus.path}}">
-          Add
-        </button>
-        {{/DynamicMembers}}
-      </div>
-      <ul class="list-group">
-        {{#Members}}
-        <li class="list-group-item">
-          <table class="mdraid-item">
-            <tr>
-              <td class="mdraid-slot">{{#Slot}}{{.}}{{/Slot}}{{^Slot}}-{{/Slot}}</td>
-              <td>{{#LinkTarget}}{{{html}}}{{/LinkTarget}}</td>
-              <td class="mdraid-states">
-                {{#States}}
-                <div {{#Danger}}class="state-danger"{{/Danger}}>{{Description}}</div>
-                {{/States}}
-              </td>
-              {{#DynamicMembers}}
-              <td class="mdraid-action">
-                <button translatable="yes" class="btn btn-default storage-privileged"
-                        data-action="mdraid_remove_disk" data-arg="{{path}}">
-                  Remove
-                </button>
-              </td>
-              {{/DynamicMembers}}
-            </tr>
-          </table>
-        </li>
-        {{/Members}}
-      </ul>
-    </div>
-    {{{Content}}}
   </script>
 
   <script id="vgroup-detail-tmpl" type="x-template/mustache">
     <div class="panel panel-default">
       <div class="panel-heading">
-        <span translatable="yes">Volume Group</span>
+        {{#VGroup}}<span>{{dbus.Name}}</span> {{/VGroup}}<span translatable="yes">Volume Group</span>
         <span class="pull-right">{{{VGroupButton}}}</span>
       </div>
       {{#VGroup}}
       <table class="info-table-ct">
-        <tr>
-          <td translatable="yes" context="storage">Name</td>
-          <td>{{dbus.Name}}</td>
-        </tr>
         <tr>
           <td translatable="yes" context="storage">UUID</td>
           <td>{{dbus.UUID}}</td>
@@ -653,46 +595,28 @@
       </table>
       {{/VGroup}}
     </div>
-    <div class="panel panel-default" id="pvols">
-      <div class="panel-heading">
-        <span translatable="yes">Physical Volumes</span>
-        <button class="btn btn-default storage-privileged pull-right"
-                data-action="vgroup_add_disk" data-arg="{{VGroup.dbus.path}}"
-                translatable="yes">
-          Add
-        </button>
-      </div>
-      <ul class="list-group">
-        {{#PVols}}
-        <li class="list-group-item">
-          <table class="vgroup-item">
-            <tr>
-              <td>
-                <div>{{#LinkTarget}}{{{html}}}{{/LinkTarget}}</div>
-                <div>{{Sizes}}</div>
-              </td>
-              <td class="vgroup-action">{{{Button}}}</td>
-            </tr>
-          </table>
-        </li>
-        {{/PVols}}
-      </ul>
-    </div>
-    {{{Content}}}
   </script>
 
-  <div id="storage-detail" class="container-fluid" hidden>
-    <ol class="breadcrumb">
-      <li><a translatable="yes">Storage</a></li>
-      <li class="active"></li>
-    </ol>
+  <div id="storage-detail" hidden>
+    <div class="col-md-12">
+      <ol class="breadcrumb">
+        <li><a translatable="yes">Storage</a></li>
+        <li class="active"></li>
+      </ol>
+    </div>
 
-    <div id="detail"></div>
-    <div id="detail-jobs"></div>
-
-    <div class="panel panel-default cockpit-log-panel">
-      <div class="panel-heading" translatable="yes">Storage Log</div>
-      <div class="panel-body" id="storage-detail-log"></div>
+    <div id="detail-header" class="col-md-12">
+    </div>
+    <div id="detail-sidebar" class="col-md-4 col-lg-3 col-md-push-8 col-lg-push-9">
+    </div>
+    <!-- column classes for #detail-body are set via JavaScript -->
+    <div id="detail-body">
+      <div id="detail-content"></div>
+      <div id="detail-jobs"></div>
+      <div class="panel panel-default cockpit-log-panel">
+        <div class="panel-heading" translatable="yes">Storage Log</div>
+        <div class="panel-body" id="storage-detail-log"></div>
+      </div>
     </div>
   </div>
 
@@ -710,9 +634,7 @@
           <p id="error-popup-message"></p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-default" data-dismiss="modal">
-            Close
-          </button>
+          <button class="btn btn-default" data-dismiss="modal" translate>Close</button>
         </div>
       </div>
     </div>
@@ -728,13 +650,28 @@
           <div class="modal-body">
             {{#Alerts}}
             <div class="alert alert-danger">
-              <span class="pficon-layered">
-                <span class="pficon pficon-error-octagon"></span>
-                <span class="pficon pficon-error-exclamation"></span>
-              </span>
+              <span class="pficon pficon-error-circle-o"></span>
               <span class="alert-message">{{Message}}</span>
             </div>
             {{/Alerts}}
+            {{#Blocking}}
+            {{#HasPhysicalVolumes}}
+            <p translate>This device is currently used for volume groups.</p>
+            <table class="table table-bordered">
+              {{#PhysicalVolumes}}
+              <tr><td><span class="pull-right">{{Name}}</span>{{VGroup}}</td></tr>
+              {{/PhysicalVolumes}}
+            </table>
+            {{/HasPhysicalVolumes}}
+            {{#HasMDRaidMembers}}
+            <p translate>This device is currently used for RAID devices.</p>
+            <table class="table table-bordered">
+              {{#MDRaidMembers}}
+              <tr><td><span class="pull-right">{{Name}}</span>{{MDRaid}}</td></tr>
+              {{/MDRaidMembers}}
+            </table>
+            {{/HasMDRaidMembers}}
+            {{/Blocking}}
             <table class="form-table-ct">
               {{#Fields}}
               <tr>
@@ -773,7 +710,7 @@
                             <div class="btn-group bootstrap-select dropdown form-control size-unit">
                               <button class="btn btn-default dropdown-toggle" type="button"
                                       data-toggle="dropdown">
-                                <span class="pull-left" translatable="yes"></span>
+                                <span class="pull-left"></span>
                                 <span class="caret"></span>
                               </button>
                               <ul class="dropdown-menu">
@@ -805,7 +742,7 @@
                   <div class="btn-group bootstrap-select dropdown form-control" data-field={{.}}>
                     <button class="btn btn-default dropdown-toggle" type="button"
                             data-toggle="dropdown">
-                      <span class="pull-left" translatable="yes"></span>
+                      <span class="pull-left"></span>
                       <span class="caret"></span>
                     </button>
                     <ul class="dropdown-menu">
@@ -821,15 +758,25 @@
                 {{#SelectMany}}
                 <td class="top">{{Title}}</td>
                 <td>
+                  {{#HasOptions}}
                   <ul class="list-group available-disks-group dialog-list-ct" data-field={{.}}>
                     {{#Options}}
                     <li class="list-group-item">
                       <div class="checkbox">
-                        <label><input type="checkbox"><span>{{Title}}</span></label>
+                        <label><input type="checkbox">
+                          {{#Label}}
+                          <span class="pull-right">{{.}}</span>
+                          {{/Label}}
+                          <span>{{Title}}</span>
+                        </label>
                       </div>
                     </li>
                     {{/Options}}
                   </ul>
+                  {{/HasOptions}}
+                  {{^HasOptions}}
+                  <span class="text-danger">{{EmptyWarning}}</span>
+                  {{/HasOptions}}
                 </td>
                 {{/SelectMany}}
                 {{#SelectRow}}
@@ -863,14 +810,46 @@
             </table>
           </div>
           <div class="modal-footer">
+            {{#Teardown}}
+            <div class="modal-footer-teardown">
+              {{#HasMounts}}
+              <p translate>This device has filesystems that are currently in use.<br>
+                Proceeding will unmount all filesystems on it.</p>
+              <table class="table table-bordered">
+                {{#Mounts}}
+                <tr><td><span class="pull-right">{{Name}}</span>{{MountPoint}}</td></tr>
+                {{/Mounts}}
+              </table>
+              {{/HasMounts}}
+              {{#HasPhysicalVolumes}}
+              <p translate>This device is currently used for volume groups.<br>
+                Proceeding will remove it from its volume groups.</p>
+              <table class="table table-bordered">
+                {{#PhysicalVolumes}}
+                <tr><td><span class="pull-right">{{Name}}</span>{{VGroup}}</td></tr>
+                {{/PhysicalVolumes}}
+              </table>
+              {{/HasPhysicalVolumes}}
+              {{#HasMDRaidMembers}}
+              <p translate>This device is currently used for RAID devices.<br>
+                Proceeding will remove it from its RAID devices.</p>
+              <table class="table table-bordered">
+                {{#MDRaidMembers}}
+                <tr><td><span class="pull-right">{{Name}}</span>{{MDRaid}}</td></tr>
+                {{/MDRaidMembers}}
+              </table>
+              {{/HasMDRaidMembers}}
+            </div>
+            {{/Teardown}}
             {{#Action}}
             {{#Danger}}<div class="modal-footer-danger">{{.}}</div>{{/Danger}}
             <div class="spinner spinner-sm pull-left" hidden></div>
-            <button class="btn btn-default" translatable="yes" data-dismiss="modal">
-              Cancel
-            </button>
+            <button class="btn btn-default" translatable="yes" data-dismiss="modal">Cancel</button>
             <button class="btn {{#Danger}}btn-danger{{/Danger}}{{^Danger}}btn-primary{{/Danger}}"
                     data-action="apply">{{Title}}</button>
+            {{/Action}}
+            {{^Action}}
+            <button class="btn btn-default" translatable="yes" data-dismiss="modal">Close</button>
             {{/Action}}
           </div>
         </div>

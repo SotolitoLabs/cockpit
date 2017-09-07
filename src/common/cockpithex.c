@@ -21,31 +21,59 @@
 
 #include "cockpithex.h"
 
+#include <stdlib.h>
 #include <string.h>
 
-gpointer
-cockpit_hex_decode (const gchar *hex,
-                    gsize *length)
-{
-  static const char HEX[] = "0123456789abcdef";
-  const gchar *hpos;
-  const gchar *lpos;
-  gsize len;
-  gchar *out;
-  gint i;
+static const char HEX[] = "0123456789abcdef";
 
-  len = strlen (hex);
-  if (len % 2 != 0)
+char *
+cockpit_hex_encode (const void * data,
+                    ssize_t length)
+{
+  const unsigned char *in = data;
+  char *out;
+  size_t i;
+
+  if (length < 0)
+    length = strlen (data);
+
+  out = malloc (length * 2 + 1);
+  if (!out)
+    return NULL;
+  for (i = 0; i < length; i++)
+    {
+      out[i * 2] = HEX[in[i] >> 4];
+      out[i * 2 + 1] = HEX[in[i] & 0xf];
+    }
+  out[i * 2] = '\0';
+  return out;
+}
+
+void *
+cockpit_hex_decode (const char *hex,
+                    ssize_t hexlen,
+                    size_t *length)
+{
+  const char *hpos;
+  const char *lpos;
+  char *out;
+  int i;
+
+  if (hexlen < 0)
+    hexlen = strlen (hex);
+  if (hexlen % 2 != 0)
     return NULL;
 
-  out = g_malloc (len * 2 + 1);
-  for (i = 0; i < len / 2; i++)
+  out = malloc (hexlen * 2 + 1);
+  if (!out)
+    return NULL;
+  for (i = 0; i < hexlen / 2; i++)
     {
       hpos = strchr (HEX, hex[i * 2]);
       lpos = strchr (HEX, hex[i * 2 + 1]);
       if (hpos == NULL || lpos == NULL)
         {
-          g_free (out);
+          free (out);
           return NULL;
         }
       out[i] = ((hpos - HEX) << 4) | ((lpos - HEX) & 0xf);

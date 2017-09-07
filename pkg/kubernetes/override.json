@@ -1,11 +1,8 @@
 {
-    "comment": "Local debugging overrides to the manifest",
-    "content-security-policy": "style-src 'self' 'nonce-lessgenerated'",
-
     "dashboard": {
         "registry": {
             "label": "Image Registry",
-            "order": 3
+            "order": 30
         }
     }
 }

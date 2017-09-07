@@ -53,6 +53,9 @@ GBytes *       cockpit_json_write_bytes       (JsonObject *object);
 gboolean       cockpit_json_equal             (JsonNode *previous,
                                                JsonNode *current);
 
+gboolean       cockpit_json_equal_object      (JsonObject *previous,
+                                               JsonObject *current);
+
 void           cockpit_json_patch             (JsonObject *target,
                                                JsonObject *patch);
 
@@ -60,6 +63,11 @@ gboolean       cockpit_json_get_int           (JsonObject *object,
                                                const gchar *member,
                                                gint64 defawlt,
                                                gint64 *value);
+
+gboolean       cockpit_json_get_double        (JsonObject *object,
+                                               const gchar *member,
+                                               gdouble defawlt,
+                                               gdouble *value);
 
 gboolean       cockpit_json_get_bool          (JsonObject *object,
                                                const gchar *member,
@@ -95,4 +103,9 @@ guint          cockpit_json_int_hash          (gconstpointer v);
 gboolean       cockpit_json_int_equal         (gconstpointer v1,
                                                gconstpointer v2);
 
+JsonObject *   cockpit_json_from_hash_table   (GHashTable *hash_table,
+                                               const gchar **fields);
+
+GHashTable *   cockpit_json_to_hash_table     (JsonObject *object,
+                                               const gchar **fields);
 #endif /* COCKPIT_JSON_H__ */

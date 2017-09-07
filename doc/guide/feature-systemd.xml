@@ -51,7 +51,9 @@ Africa/Algiers
     <code>/etc/systemd/timesynd.conf.d/</code>.  Note that
     <code>systemd-timesyncd</code> is not always enabled, depending on
     the configuration of the machine.  In that case, Cockpit disabled the
-    UI for managing the list of NTP servers.</para>
+    UI for managing the list of NTP servers. In some cases use of
+    <code>ntpd</code> can cause the <code>timedated</code> daemon to
+    behave inconsistently with regards to time synchronization.</para>
 
   <para>Cockpit restarts or powers down the machine by using the
     <ulink url="http://www.freedesktop.org/software/systemd/man/shutdown.html"><code>shutdown</code></ulink>
@@ -80,6 +82,43 @@ $ <command>systemctl status cockpit</command>
    CGroup: /system.slice/cockpit.service
            ├─ 6957 /usr/libexec/cockpit-ws
            └─29598 /usr/bin/ssh-agent
+</programlisting>
+
+  <para>In order to customize who can perform various actions in system,
+    <link linkend="privileges-polkit">create polkit rules</link> with the following
+    actions and details:</para>
+
+  <variablelist>
+    <varlistentry>
+      <term><option>org.freedesktop.systemd1.manage-units</option></term>
+      <listitem><para>Permission to manage system services or other units.
+        Details available: <code>unit</code>, <code>verb</code></para></listitem>
+    </varlistentry>
+    <varlistentry>
+      <term><option>org.freedesktop.systemd1.manage-unit-files</option></term>
+      <listitem><para>Permission to manage system services or other unit files.</para></listitem>
+    </varlistentry>
+    <varlistentry>
+      <term><option>org.freedesktop.systemd1.reload-daemon</option></term>
+      <listitem><para>Permission to reload the systemd state.</para></listitem>
+    </varlistentry>
+  </variablelist>
+
+  <para>For example, placing the following polkit rule to
+    <filename>/etc/polkit-1.rules.d/10-http.rule</filename> allows all users in the
+    <code>operators</code> group start, stop, and restart the Apache HTTP service:</para>
+
+<programlisting>
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units") {
+        if (subject.isInGroup("operators") &amp;&amp; action.lookup("unit") == "httpd.service") {
+            var verb = action.lookup("verb");
+            if (verb == "start" || verb == "stop" || verb == "restart") {
+                return polkit.Result.YES;
+            }
+        }
+    }
+});
 </programlisting>
 
 </chapter>

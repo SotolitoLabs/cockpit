@@ -17,10 +17,13 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* globals d3 */
-
 (function() {
     "use strict";
+
+    var angular = require('angular');
+    require('angular-bootstrap-npm/dist/angular-bootstrap.js');
+
+    var d3 = require('d3');
 
     var focusedClasses = {
         "chart-focused": true,
@@ -103,7 +106,6 @@
                 },
                 link: function($scope, element, attributes) {
                     var data;
-                    var lastSize = {};
                     var padding = 2;
                     var thresholdDefaults = [0, 0.7, 0.8, 0.9];
                     var heatmapColorDefaults = ['#bbbbbb', '#d4f0fa', '#F9D67A', '#EC7A08', '#CE0000' ];
@@ -113,7 +115,7 @@
                     if (!maxSize || isNaN(maxSize)) {
                         maxSize = 64;
                     } else {
-                        maxSize = parseInt(maxSize);
+                        maxSize = parseInt(maxSize, 10);
                         if (maxSize < 5)
                             maxSize = 5;
                         else if (maxSize > 64)
@@ -273,7 +275,8 @@
                             })
                             .on("mouseout", function (d, i) {
                                 svg.selectAll('rect').classed(focusResetClasses);
-                            });
+                            })
+                            .append("title");
 
                         blocks
                             .attr('x', function (d, i) {
@@ -293,6 +296,9 @@
                             .on('click', function (d) {
                                 if (d && d.name)
                                     $scope.$emit("boxClick", d.name);
+                            })
+                            .select("title").text(function(d) {
+                               return d.tooltip;
                             });
 
                         blocks.exit().remove();
@@ -496,7 +502,8 @@
                             .on("mouseover", function(i) {
                                 select(this.getAttribute('data-id'));
                             })
-                            .on("mouseout", unselect);
+                            .on("mouseout", unselect)
+                            .append("title");
 
                         path.attr("fill", function(d, i) {
                                 if (d.data && d.data.color)
@@ -507,6 +514,10 @@
                             .attr("d", arc)
                             .attr("data-id", function (d, i) {
                                 return i;
+                            })
+                            .select("title").text(function(d) {
+                               if (d.data && d.data.tooltip)
+                                   return d.data.tooltip;
                             });
 
                         path.exit().remove();

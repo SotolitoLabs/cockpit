@@ -17,10 +17,15 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* globals d3 */
-
 (function() {
     "use strict";
+
+    var angular = require('angular');
+    var d3 = require('d3');
+
+    require('./kube-client');
+    require('./kube-client-cockpit');
+    require('./utils');
 
     angular.module('kubernetes.graph', [
         'kubeClient',
@@ -45,8 +50,6 @@
                 var interval = 10000;
 
                 var last = { };
-
-                var unique = 0;
 
                 var requests = { };
 
@@ -271,7 +274,7 @@
         "kubeSelect",
         "kubeLoader",
         function ServiceGrid(CAdvisorSeries, CockpitMetrics, select, loader) {
-            function CockpitServiceGrid() {
+            function CockpitServiceGrid(until) {
                 var self = CockpitMetrics.grid(10000, 0, 0);
 
                 /* All the cadvisors that have been opened, one per host */
@@ -299,7 +302,7 @@
                 var container_tx = { };
 
                 /* Track Pods and Services */
-                var c = loader.listen(function() {
+                loader.listen(function() {
                     var changed = false;
                     var seen_services = {};
                     var seen_hosts = {};
@@ -371,10 +374,10 @@
                     /* Notify for all rows */
                     if (changed)
                         self.sync();
-                });
+                }, until);
 
-                loader.watch("Pod");
-                loader.watch("Service");
+                loader.watch("Pod", until);
+                loader.watch("Service", until);
 
                 function add_container(cadvisor, id) {
                     var cpu = self.add(cadvisor, [ id, "cpu", "usage", "total" ]);
@@ -555,7 +558,6 @@
                             cadvisor = null;
                         }
                     }
-                    c.cancel();
                     base_close.apply(self);
                 };
 
@@ -570,8 +572,8 @@
             }
 
             return {
-                new_grid: function () {
-                    return new CockpitServiceGrid();
+                new_grid: function (until) {
+                    return new CockpitServiceGrid(until);
                 }
             };
         }
@@ -584,8 +586,8 @@
         function kubernetesServiceGraph(ServiceGrid, KubeTranslate, KubeFormat) {
             var _ = KubeTranslate.gettext;
 
-            function service_graph(selector, highlighter) {
-                var grid = ServiceGrid.new_grid();
+            function service_graph($scope, selector, highlighter) {
+                var grid = ServiceGrid.new_grid($scope);
                 var outer = d3.select(selector);
 
                 var highlighted = null;
@@ -673,8 +675,6 @@
                 var factor = 300000 / 1024;
                 var width = 300;
                 var height = 300;
-
-                var changing = false;
 
                 var rendered = false;
                 window.setTimeout(function() {
@@ -775,7 +775,7 @@
                     var series = stage.selectAll("path.line")
                         .data(rows, function(d, i) { return i; });
 
-                    var trans = series
+                    series
                         .style("stroke", function(d, i) { return colors(i); })
                         .attr("d", function(d) { return line(d); })
                         .classed("highlight", function(d) { return d.uid === highlighted; });
@@ -823,6 +823,9 @@
                         notified();
                     },
                     close: function close() {
+                        if (timer)
+                            window.clearInterval(timer);
+                        timer = null;
                         window.removeEventListener('resize', resized);
                         grid.removeEventListener('notify', notified);
                         grid.removeEventListener('changed', changed);
@@ -834,7 +837,7 @@
             return {
                 restrict: 'E',
                 link: function($scope, element, attributes) {
-                    var graph = service_graph(element[0], function(uid) {
+                    var graph = service_graph($scope, element[0], function(uid) {
                         $scope.$broadcast('highlight', uid);
                         $scope.$digest();
                     });

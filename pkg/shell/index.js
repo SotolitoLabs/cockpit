@@ -17,26 +17,28 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-    "jquery",
-    "base1/cockpit",
-    "shell/indexes",
-    "shell/machines",
-    "shell/credentials",
-    'shell/po',
-    "shell/machine-dialogs",
-], function($, cockpit, indexes, machis, credentials, po, mdialogs) {
+(function() {
     "use strict";
 
-    cockpit.locale(po);
+    var machis = require("machines");
+    var credentials = require("credentials");
+    var mdialogs = require("machine-dialogs");
 
-    var shell_embedded = window.location.pathname.indexOf(".html") !== -1;
+    var indexes = require("./indexes");
 
     var machines = machis.instance();
     var loader = machis.loader(machines);
     var dialogs = mdialogs.new_manager(machines);
 
     credentials.setup();
+
+    /* When Ctrl is held down we display debugging menu items */
+    document.addEventListener("click", function(ev) {
+        var i, visible = !!ev.altKey;
+        var advanced = document.querySelectorAll(".navbar-advanced");
+        for (i = 0; i < advanced.length; i++)
+            advanced[i].style.display = visible ? "block" : "none";
+    }, true);
 
     var options = {
         brand_sel: "#index-brand",
@@ -46,9 +48,10 @@ define([
         about_sel: "#about-version",
         account_sel: "#go-account",
         user_sel: "#content-user-name",
-        default_title: "Cockpit"
+        killer_sel: "#active-pages",
+        default_title: "Cockpit",
+        privileges: require("./privileges").instance(),
     };
 
     indexes.machines_index(options, machines, loader, dialogs);
-
-});
+}());

@@ -7,7 +7,7 @@
     <refpurpose>Page location and navigation between components</refpurpose>
   </refnamediv>
 
-  <refsection>
+  <refsection id="cockpit-location-general">
     <title>Page location</title>
 
 <programlisting>
@@ -115,7 +115,7 @@ href = location.encode(path, [options])
     <refsection id="cockpit-location-changed">
       <title>cockpit.onlocationchanged</title>
 <programlisting>
-$(cockpit).on("locationchanged", function() { ... })
+cockpit.addEventListener("locationchanged", function() { ... })
 </programlisting>
       <para>An event emitted when over the <code>cockpit.location</code> changes. Typically a
         component reacts to this event by updating its interface to reflect the new
@@ -153,6 +153,33 @@ cockpit.jump(path, [ host ])
         dashboard or other multi-machine components.</para>
       <para>If the calling component is not running within Cockpit, or the calling component is not
         currently displayed, then the jump will not happen, and this function has no effect.</para>
+    </refsection>
+
+    <refsection id="cockpit-jump-hidden">
+      <title>cockpit.hidden</title>
+
+      <para>A boolean property that indicates if the current component page is visible or hidden.
+        When the code or user jumps to another component, the prior one remains loaded and initialized
+        but is hidden. Use this property together with the
+        <link linkend="cockpit-jump-visibilitychange"><code>cockpit.onvisibilitychange</code></link>
+        event to decide whether or not to perform expensive tasks to update the interface.</para>
+
+      <para>This property is analogous to the <code>document.hidden</code> page visibility API, but
+        works with the document and frame implementation of Cockpit.</para>
+    </refsection>
+
+    <refsection id="cockpit-jump-visibilitychange">
+      <title>cockpit.onvisibilitychange</title>
+
+<programlisting>
+cockpit.onvisibilitychange = function() { ... }
+</programlisting>
+
+      <para>This event is emitted when the
+        <link linkend="cockpit-jump-hidden"><code>cockpit.hidden</code></link> property changes.
+        This event is similar to the <code>document.onvisibilitychange</code> API, but works with
+        the document and frame implementation of Cockpit.</para>
+
     </refsection>
 
   </refsection>

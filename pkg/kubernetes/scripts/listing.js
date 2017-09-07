@@ -20,6 +20,21 @@
 (function() {
     "use strict";
 
+    var angular = require('angular');
+
+    require('../views/user-panel.html');
+    require('../views/service-panel.html');
+    require('../views/pod-panel.html');
+    require('../views/route-panel.html');
+    require('../views/pv-panel.html');
+    require('../views/default-panel.html');
+    require('../views/node-panel.html');
+    require('../views/project-panel.html');
+    require('../views/container-panel.html');
+    require('../views/deploymentconfig-panel.html');
+    require('../views/group-panel.html');
+    require('../views/replicationcontroller-panel.html');
+
     function inClassOrTag(el, cls, tag) {
         return (el && el.classList && el.classList.contains(cls)) ||
                (el && el.tagName === tag) ||
@@ -88,10 +103,13 @@
                         ev.stopPropagation();
                 };
 
-                self.activate = function expand(id, ev) {
-                    var emitted;
-                    if (checkBrowserEvent(ev))
-                        emitted = scope.$emit("activate", id);
+                self.activate = function activate(id, ev) {
+                    if (checkBrowserEvent(ev)) {
+                        if (self.expanded(id))
+                            self.collapse(id);
+                        else
+                            scope.$emit("activate", id);
+                    }
                 };
 
                 self.collapse = function collapse(id, ev) {

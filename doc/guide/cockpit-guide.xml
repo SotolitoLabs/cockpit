@@ -19,6 +19,7 @@
       <title>Manual pages</title>
       <xi:include href="../man/cockpit.conf.xml"/>
       <xi:include href="../man/cockpit-ws.xml"/>
+      <xi:include href="../man/remotectl.xml"/>
       <xi:include href="../man/cockpit-bridge.xml"/>
     </chapter>
 
@@ -48,6 +49,7 @@
     <xi:include href="feature-tuned.xml"/>
     <xi:include href="feature-sosreport.xml"/>
     <xi:include href="feature-ostree.xml"/>
+    <xi:include href="feature-packagekit.xml"/>
   </part>
 
   <part id="development">

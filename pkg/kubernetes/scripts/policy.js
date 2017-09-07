@@ -20,7 +20,12 @@
 (function() {
     "use strict";
 
-    angular.module('registry.policy', [ ])
+    var angular = require('angular');
+    require('./kube-client');
+
+    angular.module('registry.policy', [
+        'kubeClient',
+    ])
 
     .factory("projectPolicy", [
         '$q',
@@ -54,12 +59,15 @@
                         expire[present[link].metadata.namespace] = true;
                     } else if (present[link].kind == "RoleBinding") {
                         ensure_subjects(present[link].subjects || []);
+                        expire[present[link].metadata.namespace] = true;
                     }
                 }
 
                 var namespace;
-                for (namespace in expire)
+                for (namespace in expire) {
                     expireWhoCan(namespace);
+                    expireSAR(namespace);
+                }
             });
 
             function update_rolebindings(bindings, removed) {
@@ -101,11 +109,20 @@
                         delete expired[namespace][key];
                     }
                 }
+
+                $rootScope.$applyAsync();
             }
 
             function expireWhoCan(namespace) {
-                expired[namespace] = angular.extend({ }, cached[namespace]);
-                delete cached[namespace];
+                if (namespace) {
+                    expired[namespace] = angular.extend({ }, cached[namespace]);
+                    delete cached[namespace];
+                } else {
+                    expired = cached;
+                    cached = { };
+                }
+
+                $rootScope.$applyAsync();
             }
 
             function lookupWhoCan(namespace, verb, resource) {
@@ -151,13 +168,55 @@
                 methods.post(path, request)
                     .then(function(response) {
                         fillWhoCan(namespace, verb, resource, response);
-                        $rootScope.$applyAsync();
                     }, function(response) {
                         console.warn("failed to lookup access:", namespace, verb, resource + ":",
                                 response.message || JSON.stringify(response));
                     });
 
                 return result;
+            }
+
+            var sarCache = { };
+
+            function subjectAccessReview(namespace, user, verb, resource) {
+                var key = namespace + ':' + (user ? user.metadata.name : "")+ ':' + verb + ':' + resource;
+                var defer = $q.defer();
+
+                if (key in sarCache) {
+                    defer.resolve(sarCache[key]);
+                } else {
+                    var request = {
+                        kind: "SubjectAccessReview",
+                        apiVersion: "v1",
+                        namespace: namespace,
+                        verb: verb,
+                        resource: resource
+                    };
+
+                    methods.post(loader.resolve("subjectaccessreviews"), request)
+                        .then(function(response) {
+                            sarCache[key] = response.allowed;
+                            defer.resolve(response.allowed);
+                        }, function(response) {
+                            console.warn("failed to review subject access:", response.message || JSON.stringify(response));
+                            defer.reject(response.message || JSON.stringify(response));
+                        });
+                }
+
+                return defer.promise;
+            }
+
+            function expireSAR(namespace) {
+                if (namespace) {
+                    for (var key in sarCache) {
+                        if (key.lastIndexOf(namespace + ':', 0) === 0)
+                            delete sarCache[key];
+                    }
+                } else {
+                    sarCache = { };
+                }
+
+                $rootScope.$applyAsync();
             }
 
             /*
@@ -179,7 +238,7 @@
                     kind: "RoleBinding",
                     apiVersion: "v1",
                     metadata: {
-                        name: role,
+                        name: name,
                         namespace: namespace,
                         creationTimestamp: null,
                     },
@@ -202,7 +261,6 @@
                     removeFromArray(roleArrayKind(data, subject.kind), subject.name);
                 }).then(function() {
                     expireWhoCan(namespace);
-                    $rootScope.$applyAsync();
                 }, function(resp) {
                     /* If the role doesn't exist consider removed to work */
                     if (resp.code !== 404)
@@ -211,19 +269,18 @@
             }
 
             function removeMemberFromPolicyBinding(policyBinding, project, subjectRoleBindings, subject) {
-                var registryRoles = ["registry-admin", "registry-edit", "registry-view"];
+                var registryRoles = ["registry-admin", "registry-editor", "registry-viewer"];
                 var chain = $q.when();
-                var roleBinding, i, defaultPolicybinding;
+                var defaultPolicybinding;
                 var roleBindings = [];
 
                 if(policyBinding && policyBinding.one()){
                     defaultPolicybinding = policyBinding.one();
                     roleBindings = defaultPolicybinding.roleBindings;
                 }
-                var patchData = {"roleBindings": roleBindings};
                 angular.forEach(subjectRoleBindings, function(o) {
                     angular.forEach(roleBindings, function(role) {
-                        //Since we only added registry roles 
+                        //Since we only added registry roles
                         //remove ONLY registry roles
                         if (( indexOf(registryRoles, role.name) !== -1) && role.name === o.metadata.name) {
                             chain = chain.then(function() {
@@ -276,8 +333,10 @@
             }
 
             return {
-                watch: function watch() {
-                    loader.watch("policybindings");
+                watch: function watch(until) {
+                    loader.watch("policybindings", until).then(function() {
+                        expireWhoCan(null);
+                    });
                 },
                 whoCan: function whoCan(project, verb, resource) {
                     return lookupWhoCan(toName(project), verb, resource);
@@ -289,7 +348,6 @@
                         addToArray(roleArrayKind(data, subject.kind), subject.name);
                     }).then(function() {
                         expireWhoCan(namespace);
-                        $rootScope.$applyAsync();
                     }, function(resp) {
                         /* If the role doesn't exist create it */
                         if (resp.code === 404)
@@ -299,6 +357,7 @@
                 },
                 removeFromRole: removeFromRole,
                 removeMemberFromPolicyBinding: removeMemberFromPolicyBinding,
+                subjectAccessReview: subjectAccessReview,
             };
         }
     ]);

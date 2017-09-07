@@ -44,7 +44,8 @@ const gchar * cockpit_bridge_local_address = NULL;
  * classes implement the actual payload contents, opening the channel
  * etc...
  *
- * The channel queues messages received until the implementation
+ * The channel queues messages received until unfrozen. The caller can
+ * start off a channel as frozen, and then the implementation later
  * indicates that it's open and ready to receive messages.
  *
  * A channel sends messages over a #CockpitTransport. If the transport
@@ -66,8 +67,8 @@ struct _CockpitChannelPrivate {
     gchar **capabilities;
 
     /* Queued messages before channel is ready */
-    gboolean ready;
-    GQueue *received;
+    gboolean prepared;
+    guint prepare_tag;
 
     /* Whether we've sent a closed message */
     gboolean sent_close;
@@ -84,13 +85,9 @@ struct _CockpitChannelPrivate {
 
     /* Binary options */
     gboolean binary_ok;
-    gboolean base64_encoding;
 
     /* Other state */
     JsonObject *close_options;
-
-    /* If we've gotten to the main-loop yet */
-    guint prepare_tag;
 };
 
 enum {
@@ -110,6 +107,7 @@ on_idle_prepare (gpointer data)
 {
   CockpitChannel *self = COCKPIT_CHANNEL (data);
   g_object_ref (self);
+  self->priv->prepare_tag = 0;
   cockpit_channel_prepare (self);
   g_object_unref (self);
   return FALSE;
@@ -120,57 +118,24 @@ cockpit_channel_init (CockpitChannel *self)
 {
   self->priv = G_TYPE_INSTANCE_GET_PRIVATE (self, COCKPIT_TYPE_CHANNEL,
                                             CockpitChannelPrivate);
-
-  self->priv->prepare_tag = g_idle_add_full (G_PRIORITY_HIGH, on_idle_prepare, self, NULL);
 }
 
-static GBytes *
-base64_decode (GBytes *bytes)
+static void
+process_recv (CockpitChannel *self,
+              GBytes *payload)
 {
-  gconstpointer data;
-  guchar *decoded;
-  gsize length;
-  gint state = 0;
-  guint save = 0;
+  CockpitChannelClass *klass;
 
-  data = g_bytes_get_data (bytes, &length);
-
-  if (length == 0)
-    return g_bytes_new_static ("", 0);
-
-  /* We can use a smaller limit here, since we know the saved state is 0,
-     +1 used to avoid calling g_malloc0(0), and hence returning NULL */
-  decoded = g_malloc0 ((length / 4) * 3 + 3);
-  length = g_base64_decode_step (data, length, decoded, &state, &save);
-
-  return g_bytes_new_take (decoded, length);
-}
-
-static GBytes *
-base64_encode (GBytes *bytes)
-{
-  gconstpointer data;
-  gchar *encoded;
-  gsize length;
-  gint state = 0;
-  gint save = 0;
-
-  data = g_bytes_get_data (bytes, &length);
-
-  if (length == 0)
-    return g_bytes_new_static ("", 0);
-
-  /* We can use a smaller limit here, since we know the saved state is 0,
-     +1 is needed for trailing \0, also check for unlikely integer overflow */
-
-  if (length >= ((G_MAXSIZE - 1) / 4 - 1) * 3)
-    g_error ("%s: input too large for Base64 encoding (%"G_GSIZE_FORMAT" chars)", G_STRLOC, length);
-
-  encoded = g_malloc ((length / 3 + 1) * 4 + 4);
-  length = g_base64_encode_step (data, length, FALSE, encoded, &state, &save);
-  length += g_base64_encode_close (FALSE, encoded + length, &state, &save);
-
-  return g_bytes_new_take (encoded, length);
+  if (self->priv->received_done)
+    {
+      cockpit_channel_fail (self, "protocol-error", "channel received message after done");
+    }
+  else
+    {
+      klass = COCKPIT_CHANNEL_GET_CLASS (self);
+      g_assert (klass->recv);
+      (klass->recv) (self, payload);
+    }
 }
 
 static gboolean
@@ -180,38 +145,42 @@ on_transport_recv (CockpitTransport *transport,
                    gpointer user_data)
 {
   CockpitChannel *self = user_data;
-  CockpitChannelClass *klass;
-  GBytes *decoded = NULL;
 
   if (g_strcmp0 (channel_id, self->priv->id) != 0)
     return FALSE;
 
-  if (self->priv->received_done)
-    {
-      g_warning ("%s: channel received message after done", self->priv->id);
-      cockpit_channel_close (self, "protocol-error");
-      return TRUE;
-    }
-
-  if (self->priv->ready)
-    {
-      if (self->priv->base64_encoding)
-        data = decoded = base64_decode (data);
-      klass = COCKPIT_CHANNEL_GET_CLASS (self);
-      g_assert (klass->recv);
-      (klass->recv) (self, data);
-    }
-  else
-    {
-      if (!self->priv->received)
-        self->priv->received = g_queue_new ();
-      g_queue_push_tail (self->priv->received, g_bytes_ref (data));
-    }
-
-  if (decoded)
-    g_bytes_unref (decoded);
-
+  process_recv (self, data);
   return TRUE;
+}
+
+static void
+process_control (CockpitChannel *self,
+                 const gchar *command,
+                 JsonObject *options)
+{
+  CockpitChannelClass *klass;
+  const gchar *problem;
+
+  if (g_str_equal (command, "close"))
+    {
+      g_debug ("close channel %s", self->priv->id);
+      if (!cockpit_json_get_string (options, "problem", NULL, &problem))
+        problem = NULL;
+      cockpit_channel_close (self, problem);
+      return;
+    }
+
+  if (g_str_equal (command, "done"))
+    {
+      if (self->priv->received_done)
+        cockpit_channel_fail (self, "protocol-error", "channel received second done");
+      else
+        self->priv->received_done = TRUE;
+    }
+
+  klass = COCKPIT_CHANNEL_GET_CLASS (self);
+  if (klass->control)
+    (klass->control) (self, command, options);
 }
 
 static gboolean
@@ -223,41 +192,12 @@ on_transport_control (CockpitTransport *transport,
                       gpointer user_data)
 {
   CockpitChannel *self = user_data;
-  CockpitChannelClass *klass;
-  const gchar *problem;
 
   if (g_strcmp0 (channel_id, self->priv->id) != 0)
     return FALSE;
 
-  klass = COCKPIT_CHANNEL_GET_CLASS (self);
-  if (g_str_equal (command, "close"))
-    {
-      g_debug ("close channel %s", channel_id);
-      if (!cockpit_json_get_string (options, "problem", NULL, &problem))
-        problem = NULL;
-      cockpit_channel_close (self, problem);
-      return TRUE;
-    }
-
-  if (g_str_equal (command, "done"))
-    {
-      if (self->priv->received_done)
-        {
-          g_warning ("%s: channel received second done", self->priv->id);
-          cockpit_channel_close (self, "protocol-error");
-        }
-      else
-        {
-          self->priv->received_done = TRUE;
-          if (!self->priv->ready)
-            return TRUE;
-        }
-    }
-
-  if (klass->control)
-    return (klass->control) (self, command, options);
-
-  return FALSE;
+  process_control (self, command, options);
+  return TRUE;
 }
 
 static void
@@ -289,6 +229,10 @@ cockpit_channel_constructed (GObject *object)
                                               G_CALLBACK (on_transport_control), self);
   self->priv->close_sig = g_signal_connect (self->priv->transport, "closed",
                                             G_CALLBACK (on_transport_closed), self);
+
+  /* Freeze this channel's messages until ready */
+  cockpit_transport_freeze (self->priv->transport, self->priv->id);
+  self->priv->prepare_tag = g_idle_add_full (G_PRIORITY_HIGH, on_idle_prepare, self, NULL);
 }
 
 
@@ -320,8 +264,7 @@ cockpit_channel_ensure_capable (CockpitChannel *channel,
 
   if (!cockpit_json_get_strv (options, "capabilities", NULL, &capabilities))
     {
-      g_message ("got invalid capabilities field in open message");
-      cockpit_channel_close (channel, "protocol-error");
+      cockpit_channel_fail (channel, "protocol-error", "got invalid capabilities field in open message");
       goto out;
     }
 
@@ -371,7 +314,6 @@ cockpit_channel_real_prepare (CockpitChannel *channel)
   CockpitChannel *self = COCKPIT_CHANNEL (channel);
   JsonObject *options;
   const gchar *binary;
-  const gchar *payload;
 
   options = cockpit_channel_get_options (self);
 
@@ -380,38 +322,21 @@ cockpit_channel_real_prepare (CockpitChannel *channel)
 
   if (G_OBJECT_TYPE (channel) == COCKPIT_TYPE_CHANNEL)
     {
-      if (!cockpit_json_get_string (options, "payload", NULL, &payload))
-        payload = NULL;
-
-      if (payload)
-        {
-          g_warning ("bridge doesn't support payloads of type: %s", payload);
-          cockpit_channel_close (channel, "not-supported");
-        }
-      else
-        {
-          g_warning ("no payload type present in request to open channel");
-          cockpit_channel_close (channel, "protocol-error");
-        }
+      cockpit_channel_close (channel, "not-supported");
       return;
     }
 
   if (!cockpit_json_get_string (options, "binary", NULL, &binary))
     {
-      g_warning ("%s: channel has invalid \"binary\" option", self->priv->id);
-      cockpit_channel_close (self, "protocol-error");
+      cockpit_channel_fail (self, "protocol-error", "channel has invalid \"binary\" option");
     }
   else if (binary != NULL)
     {
       self->priv->binary_ok = TRUE;
-      if (g_str_equal (binary, "base64"))
+      if (!g_str_equal (binary, "raw"))
         {
-          self->priv->base64_encoding = TRUE;
-        }
-      else if (!g_str_equal (binary, "raw"))
-        {
-          g_warning ("%s: channel has invalid \"binary\" option: %s", self->priv->id, binary);
-          cockpit_channel_close (self, "protocol-error");
+          cockpit_channel_fail (self, "protocol-error",
+                                "channel has invalid \"binary\" option: %s", binary);
         }
     }
 }
@@ -493,10 +418,6 @@ cockpit_channel_dispose (GObject *object)
   if (self->priv->close_sig)
     g_signal_handler_disconnect (self->priv->transport, self->priv->close_sig);
   self->priv->close_sig = 0;
-
-  if (self->priv->received)
-    g_queue_free_full (self->priv->received, (GDestroyNotify)g_bytes_unref);
-  self->priv->received = NULL;
 
   if (!self->priv->emitted_close)
     cockpit_channel_close (self, "terminated");
@@ -694,11 +615,49 @@ cockpit_channel_close (CockpitChannel *self,
   (klass->close) (self, problem);
 }
 
+/*
+ * cockpit_channel_fail:
+ * @self: a channel
+ * @problem: the problem
+ *
+ * Close the channel with a @problem. In addition a "message" field
+ * will be set on the channel, using the @format argument to bulid
+ * the message. The message will also be logged.
+ *
+ * See cockpit_channel_close() for further info.
+ */
+void
+cockpit_channel_fail (CockpitChannel *self,
+                      const gchar *problem,
+                      const gchar *format,
+                      ...)
+{
+  JsonObject *options;
+  gchar *message;
+  va_list va;
+
+  g_return_if_fail (problem != NULL);
+  g_return_if_fail (COCKPIT_IS_CHANNEL (self));
+
+  va_start (va, format);
+  message = g_strdup_vprintf (format, va);
+  va_end (va);
+
+  options = cockpit_channel_close_options (self);
+  if (!json_object_has_member (options, "message"))
+    json_object_set_string_member (options, "message", message);
+  g_message ("%s: %s", self->priv->id, message);
+  g_free (message);
+
+  cockpit_channel_close (self, problem);
+}
+
 /* Used by implementations */
 
 /**
  * cockpit_channel_ready:
  * @self: a pipe
+ * @message: an optional control message, or NULL
  *
  * Called by channel implementations to signal when they're
  * ready. Any messages received before the channel was ready
@@ -710,48 +669,13 @@ cockpit_channel_close (CockpitChannel *self,
  * can connect appropriately.
  */
 void
-cockpit_channel_ready (CockpitChannel *self)
+cockpit_channel_ready (CockpitChannel *self,
+                       JsonObject *message)
 {
-  CockpitChannelClass *klass;
-  GBytes *decoded;
-  GBytes *payload;
-  GQueue *queue;
-
-  klass = COCKPIT_CHANNEL_GET_CLASS (self);
-  g_assert (klass->recv != NULL);
-  g_assert (klass->close != NULL);
-
   g_object_ref (self);
-  while (self->priv->received)
-    {
-      queue = self->priv->received;
-      self->priv->received = NULL;
-      for (;;)
-        {
-          payload = g_queue_pop_head (queue);
-          if (payload == NULL)
-            break;
-          if (self->priv->base64_encoding)
-            {
-              decoded = base64_decode (payload);
-              g_bytes_unref (payload);
-              payload = decoded;
-            }
-          (klass->recv) (self, payload);
-          g_bytes_unref (payload);
-        }
-      g_queue_free (queue);
-    }
 
-  cockpit_channel_control (self, "ready", NULL);
-  self->priv->ready = TRUE;
-
-  /* No more data coming? */
-  if (self->priv->received_done)
-    {
-      if (klass->control)
-        (klass->control) (self, "done", NULL);
-    }
+  cockpit_transport_thaw (self->priv->transport, self->priv->id);
+  cockpit_channel_control (self, "ready", message);
 
   g_object_unref (self);
 }
@@ -772,7 +696,6 @@ cockpit_channel_send (CockpitChannel *self,
                       GBytes *payload,
                       gboolean trust_is_utf8)
 {
-  GBytes *encoded = NULL;
   GBytes *validated = NULL;
 
   if (!trust_is_utf8)
@@ -781,13 +704,8 @@ cockpit_channel_send (CockpitChannel *self,
         payload = validated = cockpit_unicode_force_utf8 (payload);
     }
 
-  if (self->priv->base64_encoding)
-    payload = encoded = base64_encode (payload);
-
   cockpit_transport_send (self->priv->transport, self->priv->id, payload);
 
-  if (encoded)
-    g_bytes_unref (encoded);
   if (validated)
     g_bytes_unref (validated);
 }
@@ -845,7 +763,9 @@ cockpit_channel_get_id (CockpitChannel *self)
  *
  * Usually this is automatically called after the channel is
  * created and control returns to the mainloop. However you
- * can preempt that by calling this function.
+ * can preempt that by calling this function. In the case of
+ * a frozen channel, this method needs to be called to set
+ * things in motion.
  */
 void
 cockpit_channel_prepare (CockpitChannel *self)
@@ -854,12 +774,16 @@ cockpit_channel_prepare (CockpitChannel *self)
 
   g_return_if_fail (COCKPIT_IS_CHANNEL (self));
 
-  if (!self->priv->prepare_tag)
+  if (self->priv->prepared)
     return;
 
-  g_source_remove (self->priv->prepare_tag);
-  self->priv->prepare_tag = 0;
+  if (self->priv->prepare_tag)
+    {
+      g_source_remove (self->priv->prepare_tag);
+      self->priv->prepare_tag = 0;
+    }
 
+  self->priv->prepared = TRUE;
   if (!self->priv->emitted_close)
     {
       klass = COCKPIT_CHANNEL_GET_CLASS (self);
@@ -889,6 +813,8 @@ cockpit_channel_control (CockpitChannel *self,
 {
   JsonObject *object;
   GBytes *message;
+  const gchar *problem;
+  gchar *problem_copy = NULL;
 
   g_return_if_fail (COCKPIT_IS_CHANNEL (self));
   g_return_if_fail (command != NULL);
@@ -897,6 +823,25 @@ cockpit_channel_control (CockpitChannel *self,
     {
       g_return_if_fail (self->priv->sent_done == FALSE);
       self->priv->sent_done = TRUE;
+    }
+
+  /* If closing save the close options
+   * and let close send the message */
+  else if (g_str_equal (command, "close"))
+    {
+      if (!self->priv->close_options)
+        {
+          /* Ref for close_options, freed in parent */
+          self->priv->close_options = json_object_ref (options);
+        }
+
+      if (!cockpit_json_get_string (options, "problem", NULL, &problem))
+        problem = NULL;
+
+      /* Use a problem copy so it out lasts the value in close_options */
+      problem_copy = g_strdup (problem);
+      cockpit_channel_close (self, problem_copy);
+      goto out;
     }
 
   if (options)
@@ -912,6 +857,9 @@ cockpit_channel_control (CockpitChannel *self,
 
   cockpit_transport_send (self->priv->transport, NULL, message);
   g_bytes_unref (message);
+
+out:
+  g_free (problem_copy);
 }
 
 static GHashTable *internal_addresses;
@@ -987,7 +935,6 @@ parse_address (CockpitChannel *self,
                gchar **possible_name,
                gboolean *local_address)
 {
-  const gchar *problem = "protocol-error";
   GSocketConnectable *connectable = NULL;
   const gchar *unix_path;
   const gchar *internal;
@@ -998,39 +945,40 @@ parse_address (CockpitChannel *self,
   const gchar *host;
   gint64 port;
   gchar *name = NULL;
+  gboolean open = FALSE;
 
   options = self->priv->open_options;
   if (!cockpit_json_get_string (options, "unix", NULL, &unix_path))
     {
-      g_warning ("invalid \"unix\" option in channel");
+      cockpit_channel_fail (self, "protocol-error", "invalid \"unix\" option in channel");
       goto out;
     }
   if (!cockpit_json_get_int (options, "port", G_MAXINT64, &port))
     {
-      g_warning ("invalid \"port\" option in channel");
+      cockpit_channel_fail (self, "protocol-error", "invalid \"port\" option in channel");
       goto out;
     }
   if (!cockpit_json_get_string (options, "internal", NULL, &internal))
     {
-      g_warning ("invalid \"internal\" option in channel");
+      cockpit_channel_fail (self, "protocol-error", "invalid \"internal\" option in channel");
       goto out;
     }
   if (!cockpit_json_get_string (options, "address", NULL, &address))
     {
-      g_warning ("invalid \"address\" option in channel");
+      cockpit_channel_fail (self, "protocol-error", "invalid \"address\" option in channel");
       goto out;
     }
 
   if (port != G_MAXINT64 && unix_path)
     {
-      g_warning ("cannot specify both \"port\" and \"unix\" options");
+      cockpit_channel_fail (self, "protocol-error", "cannot specify both \"port\" and \"unix\" options");
       goto out;
     }
   else if (port != G_MAXINT64)
     {
       if (port <= 0 || port > 65535)
         {
-          g_warning ("received invalid \"port\" option");
+          cockpit_channel_fail (self, "protocol-error", "received invalid \"port\" option");
           goto out;
         }
 
@@ -1057,8 +1005,8 @@ parse_address (CockpitChannel *self,
 
       if (error != NULL)
         {
-          g_warning ("couldn't parse local address: %s: %s", host, error->message);
-          problem = "internal-error";
+          cockpit_channel_fail (self, "internal-error",
+                                "couldn't parse local address: %s: %s", host, error->message);
           goto out;
         }
       else
@@ -1078,10 +1026,10 @@ parse_address (CockpitChannel *self,
 
       if (!connectable)
         {
-          if (!reg)
-            g_warning ("couldn't find internal address: %s", internal);
-
-          problem = "not-found";
+          if (reg)
+            cockpit_channel_close (self, "not-found");
+          else
+            cockpit_channel_fail (self, "not-found", "couldn't find internal address: %s", internal);
           goto out;
         }
 
@@ -1091,27 +1039,27 @@ parse_address (CockpitChannel *self,
     }
   else
     {
-      g_warning ("no \"port\" or \"unix\" or other address option for channel");
+      cockpit_channel_fail (self, "protocol-error",
+                            "no \"port\" or \"unix\" or other address option for channel");
       goto out;
     }
 
-  problem = NULL;
+  open = TRUE;
 
 out:
   g_clear_error (&error);
-  if (problem)
-    {
-      cockpit_channel_close (self, problem);
-      if (connectable)
-        g_object_unref (connectable);
-      connectable = NULL;
-    }
-  else
+  if (open)
     {
       if (possible_name)
           *possible_name = g_strdup (name);
       if (local_address)
         *local_address = local;
+    }
+  else
+    {
+      if (connectable)
+        g_object_unref (connectable);
+      connectable = NULL;
     }
 
   g_free (name);
@@ -1141,8 +1089,7 @@ cockpit_channel_parse_address (CockpitChannel *self,
 
   if (error != NULL)
     {
-      g_warning ("couldn't find address: %s: %s", name, error->message);
-      cockpit_channel_close (self, "not-found");
+      cockpit_channel_fail (self, "not-found", "couldn't find address: %s: %s", name, error->message);
       g_error_free (error);
       g_free (name);
       return NULL;
@@ -1156,8 +1103,9 @@ cockpit_channel_parse_address (CockpitChannel *self,
   return address;
 }
 
-static const gchar *
-parse_option_file_or_data (JsonObject *options,
+static gboolean
+parse_option_file_or_data (CockpitChannel *self,
+                           JsonObject *options,
                            const gchar *option,
                            const gchar **file,
                            const gchar **data)
@@ -1173,65 +1121,65 @@ parse_option_file_or_data (JsonObject *options,
     {
       *file = NULL;
       *data = NULL;
-      return NULL;
+      return TRUE;
     }
 
   if (!JSON_NODE_HOLDS_OBJECT (node))
     {
-      g_warning ("invalid \"%s\" tls option for channel", option);
-      return "protocol-error";
+      cockpit_channel_fail (self, "protocol-error", "invalid \"%s\" tls option for channel", option);
+      return FALSE;
     }
 
   object = json_node_get_object (node);
 
   if (!cockpit_json_get_string (object, "file", NULL, file))
     {
-      g_warning ("invalid \"file\" %s option for channel", option);
-      return "protocol-error";
+      cockpit_channel_fail (self, "protocol-error", "invalid \"file\" %s option for channel", option);
     }
   else if (!cockpit_json_get_string (object, "data", NULL, data))
     {
-      g_warning ("invalid \"data\" %s option for channel", option);
-      return "protocol-error";
+      cockpit_channel_fail (self, "protocol-error", "invalid \"data\" %s option for channel", option);
     }
   else if (!*file && !*data)
     {
-      g_warning ("missing or unsupported \"%s\" option for channel", option);
-      return "not-supported";
+      cockpit_channel_fail (self, "not-supported", "missing or unsupported \"%s\" option for channel", option);
     }
   else if (*file && *data)
     {
-      g_warning ("cannot specify both \"file\" and \"data\" in \"%s\" option for channel", option);
-      return "protocol-error";
+      cockpit_channel_fail (self, "protocol-error", "cannot specify both \"file\" and \"data\" in \"%s\" option for channel", option);
+    }
+  else
+    {
+      return TRUE;
     }
 
-  return NULL;
+  return FALSE;
 }
 
-static const gchar *
-load_pem_contents (const gchar *filename,
+static gboolean
+load_pem_contents (CockpitChannel *self,
+                   const gchar *filename,
                    const gchar *option,
                    GString *pem)
 {
-  const gchar *ret = NULL;
   GError *error = NULL;
   gchar *contents = NULL;
   gsize len;
 
   if (!g_file_get_contents (filename, &contents, &len, &error))
     {
-      g_warning ("couldn't load \"%s\" file: %s: %s", option, filename, error->message);
-      ret = "internal-error";
+      cockpit_channel_fail (self, "internal-error",
+                            "couldn't load \"%s\" file: %s: %s", option, filename, error->message);
       g_clear_error (&error);
+      return FALSE;
     }
   else
     {
       g_string_append_len (pem, contents, len);
       g_string_append_c (pem, '\n');
       g_free (contents);
+      return TRUE;
     }
-
-  return ret;
 }
 
 static gchar *
@@ -1243,26 +1191,26 @@ expand_filename (const gchar *filename)
     return g_strdup (filename);
 }
 
-static const gchar *
-parse_cert_option_as_pem (JsonObject *options,
+static gboolean
+parse_cert_option_as_pem (CockpitChannel *self,
+                          JsonObject *options,
                           const gchar *option,
                           GString *pem)
 {
-  const gchar *problem = NULL;
+  gboolean ret = TRUE;
   const gchar *file;
   const gchar *data;
   gchar *path;
 
-  problem = parse_option_file_or_data (options, option, &file, &data);
-  if (problem)
-    return problem;
+  if (!parse_option_file_or_data (self, options, option, &file, &data))
+    return FALSE;
 
   if (file)
     {
       path = expand_filename (file);
 
       /* For now we assume file contents are PEM */
-      problem = load_pem_contents (path, option, pem);
+      ret = load_pem_contents (self, path, option, pem);
 
       g_free (path);
     }
@@ -1273,30 +1221,30 @@ parse_cert_option_as_pem (JsonObject *options,
       g_string_append_c (pem, '\n');
     }
 
-  return problem;
+  return ret;
 }
 
-static const gchar *
-parse_cert_option_as_database (JsonObject *options,
+static gboolean
+parse_cert_option_as_database (CockpitChannel *self,
+                               JsonObject *options,
                                const gchar *option,
                                GTlsDatabase **database)
 {
   gboolean temporary = FALSE;
   GError *error = NULL;
-  const gchar *problem;
+  gboolean ret = TRUE;
   const gchar *file;
   const gchar *data;
   gchar *path;
   gint fd;
 
-  problem = parse_option_file_or_data (options, option, &file, &data);
-  if (problem)
-    return problem;
+  if (!parse_option_file_or_data (self, options, option, &file, &data))
+    return FALSE;
 
   if (file)
     {
       path = expand_filename (file);
-      problem = NULL;
+      ret = TRUE;
     }
   else if (data)
     {
@@ -1305,17 +1253,19 @@ parse_cert_option_as_database (JsonObject *options,
       fd = g_mkstemp (path);
       if (fd < 0)
         {
-          g_warning ("couldn't create temporary directory: %s: %s", path, g_strerror (errno));
-          problem = "internal-error";
+          ret = FALSE;
+          cockpit_channel_fail (self, "internal-error",
+                                "couldn't create temporary directory: %s: %s", path, g_strerror (errno));
         }
       else
         {
           close (fd);
           if (!g_file_set_contents (path, data, -1, &error))
             {
-              g_warning ("couldn't write temporary data to: %s: %s", path, error->message);
-              problem = "internal-error";
+              cockpit_channel_fail (self, "internal-error",
+                                    "couldn't write temporary data to: %s: %s", path, error->message);
               g_clear_error (&error);
+              ret = FALSE;
             }
         }
     }
@@ -1323,34 +1273,35 @@ parse_cert_option_as_database (JsonObject *options,
     {
       /* Not specified */
       *database = NULL;
-      return NULL;
+      return TRUE;
     }
 
-  if (problem == NULL)
+  if (ret)
     {
       *database = g_tls_file_database_new (path, &error);
       if (error)
         {
-          g_warning ("couldn't load certificate data: %s: %s", path, error->message);
-          problem = "internal-error";
+          cockpit_channel_fail (self, "internal-error",
+                                "couldn't load certificate data: %s: %s", path, error->message);
           g_clear_error (&error);
+          ret = FALSE;
         }
     }
 
   /* Leave around when problem, for debugging */
-  if (temporary && problem == NULL)
+  if (temporary && ret == TRUE)
     g_unlink (path);
 
   g_free (path);
 
-  return problem;
+  return ret;
 }
 
 static gboolean
 parse_stream_options (CockpitChannel *self,
                       CockpitConnectable *connectable)
 {
-  const gchar *problem = "protocol-error";
+  gboolean ret = FALSE;
   GTlsCertificate *cert = NULL;
   GTlsDatabase *database = NULL;
   gboolean use_tls = FALSE;
@@ -1365,7 +1316,7 @@ parse_stream_options (CockpitChannel *self,
   node = json_object_get_member (self->priv->open_options, "tls");
   if (node && !JSON_NODE_HOLDS_OBJECT (node))
     {
-      g_warning ("invalid \"tls\" option for channel");
+      cockpit_channel_fail (self, "protocol-error", "invalid \"tls\" option for channel");
       goto out;
     }
   else if (node)
@@ -1383,46 +1334,38 @@ parse_stream_options (CockpitChannel *self,
 
       pem = g_string_sized_new (8192);
 
-      problem = parse_cert_option_as_pem (options, "certificate", pem);
-      if (problem)
+      if (!parse_cert_option_as_pem (self, options, "certificate", pem))
         goto out;
 
       if (pem->len)
         {
-          problem = parse_cert_option_as_pem (options, "key", pem);
-          if (problem)
+          if (!parse_cert_option_as_pem (self, options, "key", pem))
             goto out;
 
           cert = g_tls_certificate_new_from_pem (pem->str, pem->len, &error);
           if (error != NULL)
             {
-              g_warning ("invalid \"certificate\" or \"key\" content: %s", error->message);
+              cockpit_channel_fail (self, "internal-error",
+                                    "invalid \"certificate\" or \"key\" content: %s", error->message);
               g_error_free (error);
-              problem = "internal-error";
               goto out;
             }
         }
 
-      problem = parse_cert_option_as_database (options, "authority", &database);
-      if (problem)
+      if (!parse_cert_option_as_database (self, options, "authority", &database))
         goto out;
 
       if (!cockpit_json_get_bool (options, "validate", validate, &validate))
         {
-          g_warning ("invalid \"validate\" option");
-          problem = "protocol-error";
+          cockpit_channel_fail (self, "protocol-error", "invalid \"validate\" option");
           goto out;
         }
     }
 
-  problem = NULL;
+  ret = TRUE;
 
 out:
-  if (problem)
-    {
-      cockpit_channel_close (self, problem);
-    }
-  else
+  if (ret)
     {
       connectable->tls = use_tls;
       connectable->tls_cert = cert;
@@ -1452,7 +1395,7 @@ out:
   if (database)
     g_object_unref (database);
 
-  return problem == NULL;
+  return ret;
 }
 
 CockpitConnectable *
@@ -1460,8 +1403,8 @@ cockpit_channel_parse_stream (CockpitChannel *self)
 {
   CockpitConnectable *connectable;
   GSocketConnectable *address;
-  gboolean local;
-  gchar *name;
+  gboolean local = FALSE;
+  gchar *name = NULL;
 
   address = parse_address (self, &name, &local);
   if (!address)
