@@ -1,3 +1,8 @@
+Tests: smoke
+Depends: cockpit,
+         curl,
+Restrictions: isolation-container
+
 Tests: avocado
 Depends: cockpit,
          python,
@@ -6,7 +11,6 @@ Depends: cockpit,
          python-setuptools,
          python-libvirt,
          npm,
-         nodejs-legacy,
          libfontconfig1,
          curl,
          phantomjs,

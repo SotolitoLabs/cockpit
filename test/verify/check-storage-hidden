@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -24,6 +24,8 @@ from testlib import *
 from storagelib import *
 
 @skipImage("UDisks doesn't have support for LVM", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable")
+# HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1503100
+@skipImage("udisks2-lvm2 missing in RHEL 7.5", "rhel-7-5")
 class TestStorage(StorageCase):
     def testHiddenLuks(self):
         m = self.machine
@@ -65,7 +67,7 @@ class TestStorage(StorageCase):
                       "passphrase2": "einszweidrei",
                       "mounting": "custom",
                       "mount_point": mount_point_1,
-                      "crypto_options": "my-crypto-tag" })
+                      "crypto_extra_options": CheckBoxText("my-crypto-tag") })
         self.content_row_wait_in_col(2, 1, "46 MiB ext4 File System")
         self.wait_in_storaged_configuration(mount_point_1)
         self.wait_in_storaged_configuration("my-crypto-tag")

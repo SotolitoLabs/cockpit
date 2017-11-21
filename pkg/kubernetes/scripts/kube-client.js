@@ -64,7 +64,7 @@
         { kind: "User", type: "users", api: OPENSHIFT, global: true },
     ]);
 
-    var NAME_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+    var NAME_RE = /^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$/;
     var USER_NAME_RE = /^[a-zA-Z0-9_.]([-a-zA-Z0-9 ,=@._]*[a-zA-Z0-9._])?$/;
 
     /* Timeout for non-GET requests */
@@ -1230,9 +1230,12 @@
                             step();
                         }, function(response) {
                             var resp = response.data;
+                            var code = response.status;
+                            if (resp && resp.code)
+                                code = resp.code;
 
                             /* Ignore failures creating the namespace if it already exists */
-                            if (resource.kind == "Namespace" && resp && (resp.code === 409 || resp.code === 403)) {
+                            if (resource.kind == "Namespace" && (code === 409 || code === 403)) {
                                 debug("skipping namespace creation");
                                 step();
                             } else {

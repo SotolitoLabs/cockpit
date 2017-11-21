@@ -21,7 +21,7 @@
     "use strict";
 
     var machis = require("machines");
-    var credentials = require("credentials");
+    var credentials = require("./credentials");
     var mdialogs = require("machine-dialogs");
 
     var indexes = require("./indexes");
@@ -32,7 +32,7 @@
 
     credentials.setup();
 
-    /* When Ctrl is held down we display debugging menu items */
+    /* When alt is held down we display debugging menu items */
     document.addEventListener("click", function(ev) {
         var i, visible = !!ev.altKey;
         var advanced = document.querySelectorAll(".navbar-advanced");

@@ -237,11 +237,13 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
         if (authorized.indexOf("password") !== -1)
             id("authorized-input").checked = true;
 
-        var os_release = JSON.stringify(environment["os-release"]);
+        var os_release = environment["os-release"];
+        if (os_release)
+            window.localStorage.setItem('os-release', JSON.stringify(os_release));
+
         var logout_intent = window.sessionStorage.getItem("logout-intent") == "explicit";
         if (logout_intent)
             window.sessionStorage.removeItem("logout-intent");
-        window.localStorage.setItem('os-release', os_release);
 
         /* Try automatic/kerberos authentication? */
         if (oauth) {
@@ -455,11 +457,15 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
                 id("login-password-input").focus();
         }, false);
 
-        id("login-password-input").addEventListener("keydown", function(e) {
+        var do_login = function(e) {
             login_failure(null);
             if (e.which == 13)
                 call_login();
-        });
+        };
+
+        id("login-password-input").addEventListener("keydown", do_login);
+        id("authorized-input").addEventListener("keydown", do_login);
+
         show_form();
         id("login-user-input").focus();
         phantom_checkpoint();
@@ -614,13 +620,23 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
     }
 
     function login_reload (wanted) {
+        // Force a reload if not triggered below
+        // because only the hash part of the url
+        // changed
+        var timer = window.setTimeout(function() {
+            timer = null;
+            window.location.reload(true);
+        }, 100);
+
         if (wanted && wanted != window.location.href)
             window.location = wanted;
 
-        // Force a reload if the above didn't trigger it
-        window.setTimeout(function() {
-            window.location.reload(true);
-        }, 100);
+        // cancel forced reload if we are reloading
+        window.onbeforeunload = function() {
+            if (timer)
+                window.clearTimeout(timer);
+            timer = null;
+        };
     }
 
     function machine_application_login_reload (wanted) {

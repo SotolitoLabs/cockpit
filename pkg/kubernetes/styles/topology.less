@@ -1,10 +1,17 @@
 kubernetes-topology-graph {
     margin-right: 25%;
+    margin-top: 55px;
+    padding-bottom: 0px !important;
+    overflow: hidden;
 }
 
 .kube-pane {
     float: right;
     width: 25%;
+
+    .sidebar-pf-right {
+        right: 0px;
+    }
 }
 
 .kube-pane .sidebar-pf {
@@ -50,24 +57,4 @@ kubernetes-topology-icon {
 
 .topology-actions {
     float: right;
-    margin-right: 20px;
-}
-
-.kube-topology g.ReplicationController text {
-    font-size: 24px;
-}
-
-.kube-topology g.Route text {
-    fill: #888;
-    font-size: 22px;
-}
-
-.kube-topology g.DeploymentConfig text {
-    font-family: FontAwesome;
-    fill: #888;
-    font-size: 22px;
-}
-
-.kube-topology g.Service text {
-    font-size: 22px;
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 
 import glob
 import imp
@@ -6,7 +6,6 @@ import os
 import string
 import subprocess
 import sys
-import traceback
 import unittest
 
 import parent

@@ -26,6 +26,7 @@ libvirt-daemon-system \
 network-manager \
 pcp \
 policykit-1 \
+python3-dbus \
 realmd \
 selinux-basics \
 thin-provisioning-tools \
@@ -46,6 +47,7 @@ curl \
 gdb \
 iproute \
 mdadm \
+nfs-server \
 qemu-kvm \
 systemd-coredump \
 virtinst \
@@ -69,10 +71,7 @@ case "$RELEASE" in
         # https://tracker.debian.org/pcp not currently in testing
         COCKPIT_DEPS="${COCKPIT_DEPS/libpcp3 /}"
         COCKPIT_DEPS="${COCKPIT_DEPS/pcp /}"
-
-        # modern udisks (after re-merging storaged)
-        echo "deb http://deb.debian.org/debian experimental main" >/etc/apt/sources.list.d/experimental.list
-        COCKPIT_DEPS_EXPERIMENTAL="udisks2"
+        COCKPIT_DEPS="${COCKPIT_DEPS} libblockdev-mdraid2"
 
         # docker.io got removed from testing; use backports-version
         echo "deb http://deb.debian.org/debian jessie-backports main" >/etc/apt/sources.list.d/jessie-backports.list
@@ -82,6 +81,15 @@ case "$RELEASE" in
         # HACK: https://launchpad.net/bugs/1693154
         mkdir /etc/krb5.conf.d/
         ;;
+
+    xenial)
+        # NFS and NetworkManager don't work together
+        TEST_PACKAGES="${TEST_PACKAGES/nfs-server /}"
+        # 16.04's pbuilder-satisfydepends-classic does not correctly resolve
+        # our alternative debhelper build dependency
+        PBUILDER_EXTRA="dh-systemd"
+        ;;
+
 esac
 
 if grep -q 'ID=ubuntu' /etc/os-release; then
@@ -119,7 +127,7 @@ EOF
 
 eatmydata apt-get -y install dpkg-dev pbuilder
 
-pbuilder --create --extrapackages fakeroot
+pbuilder --create --extrapackages "fakeroot $PBUILDER_EXTRA"
 /usr/lib/pbuilder/pbuilder-satisfydepends-classic --control /tmp/out/tools/debian/control --force-version --echo|grep apt-get | pbuilder --login --save-after-login
 rm -rf /tmp/out
 
@@ -156,6 +164,9 @@ eatmydata apt-get -y autoremove || true
 
 # reduce image size
 apt-get clean
+pbuilder clean
+rm -rf /var/lib/docker/devicemapper
+rm -f /var/cache/apt/*cache.bin
 /var/lib/testvm/zero-disk.setup
 
 # Final tweaks

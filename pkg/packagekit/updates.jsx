@@ -23,6 +23,8 @@ var moment = require("moment");
 var Tooltip = require("cockpit-components-tooltip.jsx").Tooltip;
 require("listing.less");
 
+import AutoUpdates from "./autoupdates.jsx";
+
 const _ = cockpit.gettext;
 
 // "available" heading is built dynamically
@@ -192,7 +194,7 @@ function HeaderBar(props) {
     var actionButton;
     if (props.state == "uptodate" || props.state == "available") {
         if (!props.unregistered)
-            actionButton = <button className="btn btn-default" onClick={props.onRefresh} >{_("Check for updates")}</button>;
+            actionButton = <button className="btn btn-default" onClick={props.onRefresh} >{_("Check for Updates")}</button>;
         if (props.timeSinceRefresh !== null) {
             lastChecked = (
                 <span style={ {paddingRight: "3ex"} }>
@@ -239,7 +241,7 @@ class UpdateItem extends React.Component {
         if (info.security) {
             security_info = (
                 <p>
-                    <span className="fa fa-bug security-label"> </span>
+                    <span className="fa fa-shield security-label">&nbsp;</span>
                     <span className="security-label-text">{ _("Security Update") + (info.cve_urls.length ? ": " : "") }</span>
                     { insertCommas(info.cve_urls.map(url => (
                         <a href={url} rel="noopener" referrerpolicy="no-referrer" target="_blank">
@@ -486,7 +488,7 @@ class OsUpdates extends React.Component {
         super();
         this.state = { state: "loading", errorMessages: [], updates: {}, haveSecurity: false, timeSinceRefresh: null,
                        loadPercent: null, waiting: false, cockpitUpdate: false, allowCancel: null,
-                       history: null, unregistered: false };
+                       history: null, unregistered: false, autoUpdatesEnabled: null };
         this.handleLoadError = this.handleLoadError.bind(this);
         this.handleRefresh = this.handleRefresh.bind(this);
         this.handleRestart = this.handleRestart.bind(this);
@@ -792,7 +794,7 @@ class OsUpdates extends React.Component {
                                     { _("You need to re-subscribe this system.") }
                                 </span>
                                 <button className="btn btn-primary pull-right"
-                                        onClick={ () => cockpit.jump("/subscriptions") }>
+                                        onClick={ () => cockpit.jump("/subscriptions", cockpit.transport.host) }>
                                     { _("View Registration Details") }
                                 </button>
                             </div>
@@ -800,13 +802,13 @@ class OsUpdates extends React.Component {
                 } else {
                     applyAll = (
                         <button className="btn btn-primary" onClick={ () => this.applyUpdates(false) }>
-                            {_("Install all updates")}
+                            {_("Install All Updates")}
                         </button>);
 
                     if (this.state.haveSecurity) {
                         applySecurity = (
                             <button className="btn btn-default" onClick={ () => this.applyUpdates(true) }>
-                                {_("Install security updates")}
+                                {_("Install Security Updates")}
                             </button>);
                     }
                 }
@@ -814,6 +816,7 @@ class OsUpdates extends React.Component {
                 return (
                     <div>
                         {unregisteredWarning}
+                        <AutoUpdates onInitialized={ enabled => this.setState({ autoUpdatesEnabled: enabled }) } />
                         <table id="available" width="100%">
                             <tr>
                                 <td><h2>{_("Available Updates")}</h2></td>
@@ -837,7 +840,8 @@ class OsUpdates extends React.Component {
                         }
                         <UpdatesList updates={this.state.updates} />
 
-                        { this.state.history
+                        { /* Hide history with automatic updates, as they don't feed their history into PackageKit */
+                          this.state.history && !this.state.autoUpdatesEnabled
                           ? <div id="history">
                               <h2>{_("Update History")}</h2>
                               <UpdateHistory history={this.state.history} limit="1" />
@@ -879,7 +883,7 @@ class OsUpdates extends React.Component {
                             <p>{_("To get software updates, this system needs to be registered with Red Hat, either using the Red Hat Customer Portal or a local subscription server.")}</p>
                             <div className="blank-slate-pf-main-action">
                                 <button className="btn btn-lg btn-primary"
-                                        onClick={ () => cockpit.jump("/subscriptions") }>
+                                        onClick={ () => cockpit.jump("/subscriptions", cockpit.transport.host) }>
                                     {_("Register…")}
                                 </button>
                             </div>
@@ -887,13 +891,18 @@ class OsUpdates extends React.Component {
                 }
 
                 return (
-                    <div className="blank-slate-pf">
-                        <div className="blank-slate-pf-icon">
-                            <span className="fa fa-check"></span>
-                        </div>
-                        <p>{_("System is up to date")}</p>
+                    <div>
+                        <AutoUpdates onInitialized={ enabled => this.setState({ autoUpdatesEnabled: enabled }) } />
+                        <div className="blank-slate-pf">
+                            <div className="blank-slate-pf-icon">
+                                <span className="fa fa-check"></span>
+                            </div>
+                            <p>{_("System is up to date")}</p>
 
-                        { this.state.history ? <div className="flow-list-blank-slate"><UpdateHistory history={this.state.history} limit="1" /></div> : null }
+                            { this.state.history && !this.state.autoUpdatesEnabled
+                                ? <div className="flow-list-blank-slate"><UpdateHistory history={this.state.history} limit="1" /></div>
+                                : null }
+                        </div>
                     </div>);
 
             default:

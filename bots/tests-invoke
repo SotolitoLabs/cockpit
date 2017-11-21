@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -60,7 +60,7 @@ def main():
         task = PullTask(name, revision, opts.ref, opts.context, opts.rebase,
                         github_revision=github_revision)
         ret = task.run(opts)
-    except RuntimeError, ex:
+    except RuntimeError as ex:
         ret = str(ex)
 
     if ret:
@@ -200,6 +200,11 @@ class PullTask(object):
                 "ipa", "openshift", "selenium"
             ])
 
+            # Download some additional necessary state
+            subprocess.check_call([ os.path.join(BOTS, "image-download"),
+                "--state", "tests-learn-1.nn"
+            ])
+
         except subprocess.CalledProcessError:
             return "Downloading of additional images failed"
 
@@ -237,7 +242,7 @@ class PullTask(object):
         # COMPAT: Create a legacy tmp/run directory to prevent races during testing
         try:
             os.makedirs(os.path.join(BASE, "test", "tmp", "run"))
-        except OSError, ex:
+        except OSError as ex:
             if ex.errno != errno.EEXIST:
                 raise
 
@@ -319,13 +324,11 @@ class PullTask(object):
             os.environ["TEST_NAME"] = self.name
             os.environ["TEST_REVISION"] = self.revision
 
-        # Split a value like verify/fedora-24
+        # Split a value like verify/fedora-atomic
         (prefix, unused, value) = self.context.partition("/")
 
-        if prefix in [ 'selenium' ]:
-            image = 'fedora-24'
-        elif prefix in [ 'container' ]:
-            image = 'fedora-25'
+        if prefix in [ 'selenium', 'container', 'avocado' ]:
+            image = 'fedora-26'
         else:
             image = value
         os.environ["TEST_OS"] = image

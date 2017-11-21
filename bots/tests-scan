@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -20,11 +20,10 @@
 
 BASELINE_PRIORITY = 10
 
-BRANCHES = [ 'master', 'rhel-7.4', 'rhel-7.3.1', 'rhel-7.3.2', 'rhel-7.3.3', 'rhel-7.3.4', 'rhel-7.3.5', 'rhel-7.3.6' ]
+BRANCHES = [ 'master', 'rhel-7.4' ]
 
 DEFAULT_VERIFY = {
-    'avocado/fedora-24': BRANCHES,
-    'avocado/fedora-25': [ ],
+    'avocado/fedora': BRANCHES,
     'container/kubernetes': BRANCHES,
     'selenium/firefox': BRANCHES,
     'selenium/chrome': BRANCHES,
@@ -32,10 +31,10 @@ DEFAULT_VERIFY = {
     'verify/continuous-atomic': [ ],
     'verify/debian-stable': [ 'master' ],
     'verify/debian-testing': [ 'master' ],
-    'verify/fedora-24': [ ],
     'verify/fedora-25': [ ],
-    'verify/fedora-i386': [ 'master', 'rhel-7.4', 'rhel-7.3.6', 'rhel-7.3.5' ],
-    'verify/fedora-26': [ 'master' ],
+    'verify/fedora-i386': BRANCHES,
+    'verify/fedora-26': [ ],
+    'verify/fedora-27': [ 'master' ],
     'verify/fedora-atomic': BRANCHES,
     'verify/fedora-testing': [ ],
     'verify/ubuntu-1604': [ 'master' ],
@@ -48,27 +47,34 @@ NPM_REPOS = {
 
 # Non-public images used for testing
 REDHAT_VERIFY = {
-    "verify/rhel-7": [ 'master', 'rhel-7.3.6', 'rhel-7.3.5', 'rhel-7.3.4', 'rhel-7.3.3', 'rhel-7.3.2' ],
+    "verify/rhel-7": [ 'master' ],
     "verify/rhel-7-4": [ 'master', 'rhel-7.4' ],
+    "verify/rhel-7-5": [ 'master', 'rhel-7.5' ],
     "verify/rhel-atomic": [ 'master' ],
     'selenium/explorer': [ 'master' ],
 }
 
-# Server to tell us if we can test Red Hat images
-REDHAT_PING = "http://cockpit-11.e2e.bos.redhat.com"
+# Host interfaces that tell us we're not in a namespaced network
+HOST_INTERFACES = [ "cockpit1", "docker0", "virbr0" ]
+
+# Branches that need the bridged network to work
+LEGACY_BRANCHES = [
+    'rhel-7.4',
+]
 
 import argparse
 import os
 import json
 import pipes
 import random
+import subprocess
 import sys
 import time
 import urllib
 
 sys.dont_write_bytecode = True
 
-from task import github
+from task import github, REDHAT_PING
 
 def main():
     parser = argparse.ArgumentParser(description='Bot: scan and update status of pull requests on GitHub')
@@ -81,7 +87,7 @@ def main():
 
     try:
         results = scan(api, not opts.dry, opts.human_readable)
-    except RuntimeError, ex:
+    except RuntimeError as ex:
         sys.stderr.write("tests-scan: " + str(ex) + "\n")
         return 1
 
@@ -340,6 +346,17 @@ def scan(api, update, human):
         policy.update(REDHAT_VERIFY)
     except IOError:
         pass
+
+    # Check if we're in a namespaced network
+    null = open("/dev/null", "r+")
+    for interface in HOST_INTERFACES:
+        if subprocess.call([ "ip", "link", "show", interface ], stdout=null, stderr=null) == 0:
+            break
+
+    # In a namespaced network, remove legacy branches
+    else:
+        for context, branches in policy.items():
+            policy[context] = filter(lambda branch: branch not in LEGACY_BRANCHES, branches)
 
     return scan_for_pull_tasks(api, update, human, policy)
 

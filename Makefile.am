@@ -50,6 +50,7 @@ SUFFIXES = \
 	.map .map.gz \
 	.mo .po \
 	.service .service.in \
+	.socket .socket.in \
 	.svg .svg.gz \
 	.woff .woff.gz \
 	.1 .8 .5 \
@@ -103,6 +104,7 @@ SUBST_RULE = \
 	$(AM_V_GEN) $(MKDIR_P) $(dir $@) && sed \
 	-e 's,[@]datadir[@],$(datadir),g' \
 	-e 's,[@]libexecdir[@],$(libexecdir),g' \
+	-e 's,[@]sysconfdir[@],$(sysconfdir),g' \
 	-e 's,[@]libdir[@],$(libdir),g' \
 	-e 's,[@]includedir[@],$(includedir),g' \
 	-e 's,[@]bindir[@],$(bindir),g' \
@@ -134,6 +136,8 @@ SUBST_RULE = \
 	$(GZ_RULE)
 .service.in.service:
 	$(SUBST_RULE)
+.socket.in.socket:
+	$(SUBST_RULE)
 .svg.svg.gz:
 	$(GZ_RULE)
 .woff.woff.gz:
@@ -142,6 +146,7 @@ SUBST_RULE = \
 # Webpack related
 
 WEBPACK_PACKAGES = \
+	apps \
 	dashboard \
 	docker \
 	kdump \
@@ -149,6 +154,7 @@ WEBPACK_PACKAGES = \
 	machines \
 	networkmanager \
 	ostree \
+	ovirt \
 	pcp \
 	packagekit \
 	playground \
@@ -168,7 +174,7 @@ V_WEBPACK = $(V_WEBPACK_$(V))
 V_WEBPACK_ = $(V_WEBPACK_$(AM_DEFAULT_VERBOSITY))
 V_WEBPACK_0 = @echo "  WEBPACK  $(@:dist/%/Makefile.deps=%)";
 
-WEBPACK_MAKE = NODE_ENV=$(NODE_ENV) SRCDIR=$(srcdir) BUILDDIR=$(builddir) \
+WEBPACK_MAKE = NODE_ENV=$(NODE_ENV) SRCDIR=$(abspath $(srcdir)) BUILDDIR=$(builddir) \
 	       $(srcdir)/tools/missing $(srcdir)/tools/webpack-make
 
 WEBPACK_RULE = $(V_WEBPACK) $(WEBPACK_MAKE)
@@ -257,7 +263,7 @@ endif
 VALGRIND_ARGS = --trace-children=yes --quiet --error-exitcode=33 \
 	--suppressions=valgrind-suppressions --gen-suppressions=all \
 	--num-callers=16 --leak-check=yes --show-leak-kinds=definite \
-	--errors-for-leak-kinds=definite --trace-children-skip='*mock*,/bin*,/usr/bin/*,/usr/local/bin,*cockpit-bridge,*cockpit-stub'
+	--errors-for-leak-kinds=definite --trace-children-skip='*mock*,/bin*,/usr/bin/*,/usr/local/bin'
 VALGRIND_SUPPRESSIONS = \
 	tools/gcrypt.supp \
 	tools/glib.supp \

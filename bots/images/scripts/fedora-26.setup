@@ -66,6 +66,7 @@ systemtap-runtime-virtguest \
 valgrind \
 gdb \
 targetcli \
+dnf-automatic \
 "
 
 # HACK - For correct work of ABRT in Fedora 26 Alpha release a following
@@ -75,6 +76,14 @@ targetcli \
 ABRT_PACKAGES="\
 abrt-desktop \
 libreport-plugin-systemd-journal \
+"
+
+AVOCADO_TEST_DEPS="\
+python2-avocado \
+python2-avocado-plugins-output-html \
+fontconfig \
+npm \
+python2-selenium \
 "
 
 rm -rf /etc/sysconfig/iptables
@@ -90,7 +99,10 @@ useradd -c Administrator -G wheel admin
 echo foobar | passwd --stdin admin
 
 dnf $DNF_OPTS -y upgrade
-dnf $DNF_OPTS -y install $TEST_PACKAGES $COCKPIT_DEPS $IPA_CLIENT_PACKAGES $ABRT_PACKAGES
+dnf $DNF_OPTS -y install $TEST_PACKAGES $COCKPIT_DEPS $IPA_CLIENT_PACKAGES $ABRT_PACKAGES $AVOCADO_TEST_DEPS
+
+# for avocado/fedora integration test
+npm -g install phantomjs-prebuilt
 
 # Prepare for building
 dnf $DNF_OPTS -y install mock dnf-plugins-core rpm-build

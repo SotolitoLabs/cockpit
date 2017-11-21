@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -44,7 +44,11 @@ __all__ = (
     "issue",
     "verbose",
     "stale",
+    "REDHAT_PING",
 )
+
+# Server to tell us if we can handle Red Hat images
+REDHAT_PING = "http://cockpit-11.e2e.bos.redhat.com"
 
 api = github.GitHub()
 verbose = False
@@ -91,6 +95,8 @@ def main(**kwargs):
         help="Act on an already created task issue")
     parser.add_argument("--publish", dest="publish", default=os.environ.get("TEST_PUBLISH", ""),
         action="store", help="Publish results centrally to a sink")
+    parser.add_argument("--dry", dest="dry", action="store_true",
+        help="Dry run to validate this task if supported")
     parser.add_argument("context", nargs="?")
 
     opts = parser.parse_args()
@@ -102,6 +108,7 @@ def main(**kwargs):
         task["verbose"] = opts.verbose
     task["issue"] = opts.issue
     task["publish"] = opts.publish
+    task["dry"] = opts.dry
 
     ret = run(opts.context, **task)
 
@@ -261,12 +268,12 @@ def run(context, function, **kwargs):
             execute("git", "checkout", "--detach", pull['head']['sha'])
 
         ret = function(context, **kwargs)
-    except (RuntimeError, subprocess.CalledProcessError), ex:
+    except (RuntimeError, subprocess.CalledProcessError) as ex:
         ret = str(ex)
     except (AssertionError, KeyboardInterrupt):
         raise
     except:
-        traceback.print_exc(file=sys.stderr)
+        sys.stderr.write(traceback.print_exc())
     finally:
         finish(publishing, ret, name, context, issue)
     return ret or 0
@@ -305,7 +312,7 @@ def stale(days, pathspec, ref="HEAD"):
             sys.stderr.write("> " + output + "\n")
         return output
 
-    timestamp = execute("git", "log", "--max-count=1", "--pretty=format:%at", ref, "--", pathspec)
+    timestamp = execute("git", "log", "--max-count=1", "--pretty=format:%ct", ref, "--", pathspec)
     try:
         timestamp = int(timestamp)
     except ValueError:
@@ -339,17 +346,16 @@ def execute(*args):
     if verbose:
         sys.stderr.write("+ " + " ".join(args) + "\n")
 
-    # Github wants the OAuth token as the username and git will
-    # happily echo that back out.  So we censor all output.
+    # Make double sure that the token does not appear anywhere in the output
     def censored(text):
         return text.replace(api.token, "CENSORED")
 
-    try:
-        output = subprocess.check_output(args, cwd=BASE, stderr=subprocess.STDOUT)
-        sys.stderr.write(censored(output))
-    except subprocess.CalledProcessError, ex:
-        sys.stderr.write(censored(ex.output))
-        raise
+    env = os.environ.copy()
+    # No prompting for passwords
+    if "GIT_ASKPASS" not in env:
+        env["GIT_ASKPASS"] = "/bin/true"
+    output = subprocess.check_output(args, cwd=BASE, stderr=subprocess.STDOUT, env=env)
+    sys.stderr.write(censored(output))
 
 def branch(context, message, pathspec=".", issue=None, **kwargs):
     current = time.strftime('%Y%m%d-%H%M%M')
@@ -357,8 +363,14 @@ def branch(context, message, pathspec=".", issue=None, **kwargs):
     branch = "{0} {1} {2}".format(name, context or "", current).strip()
     branch = branch.replace(" ", "-").replace("--", "-")
 
+    # Tell git about our github token as a user name
+    try:
+        subprocess.check_output(["git", "config", "credential.https://github.com.username", api.token])
+    except subprocess.CalledProcessError:
+        raise RuntimeError("Couldn't configure git config with our API token")
+
     user = api.get("/user")['login']
-    url = "https://{0}@github.com/{1}/cockpit".format(api.token, user)
+    url = "https://github.com/{0}/cockpit".format(user)
     clean = "https://github.com/{0}/cockpit".format(user)
 
     execute("git", "add", "--", pathspec)

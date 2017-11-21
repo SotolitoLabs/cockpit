@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -50,6 +49,9 @@ class KubernetesCase(testlib.MachineCase):
             self.machine.execute("systemctl stop kube-apiserver")
 
     def start_kubernetes(self):
+        # HACK: These are the default container secrets that which conflict
+        # with kubernetes secrets and cause the pod to not start
+        self.machine.execute("rm -rf /usr/share/rhel/secrets/* || true")
         self.machine.execute("test -f /etc/resolv.conf || touch /etc/resolv.conf")
         self.machine.execute("systemctl start docker || journalctl -u docker")
 
@@ -316,10 +318,10 @@ class KubernetesCommonTests(VolumeTests):
         b.click("tbody.open .listing-ct-panel .listing-ct-head li a.shell")
         b.wait_present("tbody.open .listing-ct-panel div.terminal")
         b.wait_visible("tbody.open .listing-ct-panel div.terminal")
-        b.wait_in_text("tbody.open .listing-ct-panel .terminal div:nth-child(1)", "#")
+        b.wait_in_text("tbody.open .listing-ct-panel div.terminal", "#")
         b.focus('tbody.open .listing-ct-panel .terminal')
         b.key_press( [ 'w', 'h', 'o', 'a', 'm', 'i', 'Return' ] )
-        b.wait_in_text("tbody.open .listing-ct-panel .terminal div:nth-child(2)", "root")
+        b.wait_in_text("tbody.open .listing-ct-panel div.terminal", "root")
 
     def testDelete(self):
         b = self.browser
@@ -746,6 +748,9 @@ class OpenshiftCommonTests(VolumeTests):
         m = self.machine
         b = self.browser
 
+        # Delete lang.sh to avoid weirdly truncated setlocale journal messages
+        self.openshift.execute("rm /etc/profile.d/lang.sh")
+
         # Make sure we can find openshift
         m.execute("echo '10.111.112.101  f1.cockpit.lan' >> /etc/hosts")
 
@@ -811,6 +816,5 @@ class OpenshiftCommonTests(VolumeTests):
         self.allow_journal_messages('/usr/libexec/cockpit-pcp: bridge was killed: .*',
                                     '.* host key for server is not known: .*',
                                     'invalid or unusable locale: .*',
-                                    '.* warning: setlocale: .*',
                                     'connection unexpectedly closed by peer',
                                     'Error receiving data: Connection reset by peer')

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -33,10 +33,19 @@ TRIGGERS = {
     ],
     "fedora-25": [
         "verify/fedora-25",
-        "verify/fedora-atomic"
     ],
     "fedora-26": [
-        "verify/fedora-26"
+        "verify/fedora-26",
+        "verify/fedora-atomic",
+        "container/kubernetes",
+        "selenium/explorer",
+        "selenium/chrome",
+        "selenium/firefox",
+        "avocado/fedora",
+    ],
+    "fedora-27": [
+        "verify/fedora-27",
+        "verify/fedora-atomic",
     ],
     "fedora-atomic": [
         "verify/fedora-atomic"
@@ -55,7 +64,7 @@ TRIGGERS = {
     ],
     "openshift": [
         "container/kubernetes",
-        "verify/fedora-25",
+        "verify/fedora-26",
         "verify/rhel-7",
         "verify/rhel-7-4"
     ],
@@ -70,6 +79,12 @@ TRIGGERS = {
         "verify/rhel-7",
         "verify/rhel-atomic"  # builds in rhel-7
     ],
+    "rhel-7-4": [
+        "verify/rhel-7-4"
+    ],
+    "rhel-7-5": [
+        "verify/rhel-7-5"
+    ],
     "rhel-atomic": [
         "verify/rhel-atomic"
     ]
@@ -80,6 +95,7 @@ REDHAT_STORE = "https://cockpit-11.e2e.bos.redhat.com:8493"
 STORES = {
     "rhel-7": REDHAT_STORE,
     "rhel-7-4": REDHAT_STORE,
+    "rhel-7-5": REDHAT_STORE,
     "rhel-atomic": REDHAT_STORE,
     "windows-8": REDHAT_STORE
 }

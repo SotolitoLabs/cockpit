@@ -360,7 +360,8 @@ PageServer.prototype = {
 
         $('#server').on('click', "[data-goto-service]", function () {
             var service = $(this).attr("data-goto-service");
-            cockpit.jump("/system/services/#/" + window.encodeURIComponent(service));
+            cockpit.jump("/system/services/#/" + window.encodeURIComponent(service),
+                         cockpit.transport.host);
         });
 
         self.plot_controls = plot.setup_plot_controls($('#server'), $('#server-graph-toolbar'));
@@ -467,7 +468,7 @@ PageServer.prototype = {
         $.extend(memory_options.yaxis, { ticks: plot.memory_ticks,
                                          tickFormatter: plot.format_bytes_tick_no_unit
                                        });
-        memory_options.setup_hook = function memory_setup_hook(pl) {
+        memory_options.post_hook = function memory_post_hook(pl) {
             var axes = pl.getAxes();
             $('#server_memory_unit').text(plot.bytes_tick_unit(axes.yaxis));
         };
@@ -496,7 +497,9 @@ PageServer.prototype = {
             else
                 axes.yaxis.options.max = null;
             axes.yaxis.options.min = 0;
-
+        };
+        network_options.post_hook = function network_post_hook(pl) {
+            var axes = pl.getAxes();
             $('#server_network_traffic_unit').text(plot.bits_per_sec_tick_unit(axes.yaxis));
         };
 
@@ -524,7 +527,9 @@ PageServer.prototype = {
             else
                 axes.yaxis.options.max = null;
             axes.yaxis.options.min = 0;
-
+        };
+        disk_options.post_hook = function disk_post_hook(pl) {
+            var axes = pl.getAxes();
             $('#server_disk_io_unit').text(plot.bytes_per_sec_tick_unit(axes.yaxis));
         };
 
@@ -623,6 +628,9 @@ PageServer.prototype = {
     },
 
     show: function() {
+        /* HACK: Overflow: auto on motd pre element causes a phantomjs crash */
+        $('#motd').toggleClass("phantom", window.navigator.userAgent.indexOf("PhantomJS") > -1);
+
         this.cpu_plot.start_walking();
         this.memory_plot.start_walking();
         this.disk_plot.start_walking();
@@ -1515,12 +1523,12 @@ $("#link-memory").on("click", function() {
 });
 
 $("#link-network").on("click", function() {
-    cockpit.jump("/network");
+    cockpit.jump("/network", cockpit.transport.host);
     return false;
 });
 
 $("#link-disk").on("click", function() {
-    cockpit.jump("/storage");
+    cockpit.jump("/storage", cockpit.transport.host);
     return false;
 });
 

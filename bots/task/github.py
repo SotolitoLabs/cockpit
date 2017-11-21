@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -183,6 +183,11 @@ class GitHub(object):
                 self.conn.request(method, self.qualify(resource), data, headers)
                 response = self.conn.getresponse()
                 break
+            # This happens when TLS is the source of a disconnection
+            except socket.error as ex:
+                if connected or ex.errno != errno.EPIPE:
+                    raise
+                self.conn = None
             # This happens when GitHub disconnects a keep-alive connection
             except httplib.BadStatusLine:
                 if connected:
@@ -264,17 +269,26 @@ class GitHub(object):
                 count = len(data["statuses"])
         return result
 
-    def pulls(self):
+    def pulls(self, state='open', since=None):
         result = [ ]
         page = 1
         count = 100
         while count == 100:
-            pulls = self.get("pulls?page={0}&per_page={1}".format(page, count))
+            pulls = self.get("pulls?page={0}&per_page={1}&state={2}&sort=created&direction=desc".format(page, count, state))
             count = 0
             page += 1
-            if pulls:
-                result += pulls
-                count = len(pulls)
+            for pull in pulls or []:
+                # Check that the pulls are past the expected date
+                if since:
+                    closed = pull.get("closed_at", None)
+                    if closed and since > time.mktime(time.strptime(closed, "%Y-%m-%dT%H:%M:%SZ")):
+                        continue
+                    created = pull.get("created_at", None)
+                    if not closed and created and since > time.mktime(time.strptime(created, "%Y-%m-%dT%H:%M:%SZ")):
+                        continue
+
+                result.append(pull)
+                count += 1
         return result
 
     # The since argument is seconds since the issue was either
@@ -308,7 +322,7 @@ class GitHub(object):
                     if closed and since > time.mktime(time.strptime(closed, "%Y-%m-%dT%H:%M:%SZ")):
                         continue
                     created = issue.get("created_at", None)
-                    if created and since > time.mktime(time.strptime(created, "%Y-%m-%dT%H:%M:%SZ")):
+                    if not closed and created and since > time.mktime(time.strptime(created, "%Y-%m-%dT%H:%M:%SZ")):
                         continue
 
                 result.append(issue)

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -114,9 +114,14 @@ WantedBy=default.target
 
         b.switch_to_top()
 
-        # The top bar should not be visible on fedora-atomic because no dashboards
-        if "fedora-atomic" in m.image:
-            b.wait_not_visible("#content-navbar")
+        if m.image != "rhel-7-4":
+            # The top bar should not be visible on fedora-atomic because no dashboards
+            b.wait_present(".area-ct-body")
+            if "atomic" in m.image:
+                b.wait_present(".area-ct-body.single-nav")
+            else:
+                b.wait_not_present(".area-ct-body.single-nav")
+            b.wait_present("#host-nav")
 
         # Lets try changing the language
 

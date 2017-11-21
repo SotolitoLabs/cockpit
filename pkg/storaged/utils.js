@@ -203,9 +203,9 @@
             if (client.blocks_part[path] && client.blocks_ptable[client.blocks_part[path].Table]) {
                 is_part = true;
                 path = client.blocks_part[path].Table;
-            } else if (client.blocks_crypto[path] && client.blocks[client.blocks_crypto[path].CryptoBackingDevice]) {
+            } else if (client.blocks[path] && client.blocks[client.blocks[path].CryptoBackingDevice]) {
                 is_crypt = true;
-                path = client.blocks_crypto[path].CryptoBackingDevice;
+                path = client.blocks[path].CryptoBackingDevice;
             } else
                 break;
         }
@@ -468,6 +468,21 @@
         $zone.removeClass('armed');
     };
 
+
+    utils.get_parent = function(client, path) {
+        if (client.blocks_part[path] && client.blocks[client.blocks_part[path].Table])
+            return client.blocks_part[path].Table;
+        if (client.blocks[path] && client.blocks[client.blocks[path].CryptoBackingDevice])
+            return client.blocks[path].CryptoBackingDevice;
+        if (client.blocks[path] && client.drives[client.blocks[path].Drive])
+            return client.blocks[path].Drive;
+        if (client.blocks[path] && client.mdraids[client.blocks[path].MDRaid])
+            return client.blocks[path].MDRaid;
+        if (client.blocks_lvm2[path] && client.lvols[client.blocks_lvm2[path].LogicalVolume])
+            return client.blocks_lvm2[path].LogicalVolume;
+        if (client.lvols[path] && client.vgroups[client.lvols[path].VolumeGroup])
+            return client.lvols[path].VolumeGroup;
+    };
 
     function get_children(client, path) {
         var children = [ ];

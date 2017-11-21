@@ -25,6 +25,13 @@ var _ = cockpit.gettext;
 require("./cockpit-components-file-autocomplete.css");
 
 var FileAutoComplete = React.createClass({
+    propTypes: {
+        id: React.PropTypes.string,
+        placeholder: React.PropTypes.string,
+        value: React.PropTypes.string,
+        superuser: React.PropTypes.string,
+        onChange: React.PropTypes.func,
+    },
     getInitialState () {
         var value = this.props.value || "";
         this.updateFiles(value);
@@ -59,11 +66,45 @@ var FileAutoComplete = React.createClass({
         if (value && value.indexOf("/") !== 0)
             value = "/" + value;
 
-        if (!this.updateIfDirectoryChanged(value));
-            this.filterFiles(value);
+        var stateUpdate;
+        if (!this.updateIfDirectoryChanged(value))
+            stateUpdate = this.filterFiles(value);
+        else
+            stateUpdate = {};
+
+        stateUpdate.value = value;
+        this.setState(stateUpdate);
+
+        this.onChangeCallback(value, {
+            error: stateUpdate.error,
+        });
+    },
+    onChangeCallback: function(value, options) {
+        if (this.props.onChange)
+            this.props.onChange(value, options);
+    },
+
+    onMouseDown: function (ev) {
+        // only consider clicks with the primary button
+        if (ev && ev.button !== 0)
+            return;
+
+        if (ev.target.tagName == 'A') {
+            this.setState({
+                selecting: true,
+            });
+        }
+    },
+
+    onBlur: function() {
+        if (this.state.selecting)
+            return;
+
+        if (this.timer)
+            window.clearTimeout(this.timer);
 
         this.setState({
-            value: value,
+            open: false,
         });
     },
 
@@ -73,10 +114,11 @@ var FileAutoComplete = React.createClass({
         if (this.timer)
             window.clearTimeout(this.timer);
 
-        this.timer = window.setTimeout(function () {
-            self.onChange(value);
-            self.timer = null;
-        }, 250);
+        if (this.state.value !== value)
+            this.timer = window.setTimeout(function() {
+                self.onChange(value);
+                self.timer = null;
+            }, 250);
     },
 
     updateFiles: function(path) {
@@ -93,7 +135,7 @@ var FileAutoComplete = React.createClass({
         });
 
         channel.addEventListener("close", function (ev, data) {
-            self.finishUpdate(results, error || data);
+            self.finishUpdate(results, error || cockpit.format(cockpit.message(data)));
         });
 
         channel.addEventListener("message", function (ev, data) {
@@ -127,15 +169,18 @@ var FileAutoComplete = React.createClass({
         return changed;
     },
 
-    finishUpdate: function(result, error) {
-        result = result.sort(function(a, b) {
-            return a.path.localeCompare(b.path,
-                                        { sensitivity: 'base'});
+    finishUpdate: function(results, error) {
+        results = results.sort(function(a, b) {
+            return a.path.localeCompare(b.path, { sensitivity: 'base' });
+        });
+
+        this.onChangeCallback(this.state.value, {
+            error,
         });
 
         this.setState({
-            displayFiles: result,
-            directoryFiles: result,
+            displayFiles: results,
+            directoryFiles: results,
             error: error,
         });
     },
@@ -149,16 +194,24 @@ var FileAutoComplete = React.createClass({
         inputValue = inputValue.slice(dirLength);
         inputLength = inputValue.length;
 
+        var error;
+
         if (this.state.directoryFiles !== null) {
             matches = this.state.directoryFiles.filter(function (v) {
                 return v.path.toLowerCase().slice(0, inputLength) === inputValue;
             });
+
+            if (matches.length < 1)
+                error = _("No matching files found");
+        } else {
+            error = this.state.error;
         }
 
-        this.setState({
+        return {
             displayFiles: matches,
             open: true,
-        });
+            error,
+        };
     },
 
     showAllOptions: function (ev) {
@@ -187,8 +240,15 @@ var FileAutoComplete = React.createClass({
             value = directory + value;
             this.setState({
                 open: false,
-                value: value
+                value: value,
+                selecting: false,
             });
+
+            this.onChangeCallback(value, {
+                error: this.state.error,
+            });
+
+            this.refs.input.focus();
             this.updateIfDirectoryChanged(value);
         }
     },
@@ -213,15 +273,11 @@ var FileAutoComplete = React.createClass({
         else
             controlClasses += "caret";
 
-        var listItems, error;
-        if (this.state.error)
-            error = cockpit.format(cockpit.message(this.state.error));
-        else if (this.state.directoryFiles && this.state.displayFiles.length < 1)
-            error = _("No matching files found");
+        var listItems;
 
-        if (error) {
-            listItems = [this.renderError(error)];
-            classes += " error"
+        if (this.state.error) {
+            listItems = [this.renderError(this.state.error)];
+            classes += " error";
         } else {
             listItems = React.Children.map(this.state.displayFiles, function(file) {
                 return <li className={file.type}><a data-type={file.type}>{file.path}</a></li>;
@@ -231,9 +287,9 @@ var FileAutoComplete = React.createClass({
         return (
             <div className="combobox-container" id={this.props.id}>
                 <div className={classes}>
-                    <input autocomplete="false" placeholder={placeholder} className="combobox form-control" type="text" onChange={this.delayedOnChange} value={this.state.value} />
+                    <input ref="input" autocomplete="false" placeholder={placeholder} className="combobox form-control" type="text" onChange={this.delayedOnChange} value={this.state.value} onBlur={this.onBlur} />
                     <span onClick={this.showAllOptions} className={controlClasses}></span>
-                    <ul onClick={this.selectItem} className="typeahead typeahead-long dropdown-menu">
+                    <ul onMouseDown={this.onMouseDown} onClick={this.selectItem} className="typeahead typeahead-long dropdown-menu">
                         {listItems}
                     </ul>
                 </div>

@@ -40,6 +40,8 @@ GUIDE_INCLUDES = \
 	doc/guide/feature-terminal.xml \
 	doc/guide/feature-tuned.xml \
 	doc/guide/feature-users.xml \
+	doc/guide/feature-virtualmachines.xml \
+	doc/guide/feature-ovirt.xml \
 	doc/guide/packages.xml \
 	doc/guide/privileges.xml \
 	doc/guide/https.xml \
@@ -99,6 +101,7 @@ dist/guide/html/index.html: $(GUIDE_DOCBOOK) $(GUIDE_INCLUDES) $(man_MANS) $(GUI
 	$(AM_V_GEN) LANG=en_US.UTF-8 $(XMLTO) html -m $(srcdir)/doc/guide/gtk-doc.xsl -o dist/guide/html/ \
 		--searchpath $(abs_builddir):$(abs_srcdir):$(abs_builddir)/doc/guide \
 		$(srcdir)/$(GUIDE_DOCBOOK)
+	rm -f dist/guide/html/cockpit-guide.proc
 
 dist/guide/html: dist/guide/html/index.html
 

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -31,7 +31,7 @@ class TestTerminal(MachineCase):
 
         # Make sure we get what we expect
         m.write("/tmp/bashrc-extra", """
-PS1="\u@\h \W]\$ "
+PS1="\\u@\\h \\W]\$ "
 PROMPT_COMMAND='printf "\\033]0;%s@%s:%s\\007" "${USER}" "${HOSTNAME%%.*}" "${PWD/#$HOME/\~}"'
 """)
         m.execute("cat /tmp/bashrc-extra >>/home/admin/.bashrc")

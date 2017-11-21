@@ -37,39 +37,10 @@
         var jobs_tmpl = $("#jobs-tmpl").html();
         mustache.parse(jobs_tmpl);
 
-        /* As a special service, we try to also show UDisks2 jobs.
-         * (But only if storaged itself isn't behind
-         * org.freedesktop.UDisks2, of course.)  As a shortcut, we
-         * assume that we can blindly transform a UDisks2 object path
-         * into a Storaged object path for the same object.
-         */
-
-        function udisks_path_to_storaged_path(upath) {
-            if (client.udisks_client)
-                return upath.replace("/org/freedesktop/UDisks2/", "/org/storaged/Storaged/");
-            else
-                return upath;
-        }
-
         function update_job_spinners(parent) {
             var path;
 
             $(parent).find('[data-job-object]').css('visibility', 'hidden');
-
-            function get_parent(path) {
-                if (client.blocks_part[path] && client.blocks[client.blocks_part[path].Table])
-                    return client.blocks_part[path].Table;
-                if (client.blocks_crypto[path] && client.blocks[client.blocks_crypto[path].CryptoBackingDevice])
-                    return client.blocks_crypto[path].CryptoBackingDevice;
-                if (client.blocks[path] && client.drives[client.blocks[path].Drive])
-                    return client.blocks[path].Drive;
-                if (client.blocks[path] && client.mdraids[client.blocks[path].MDRaid])
-                    return client.blocks[path].MDRaid;
-                if (client.blocks_lvm2[path] && client.lvols[client.blocks_lvm2[path].LogicalVolume])
-                    return client.blocks_lvm2[path].LogicalVolume;
-                if (client.lvols[path] && client.vgroups[client.lvols[path].VolumeGroup])
-                    return client.lvols[path].VolumeGroup;
-            }
 
             function show_spinners_for_path(path) {
                 $(parent).find('[data-job-object="' + path + '"]').css('visibility', 'visible');
@@ -77,7 +48,7 @@
 
             function show_spinners_for_object(path) {
                 show_spinners_for_path(path);
-                var parent = get_parent(path);
+                var parent = utils.get_parent(client, path);
                 if (parent)
                     show_spinners_for_object(parent);
             }
@@ -89,23 +60,15 @@
                     show_spinners_for_object(paths[i]);
             }
 
-            for (path in client.storaged_jobs)
-                show_spinners_for_objects(client.storaged_jobs[path].Objects);
-
-            for (path in client.udisks_jobs) {
-                show_spinners_for_objects(client.udisks_jobs[path].Objects.map(udisks_path_to_storaged_path));
-            }
+            for (path in client.jobs)
+                show_spinners_for_objects(client.jobs[path].Objects);
         }
 
-        $(client.storaged_jobs).on('added removed changed', function () {
+        $(client.jobs).on('added removed changed', function () {
             update_job_spinners('body');
         });
 
-        $(client.udisks_jobs).on('added removed changed', function () {
-            update_job_spinners('body');
-        });
-
-        function render_jobs_panel() {
+        function query_jobs_data() {
 
             /* Human readable descriptions of the symbolic "Operation"
              * property of job objects.  These are from the storaged
@@ -165,8 +128,7 @@
                     fmt = _("Operation '$operation' on $target");
 
                 var target =
-                    job.Objects.map(function (p) {
-                        var path = udisks_path_to_storaged_path(p);
+                    job.Objects.map(function (path) {
                         if (client.blocks[path])
                             return utils.block_name(client.blocks[path]);
                         else if (client.mdraids[path])
@@ -183,7 +145,7 @@
             }
 
             function job(path) {
-                return client.storaged_jobs[path] || client.udisks_jobs[path];
+                return client.jobs[path];
             }
 
             function cmp_job(a, b) {
@@ -215,6 +177,7 @@
 
                 return {
                     path: path,
+                    dbus: j,
                     Description: make_description(j),
                     Progress: j.ProgressValid && (j.Progress*100).toFixed() + "%",
                     RemainingTime: remaining,
@@ -222,11 +185,14 @@
                 };
             }
 
-            var js = (Object.keys(client.storaged_jobs).concat(Object.keys(client.udisks_jobs)).
-                      filter(job_is_stable).
-                      sort(cmp_job).
-                      map(make_job));
+            return (Object.keys(client.jobs).
+                    filter(job_is_stable).
+                    sort(cmp_job).
+                    map(make_job));
+        }
 
+        function render_jobs_panel() {
+            var js = query_jobs_data();
             return mustache.render(jobs_tmpl,
                                    { Jobs: js,
                                      HasJobs: js.length > 0
@@ -235,6 +201,7 @@
 
         return {
             update:  update_job_spinners,
+            query:   query_jobs_data,
             render:  render_jobs_panel
         };
 

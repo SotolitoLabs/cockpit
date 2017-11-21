@@ -54,6 +54,14 @@ var CryptoTab = React.createClass({
                 function (items) {
                     old_config = utils.array_find(items, function (c) { return c[0] == "crypttab"; });
                     new_config = [ "crypttab", old_config? $.extend({ }, old_config[1]) : { } ];
+
+                    // UDisks insists on always having a "passphrase-contents" field when
+                    // adding a crypttab entry, but doesn't include one itself when returning
+                    // an entry without a stored passphrase.
+                    //
+                    if (!new_config[1]['passphrase-contents'])
+                        new_config[1]['passphrase-contents'] = { t: 'ay', v: utils.encode_filename("") };
+
                     modify (new_config[1], commit);
                 });
         }
@@ -97,18 +105,13 @@ var CryptoTab = React.createClass({
         function edit_options() {
             edit_config(function (config, commit) {
                 dialog.open({ Title: _("Encryption Options"),
-                              Fields: [
-                                  { TextInput: "options",
-                                    Title: _("Options"),
-                                    Value: old_options
-                                  }
-                              ],
+                              Fields: FormatDialog.crypto_options_dialog_fields(old_options),
                               Action: {
                                   Title: _("Apply"),
                                   action: function (vals) {
                                       config["options"] = {
                                           t: 'ay',
-                                          v: utils.encode_filename(vals.options)
+                                          v: utils.encode_filename(FormatDialog.crypto_options_dialog_options(vals))
                                       }
                                       return commit();
                                   }

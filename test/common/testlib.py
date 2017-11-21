@@ -37,6 +37,7 @@ import re
 import json
 import tempfile
 import time
+import signal
 import unittest
 
 import tap
@@ -126,7 +127,7 @@ class Browser:
 
         tries = 0
         while not tryopen(tries >= 20):
-            print "Restarting browser..."
+            print("Restarting browser...")
             sleep(0.1)
             tries = tries + 1
 
@@ -202,20 +203,22 @@ class Browser:
             def __exit__(self, type, value, traceback):
                 browser.phantom.timeout = self.timeout
         r = WaitParamsRestorer(self.phantom.timeout)
-        self.phantom.timeout = max(timeout, self.phantom.timeout)
+        self.phantom.timeout = timeout
         return r
 
     def wait(self, predicate):
-        self.arm_timeout()
+        def alarm_handler(signum, frame):
+            raise Error('timed out waiting for predicate to become true')
+
+        signal.signal(signal.SIGALRM, alarm_handler)
+        orig_handler = signal.alarm(self.phantom.timeout)
         while True:
             val = predicate()
             if val:
-                self.disarm_timeout()
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, orig_handler)
                 return val
             self.wait_checkpoint()
-
-    def inject_js(self, code):
-        self.phantom.do(code);
 
     def wait_js_cond(self, cond):
         return self.phantom.wait(cond)
@@ -333,15 +336,14 @@ class Browser:
                 self.wait_not_visible(".curtains-ct")
                 self.wait_visible("iframe.container-frame[name='%s']" % frame)
                 break
-            except Error, ex:
+            except Error as ex:
                 if reconnect and ex.msg.startswith('timeout'):
                     reconnect = False
                     if self.is_present("#machine-reconnect"):
                         self.click("#machine-reconnect", True)
                         self.wait_not_visible(".curtains-ct")
                         continue
-                exc_info = sys.exc_info()
-                raise exc_info[0], exc_info[1], exc_info[2]
+                raise
 
         self.switch_to_frame(frame)
         self.wait_present("body")
@@ -461,7 +463,7 @@ class MachineCase(unittest.TestCase):
         if opts.address:
             if machine_class or forward:
                 raise unittest.SkipTest("Cannot run this test when specific machine address is specified")
-            machine = testvm.Machine(address=opts.address, image=image, verbose=opts.trace)
+            machine = testvm.Machine(address=opts.address, image=image, verbose=opts.trace, browser=opts.browser)
             self.addCleanup(lambda: machine.disconnect())
         else:
             if not machine_class:
@@ -524,7 +526,7 @@ class MachineCase(unittest.TestCase):
         for retry in range(0, max_retry_hard_limit):
             try:
                 super(MachineCase, self).run(result)
-            except RetryError, ex:
+            except RetryError as ex:
                 assert retry < max_retry_hard_limit
                 sys.stderr.write("{0}\n".format(ex))
                 sleep(retry * 10)
@@ -562,7 +564,7 @@ class MachineCase(unittest.TestCase):
             if not self.machine:
                 self.machine = machine
             if opts.trace:
-                print "Starting {0} {1}".format(key, machine.label)
+                print("Starting {0} {1}".format(key, machine.label))
             machine.start()
 
         def sitter():
@@ -638,38 +640,13 @@ class MachineCase(unittest.TestCase):
         # SELinux messages to ignore
         "(audit: )?type=1403 audit.*",
         "(audit: )?type=1404 audit.*",
-
-        # https://bugzilla.redhat.com/show_bug.cgi?id=1298157
-        "(audit: )?type=1400 .*granted.*comm=\"tuned\".*",
-
-        # https://bugzilla.redhat.com/show_bug.cgi?id=1298171
-        "(audit: )?type=1400 .*denied.*comm=\"iptables\".*name=\"xtables.lock\".*",
-
-        # https://bugzilla.redhat.com/show_bug.cgi?id=1386624
-        ".*type=1400 .*denied  { name_bind } for.*dhclient.*",
-
-        # https://bugzilla.redhat.com/show_bug.cgi?id=1419263
-        ".*type=1400 .*denied  { write } for.*firewalld.*__pycache__.*",
+        # happens on Atomic (https://bugzilla.redhat.com/show_bug.cgi?id=1298157)
+        "(audit: )?type=1400 audit.*: avc:  granted .*",
 
         # https://bugzilla.redhat.com/show_bug.cgi?id=1242656
         "(audit: )?type=1400 .*denied.*comm=\"cockpit-ws\".*name=\"unix\".*dev=\"proc\".*",
         "(audit: )?type=1400 .*denied.*comm=\"ssh-transport-c\".*name=\"unix\".*dev=\"proc\".*",
         "(audit: )?type=1400 .*denied.*comm=\"cockpit-ssh\".*name=\"unix\".*dev=\"proc\".*",
-
-        # https://bugzilla.redhat.com/show_bug.cgi?id=1374820
-        "(audit: )?type=1400 .*denied.*comm=\"systemd\" path=\"/run/systemd/inaccessible/blk\".*",
-
-        # SELinux fighting with systemd: https://bugzilla.redhat.com/show_bug.cgi?id=1253319
-        "(audit: )?type=1400 audit.*systemd-journal.*path=2F6D656D66643A73642D73797374656D642D636F726564756D202864656C6574656429",
-
-        # SELinux and plymouth: https://bugzilla.redhat.com/show_bug.cgi?id=1427884
-        "(audit: )?type=1400 audit.*connectto.*plymouth.*unix_stream_socket.*",
-
-        # SELinux and nfs-utils fighting: https://bugzilla.redhat.com/show_bug.cgi?id=1447854
-        ".*type=1400 .*denied  { execute } for.*sm-notify.*init_t.*",
-
-        # SELinux prevents agetty from being executed by systemd: https://bugzilla.redhat.com/show_bug.cgi?id=1449569
-        ".*type=1400 .*denied  { execute } for.*agetty.*init_t.*",
 
         # apparmor loading
         "(audit: )?type=1400.*apparmor=\"STATUS\".*",
@@ -682,14 +659,6 @@ class MachineCase(unittest.TestCase):
         'calling: info',
         'Sent message type=method_call sender=.*',
         'Got message type=method_return sender=.*',
-
-        # HACK: https://github.com/systemd/systemd/pull/1758
-        'Error was encountered while opening journal files:.*',
-        'Failed to get data: Cannot assign requested address',
-
-        # HACK https://bugzilla.redhat.com/show_bug.cgi?id=1461893
-        # selinux errors while logging in via ssh
-        'type=1401 audit(.*): op=security_compute_av reason=bounds .* tclass=process perms=transition.*',
 
         # Various operating systems see this from time to time
         "Journal file.*truncated, ignoring file.",
@@ -711,15 +680,11 @@ class MachineCase(unittest.TestCase):
                                     "g_dbus_connection_real_closed: Remote peer vanished with error: Underlying GIOStream returned 0 bytes on an async read \\(g-io-error-quark, 0\\). Exiting.",
                                     "connection unexpectedly closed by peer",
                                     "peer did not close io when expected",
-                                    # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
-                                    "localhost: bridge program failed: Child process killed by signal 9",
                                     "request timed out, closing",
                                     "PolicyKit daemon disconnected from the bus.",
                                     ".*couldn't create polkit session subject: No session for pid.*",
                                     "We are no longer a registered authentication agent.",
                                     ".*: failed to retrieve resource: terminated",
-                                    # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1253319
-                                    'audit:.*denied.*2F6D656D66643A73642D73797374656D642D636F726564756D202864656C.*',
                                     'audit:.*denied.*comm="systemd-user-se".*nologin.*',
 
                                     'localhost: dropping message while waiting for child to exit',
@@ -762,7 +727,7 @@ class MachineCase(unittest.TestCase):
                     found = True
                     break
             if not found:
-                print "Unexpected journal message '%s'" % m
+                print("Unexpected journal message '%s'" % m)
                 all_found = False
                 if not first:
                     first = m
@@ -791,7 +756,7 @@ class MachineCase(unittest.TestCase):
                 log = "%s-%s-%s.log" % (label or self.label(), m.label, title)
                 with open(log, "w") as fp:
                     m.execute("journalctl", stdout=fp)
-                    print "Journal extracted to %s" % (log)
+                    print("Journal extracted to %s" % (log))
                     attach(log)
 
     def copy_cores(self, title, label=None):
@@ -802,9 +767,9 @@ class MachineCase(unittest.TestCase):
                 m.download_dir("/var/lib/systemd/coredump", dest)
                 try:
                     os.rmdir(dest)
-                except OSError, ex:
+                except OSError as ex:
                     if ex.errno == errno.ENOTEMPTY:
-                        print "Core dumps downloaded to %s" % (dest)
+                        print("Core dumps downloaded to %s" % (dest))
                         attach(dest)
 
 some_failed = False
@@ -829,7 +794,7 @@ class Phantom:
         if not self._driver:
             self.start()
         if opts.trace:
-            print "-> {0}({1})".format(name, repr(args)[1:-2])
+            print("-> {0}({1})".format(name, repr(args)[1:-2]))
         line = json.dumps({
             "cmd": name,
             "args": args,
@@ -843,15 +808,15 @@ class Phantom:
         try:
             res = json.loads(line)
         except:
-            print line.strip()
+            print(line.strip())
             raise
         if 'error' in res:
             if opts.trace:
-                print "<- raise", res['error']
+                print("<- raise", res['error'])
             raise Error(res['error'])
         if 'result' in res:
             if opts.trace:
-                print "<-", repr(res['result'])
+                print("<-", repr(res['result']))
             return res['result']
         raise Error("unexpected: " + line.strip())
 
@@ -883,99 +848,10 @@ def skipImage(reason, *args):
         return unittest.skip("{0}: {1}".format(testvm.DEFAULT_IMAGE, reason))
     return lambda func: func
 
-class Policy(object):
-    def __init__(self, retryable=True):
-        self.retryable = retryable
-
-    def normalize_traceback(self, trace):
-        # All file paths converted to basename
-        return re.sub(r'File "[^"]*/([^/"]+)"', 'File "\\1"', trace.strip())
-
-    def check_issue(self, trace):
-        cmd = [ "image-naughty", testvm.DEFAULT_IMAGE ]
-
-        try:
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-            (output, error) = proc.communicate(str(trace))
-        except OSError, ex:
-            if getattr(ex, 'errno', 0) != errno.ENOENT:
-                sys.stderr.write("Couldn't check known issue: {0}\n".format(str(ex)))
-            output = ""
-
-        return output
-
-    def check_retry(self, trace, tries):
-        # Never try more than five times
-        if not self.retryable or tries >= 5:
-            return False
-
-        # We check for persistent but test harness or framework specific
-        # failures that otherwise cause flakiness and false positives.
-        #
-        # The things we check here must:
-        #  * have no impact on users of Cockpit in the real world
-        #  * be things we tried to resolve in other ways. This is a last resort
-        #
-        trace = self.normalize_traceback(trace)
-
-        # HACK: An issue in phantomjs and QtWebkit
-        # http://stackoverflow.com/questions/35337304/qnetworkreply-network-access-is-disabled-in-qwebview
-        # https://github.com/owncloud/client/issues/3600
-        # https://github.com/ariya/phantomjs/issues/14789
-        if "PhantomJS or driver broken" in trace:
-            return True
-
-        # HACK: A race issue in phantomjs that happens randomly
-        # https://github.com/ariya/phantomjs/issues/12750
-        if "Resource Error: Operation canceled" in trace:
-            return True
-
-        # HACK: Interacting with sshd during boot is not always predictable
-        # We're using an implementation detail of the server as our "way in" for testing.
-        # This often has to do with sshd being restarted for some reason
-        if "SSH master process exited with code: 255" in trace:
-            return True
-
-        # HACK: Intermittently the new libvirt machine won't get an IP address
-        # or SSH will completely fail to start. We've tried various approaches
-        # to minimize this, but it happens every 100,000 tests or so
-        if "Failure: Unable to reach machine " in trace:
-            return True
-
-        # HACK: For when the verify machine runs out of available processes
-        # We should retry this test process
-        if "self.pid = os.fork()\nOSError: [Errno 11] Resource temporarily unavailable" in trace:
-            return True
-
-        return False
-
 class TestResult(tap.TapResult):
     def __init__(self, stream, descriptions, verbosity):
         self.policy = None
         super(TestResult, self).__init__(verbosity)
-
-    def maybeIgnore(self, test, err):
-        string = self._exc_info_to_string(err, test)
-        if self.policy:
-            issue = self.policy.check_issue(string)
-            if issue:
-                self.addSkip(test, "Known issue #{0}".format(issue))
-                return True
-            tries = getattr(test, "retryCount", 1)
-            if self.policy.check_retry(string, tries):
-                self.offset -= 1
-                setattr(test, "retryCount", tries + 1)
-                test.doCleanups()
-                raise RetryError("Retrying due to failure of test harness or framework")
-        return False
-
-    def addError(self, test, err):
-        if not self.maybeIgnore(test, err):
-            super(TestResult, self).addError(test, err)
-
-    def addFailure(self, test, err):
-        if not self.maybeIgnore(test, err):
-            super(TestResult, self).addError(test, err)
 
     def startTest(self, test):
         sys.stdout.write("# {0}\n# {1}\n#\n".format('-' * 70, str(test)))
@@ -1036,15 +912,13 @@ class TapRunner(object):
     def runOne(self, test, offset):
         result = TestResult(self.stream, False, self.verbosity)
         result.offset = offset
-        if not self.thorough:
-            result.policy = Policy()
         try:
             test(result)
         except KeyboardInterrupt:
             return False
         except:
             sys.stderr.write("Unexpected exception while running {0}\n".format(test))
-            traceback.print_exc(file=sys.stderr)
+            sys.stderr.write(traceback.print_exc())
             return False
         else:
             result.printErrors()
@@ -1052,18 +926,32 @@ class TapRunner(object):
 
     def run(self, testable):
         tap.TapResult.plan(testable)
-        count = testable.countTestCases()
+
+        tests = [ ]
+
+        # The things to test
+        def collapse(test, tests):
+            if test.countTestCases() == 1:
+                tests.append(test)
+            else:
+                for t in test:
+                    collapse(t, tests)
+        collapse(testable, tests)
+
+        # Now setup the count we have
+        count = len(tests)
+        for i, test in enumerate(tests):
+            setattr(test, "tapOffset", i)
 
         # For statistics
         start = time.time()
 
-        pids = set()
+        pids = { }
         options = 0
         buffer = None
-        if self.jobs > 1:
+        if not self.thorough and self.verbosity <= 1:
             buffer = OutputBuffer()
             options = os.WNOHANG
-        offset = 0
         failures = { "count": 0 }
 
         def join_some(n):
@@ -1074,18 +962,32 @@ class TapRunner(object):
                     (pid, code) = os.waitpid(-1, options)
                 except KeyboardInterrupt:
                     sys.exit(255)
-                if pid:
-                    if buffer:
-                        sys.stdout.write(buffer.pop(pid))
-                    pids.remove(pid)
                 if code & 0xff:
                     failed = 1
                 else:
                     failed = (code >> 8) & 0xff
+                if pid:
+                    if buffer:
+                        output = buffer.pop(pid)
+                        test = pids[pid]
+                        failed, retry = self.filterOutput(test, failed, output)
+                        if retry:
+                            tests.append(test)
+                    del pids[pid]
                 failures["count"] += failed
 
-        for test in testable:
+        while True:
             join_some(self.jobs - 1)
+
+            if not tests:
+                join_some(0)
+
+                # See if we inserted more tests
+                if not tests:
+                    break
+
+            # The next test to test
+            test = tests.pop()
 
             # Fork off a child process for each test
             if buffer:
@@ -1099,20 +1001,17 @@ class TapRunner(object):
                     os.dup2(wfd, 1)
                     os.dup2(wfd, 2)
                 random.seed()
+                offset = getattr(test, "tapOffset", 0)
                 if self.runOne(test, offset):
                     sys.exit(0)
                 else:
                     sys.exit(1)
 
             # The parent process
-            pids.add(pid)
+            pids[pid] = test
             if buffer:
                 os.close(wfd)
                 buffer.push(pid, rfd)
-            offset += test.countTestCases()
-
-        # Wait for the remaining subprocesses
-        join_some(0)
 
         # Report on the results
         duration = int(time.time() - start)
@@ -1124,6 +1023,35 @@ class TapRunner(object):
         else:
             sys.stdout.write("# TESTS PASSED {0}\n".format(details))
         return count
+
+    def filterOutput(self, test, failed, output):
+        # Check how many retries we can do of this test
+        tries = getattr(test, "retryCount", 0)
+        tries += 1
+        setattr(test, "retryCount", tries)
+
+        # Didn't fail, just print output and continue
+        if tries >= 3 or not failed:
+            sys.stdout.write(output)
+            return failed, False
+
+        # Otherwise pass through this command if it exists
+        cmd = [ "tests-policy", testvm.DEFAULT_IMAGE ]
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            (output, error) = proc.communicate(output)
+        except OSError as ex:
+            if ex.errno != errno.ENOENT:
+                sys.stderr.write("Couldn't check known issue: {0}\n".format(str(ex)))
+
+        # Write the output
+        sys.stdout.write(output)
+
+        if "# SKIP " in output:
+            failed = 0
+
+        # Whether we should retry the test or not
+        return failed, "# RETRY " in output
 
 def arg_parser():
     parser = argparse.ArgumentParser(description='Run Cockpit test(s)')
@@ -1162,11 +1090,17 @@ def test_main(options=None, suite=None, attachments=None, **kwargs):
 
     standalone = options is None
     parser = arg_parser()
-    parser.add_argument('--machine', dest="address", action="store",
+    parser.add_argument('--machine', metavar="hostname[:port]", dest="address",
                         default=None, help="Run this test against an already running machine")
+    parser.add_argument('--browser', metavar="hostname[:port]", dest="browser",
+                        default=None, help="When using --machine, use this cockpit web address")
 
     if standalone:
         options = parser.parse_args()
+
+    # Sit should always imply verbose
+    if options.sit:
+        options.verbosity = 2
 
     # Have to copy into opts due to python globals across modules
     for (key, value) in vars(options).items():
@@ -1176,6 +1110,7 @@ def test_main(options=None, suite=None, attachments=None, **kwargs):
         parser.error("the -s or --sit argument not avalible with multiple jobs")
 
     opts.address = getattr(opts, "address", None)
+    opts.browser = getattr(opts, "browser", None)
     opts.attachments = os.environ.get("TEST_ATTACHMENTS", attachments)
     if opts.attachments and not os.path.exists(opts.attachments):
         os.makedirs(opts.attachments)

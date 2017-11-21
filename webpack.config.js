@@ -4,6 +4,10 @@
 
 var info = {
     entries: {
+        "apps/apps": [
+            "apps/index.jsx"
+        ],
+
         "dashboard/dashboard": [
             "dashboard/list.js",
         ],
@@ -38,6 +42,10 @@ var info = {
             "machines/vnc.js",
         ],
 
+        "ovirt/vnc": [
+            "ovirt/vnc.js",
+        ],
+
         "networkmanager/network": [
             "networkmanager/interfaces.js",
             "networkmanager/utils.js"
@@ -46,6 +54,11 @@ var info = {
         "ostree/ostree": [
             "ostree/app.js",
             "ostree/ostree.less",
+        ],
+
+        "ovirt/ovirt": [
+            "ovirt/index.js",
+            "ovirt/ovirt.less",
         ],
 
         "playground/jquery-patterns": [
@@ -169,6 +182,10 @@ var info = {
     ],
 
     files: [
+        "apps/index.html",
+        "apps/default.png",
+        "apps/manifest.json",
+
         "dashboard/index.html",
         "dashboard/manifest.json",
 
@@ -195,6 +212,11 @@ var info = {
 
         "ostree/manifest.json",
         "ostree/index.html",
+
+        "ovirt/index.html",
+        "ovirt/manifest.json",
+        "ovirt/vnc.html",
+        "ovirt/vnc.css",
 
         "packagekit/index.html",
         "packagekit/manifest.json",

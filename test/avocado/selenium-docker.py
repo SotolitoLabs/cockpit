@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 
 # we need to be able to find and import seleniumlib, so add this directory
 import os
@@ -16,7 +16,7 @@ class DockerTestSuite(SeleniumTest):
     """
     def test10ContainerTab(self):
         self.login()
-        self.wait_id("sidebar")
+        self.wait_id("host-apps")
         self.click(self.wait_link('Containers', cond=clickable))
         self.wait_frame("docker")
         if self.wait_xpath("//*[@data-action='docker-start']", fatal=False, overridetry=5, cond=clickable):

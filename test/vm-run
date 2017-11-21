@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 # This file is part of Cockpit.
 #
 # Copyright (C) 2013 Red Hat, Inc.
@@ -102,7 +102,7 @@ try:
     if not os.path.exists(machine.image_file):
         try:
             ret = subprocess.call([ os.path.join(BOTS, "image-download"), args.image])
-        except OSError, ex:
+        except OSError as ex:
             if ex.errno != errno.ENOENT:
                 raise
         else:
@@ -119,6 +119,6 @@ try:
     else:
         machine.qemu_console()
 
-except testvm.Failure, ex:
-    print >> sys.stderr, "vm-run:", ex
+except testvm.Failure as ex:
+    sys.stderr.write("vm-run: %s\n" % ex)
     sys.exit(1)

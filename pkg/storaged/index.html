@@ -271,6 +271,109 @@
     </div>
   </script>
 
+  <script id="nfs-mounts-tmpl" type="x-template/mustache">
+    <div class="panel panel-default storage-mounts">
+      <div class="panel-heading">
+        <span class="pull-right">
+          {{#HasMounts}}
+          <button class="btn btn-default fa fa-check nfs-arm-button {{#armed}}active{{/armed}}"></button>
+          {{/HasMounts}}
+          <button class="btn btn-primary fa fa-plus" data-action="mount-add" ></button>
+        </span>
+        <span translatable="yes">NFS Mounts</span>
+      </div>
+      {{#HasMounts}}
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="mount-name" translatable="yes">Server</th>
+            <th class="mount-point" translatable="yes">Mount Point</th>
+            {{#armed}}
+            <th class="mount-actions">&nbsp;</th>
+            {{/armed}}
+            {{^armed}}
+            <th class="mount-size-graph" translatable="yes">Size</th>
+            <th class="mount-size-number">&nbsp;</th>
+            {{/armed}}
+          </tr>
+        </thead>
+        <tbody>
+          {{#Mounts}}
+          <tr>
+            <td>
+              {{Server}} {{RemoteDir}}
+            </td>
+            <td>
+              {{MountPoint}}
+            </td>
+            {{#armed}}
+            <td class="text-right">
+              {{#IsMounted}}
+              <button translatable="yes" class="btn btn-default"
+                      data-action="mount-unmount" data-arg="{{action_arg}}">Unmount</button>
+              {{/IsMounted}}
+              {{^IsMounted}}
+              <button translatable="yes" class="btn btn-default"
+                      data-action="mount-mount" data-arg="{{action_arg}}">Mount</button>
+              {{/IsMounted}}
+              {{#CanEdit}}
+              <button class="btn btn-default pficon pficon-edit"
+                      data-action="mount-edit" data-arg="{{action_arg}}"></button>
+              <button class="btn btn-danger pficon pficon-delete"
+                      data-action="mount-remove" data-arg="{{action_arg}}"></button>
+              {{/CanEdit}}
+            </td>
+            {{/armed}}
+            {{^armed}}
+            {{#IsMounted}}
+            <td>
+              <div class="progress">
+                <div class="progress-bar {{#UsageCritical}}progress-bar-danger{{/UsageCritical}}"
+                     data-width="{{UsagePercent}}%">
+                </div>
+              </div>
+            </td>
+            <td class="usage-text">
+              {{UsageText}}
+            </td>
+            {{/IsMounted}}
+            {{^IsMounted}}
+            <td>
+              Not mounted
+            </td>
+            <td>
+            </td>
+            {{/IsMounted}}
+            {{/armed}}
+          </tr>
+          {{/Mounts}}
+        </tbody>
+      </table>
+      {{/HasMounts}}
+      {{^HasMounts}}
+      <div translatable="yes" class="empty-panel-text">No NFS mounts set up</div>
+      {{/HasMounts}}
+    </div>
+  </script>
+
+  <script id="nfs-users-tmpl" type="x-template/mustache">
+    <div>
+      <p>{{Description}}</p>
+      <div class="nfs-users-table">
+        <table>
+          <tbody>
+            {{#Users}}
+            <tr>
+              <td>{{unit}}</td>
+              <td>{{desc}}</td>
+            </tr>
+            {{/Users}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </script>
+
   <script id="jobs-tmpl" type="x-template/mustache">
     {{#HasJobs}}
     <div class="panel panel-default">
@@ -335,6 +438,7 @@
       </div>
       <br/>
       <div id="mounts"></div>
+      <div id="nfs-mounts"></div>
       <div id="jobs"></div>
       <div class="panel panel-default cockpit-log-panel">
         <div class="panel-heading" translatable="yes">Storage Logs</div>
@@ -354,270 +458,7 @@
 
   <!-- DETAIL -->
 
-  <script id="action-btn-tmpl"  type="x-template/mustache">
-    <div class="btn-group">
-      <button data-action="{{def.action}}" data-arg="{{arg}}" class="btn btn-default storage-privileged">{{def.title}}</button>
-      <button class="btn btn-default dropdown-toggle storage-privileged" data-toggle="dropdown">
-        <span class="caret"></span>
-      </button>
-      <ul class="dropdown-menu action-dropdown-menu" role="menu">
-        {{#actions}}
-        <li class="presentation">
-          <a class="{{#disabled}}disabled{{/disabled}}"
-             data-action="{{action}}" data-arg="{{arg}}" role="menuitem">{{title}}</a>
-        </li>
-        {{/actions}}
-      </ul>
-    </div>
-  </script>
-
-  <script id="content-tmpl" type="x-template/mustache">
-    <div class="panel panel-default" id="content">
-      <div class="panel-heading">
-        <span>{{Title}}</span>
-        {{#path}}
-        <button class="btn btn-default storage-privileged pull-right" translatable="yes"
-                data-action="format_disk" data-arg="{{path}}">Create partition table</button>
-        {{/path}}
-      </div>
-      <ul class="list-group">
-        {{#Entries}}
-        <li class="list-group-item content-item">
-          <table>
-            <tr>
-              <td width="50%" class="content-level-{{Level}}">
-                {{{Description}}}
-              </td>
-              <td class="content-name">{{Name}}</td>
-              <td class="content-action">
-                <div>
-                  <div class="spinner spinner-sm" data-job-object="{{job_object}}"></div>
-                </div>
-                {{{Button}}}
-              </td>
-            </tr>
-          </table>
-        {{/Entries}}
-      </ul>
-    </div>
-  </script>
-
-  <script id="block-detail-tmpl" type="x-template/mustache">
-    <div class="panel panel-default">
-      <div class="panel-heading">
-        {{#Drive}}
-        <span translatable="yes">Drive</span>
-        {{/Drive}}
-        {{^Drive}}
-        <span translatable="yes">Block Device</span>
-        {{/Drive}}
-      </div>
-      <div class="panel-body">
-        <table class="info-table-ct">
-          {{#Drive}}
-          <tr>
-            <td translatable="yes" context="storage">Model</td>
-            <td>{{dbus.Model}}</td>
-          </tr>
-          {{#dbus.Revision}}
-          <tr>
-            <td translatable="yes" context="storage">Firmware Version</td>
-            <td>{{.}}</td>
-          </tr>
-          {{/dbus.Revision}}
-          {{#dbus.Serial}}
-          <tr>
-            <td translatable="yes" context="storage">Serial Number</td>
-            <td>{{.}}</td>
-          </tr>
-          {{/dbus.Serial}}
-          {{#dbus.WWN}}
-          <tr>
-            <td translatable="yes" context="storage">World Wide Name</td>
-            <td>{{.}}</td>
-          </tr>
-          {{/dbus.WWN}}
-          <tr>
-            <td translatable="yes" context="storage">Capacity</td>
-            <td>
-              {{#Size}}{{.}}{{/Size}}
-              {{^Size}}<span translatable="yes">No media inserted</span>{{/Size}}
-            </td>
-          </tr>
-          {{#Assessment}}
-          <tr>
-            <td translatable="yes" context="storage">Assessment</td>
-            <td>
-              {{#Failing}}
-              <span translatable="yes" class="cockpit-disk-failing">DISK IS FAILING</span>
-              {{/Failing}}
-              {{^Failing}}
-              <span translatable="yes">Disk is OK</span>
-              {{/Failing}}
-              {{#Temperature}}
-              <span> ({{.}})</span>
-              {{/Temperature}}
-            </td>
-          </tr>
-          {{/Assessment}}
-          {{^Multipath}}
-          <tr>
-            <td translatable="yes" context="storage">Device File</td>
-            <td>{{Device}}</td>
-          </tr>
-          {{/Multipath}}
-          {{#Multipath}}
-          <tr>
-            <td translatable="yes" context="storage">Device File</td>
-            <td>
-              <!-- There are three interesting cases here for a
-                   multipath device:
-
-                   a) Everything is setup as expected and there is a
-                      master device which we can show.
-
-                   b) The multipathd service isn't running and there
-                      is no master device.  In this case, there is a
-                      big alert at the top of the page that tells the
-                      user about multipathd not running, so we just
-                      show a "-" as the device.
-
-                   c) The multipathd service _is_ running but there
-                      _still_ is no master device.  Something is
-                      wrong, but we have no idea what and can't offer
-                      any good advise or help with fixing it.  Thus,
-                      we also show "-" in this case.  In the future,
-                      with a richer multipath API, we can hopefully
-                      offer better explanations and useful knobs for
-                      fixing things.
-
-                   Although case b) and c) show the same thing, we
-                   keep them separate in the markup so that it is easy
-                   to change our minds.
-                -->
-              {{#Device}}{{.}}{{/Device}}                <!-- a) -->
-              {{^Device}}
-              {{^MultipathActive}}-{{/MultipathActive}}  <!-- b) -->
-              {{#MultipathActive}}-{{/MultipathActive}}  <!-- c) -->
-              {{/Device}}
-            </td>
-          </tr>
-          <tr>
-            <td translatable="yes" context="storage">Multipathed Devices</td>
-            <td>{{#Devices}}{{.}} {{/Devices}}</td>
-          </tr>
-          {{/Multipath}}
-          {{/Drive}}
-          {{^Drive}}
-          <tr>
-            <td translatable="yes" context="storage">Device File</td>
-            <td>{{Block.Name}}</td>
-          </tr>
-          <tr>
-            <td translatable="yes" context="storage">Capacity</td>
-            <td>{{Block.Size}}</td>
-          </tr>
-          {{/Drive}}
-        </table>
-      </div>
-    </div>
-  </script>
-
-  <script id="mdraid-detail-tmpl" type="x-template/mustache">
-    {{#MDRaid.Degraded}}
-    <div class="alert alert-danger">
-      <span class="pficon pficon-error-circle-o"></span>
-      <span translatable="yes">The RAID Array is in a degraded state</span> - {{.}}
-    </div>
-    {{/MDRaid.Degraded}}
-    <div class="panel panel-default">
-      <div class="panel-heading">
-        {{#MDRaid}}<span>{{Name}}</span> {{/MDRaid}}<span translatable="yes">RAID Device</span>
-        <span class="pull-right">{{{MDRaidButton}}}</span>
-      </div>
-      {{#MDRaid}}
-      <table class="info-table-ct">
-        <tr>
-          <td translatable="yes" context="storage">Device</td>
-          <td>{{Block.Device}}</td>
-        </tr>
-        <tr>
-          <td translatable="yes" context="storage">UUID</td>
-          <td>{{dbus.UUID}}</td>
-        </tr>
-        <tr>
-          <td translatable="yes" context="storage">Capacity</td>
-          <td>{{Size}}</td>
-        </tr>
-        <tr>
-          <td translatable="yes" context="storage">RAID Level</td>
-          <td>{{Level}}</td>
-        </tr>
-        {{#Bitmap}}
-        <tr>
-          <td translatable="yes" context="storage">Bitmap</td>
-          <td>
-            <div class="btn-group btn-toggle"
-                 data-action="mdraid_toggle_bitmap" data-arg="{{dbus.path}}">
-              <button translatable="yes" class="btn {{#Value}}btn-primary active{{/Value}} btn-default">On</button>
-              <button translatable="yes" class="btn {{^Value}}btn-primary active{{/Value}} btn-default">Off</button>
-            </div>
-          </td>
-        </tr>
-        {{/Bitmap}}
-        <tr>
-          <td translatable="yes" context="storage">State</td>
-          <td>
-            {{State}}
-          </td>
-        </tr>
-      </table>
-      {{/MDRaid}}
-    </div>
-  </script>
-
-  <script id="vgroup-detail-tmpl" type="x-template/mustache">
-    <div class="panel panel-default">
-      <div class="panel-heading">
-        {{#VGroup}}<span>{{dbus.Name}}</span> {{/VGroup}}<span translatable="yes">Volume Group</span>
-        <span class="pull-right">{{{VGroupButton}}}</span>
-      </div>
-      {{#VGroup}}
-      <table class="info-table-ct">
-        <tr>
-          <td translatable="yes" context="storage">UUID</td>
-          <td>{{dbus.UUID}}</td>
-        </tr>
-        <tr>
-          <td translatable="yes" context="storage">Capacity</td>
-          <td>{{Size}}</td>
-        </tr>
-      </table>
-      {{/VGroup}}
-    </div>
-  </script>
-
   <div id="storage-detail" hidden>
-    <div class="col-md-12">
-      <ol class="breadcrumb">
-        <li><a translatable="yes">Storage</a></li>
-        <li class="active"></li>
-      </ol>
-    </div>
-
-    <div id="detail-header" class="col-md-12">
-    </div>
-    <div id="detail-sidebar" class="col-md-4 col-lg-3 col-md-push-8 col-lg-push-9">
-    </div>
-    <!-- column classes for #detail-body are set via JavaScript -->
-    <div id="detail-body">
-      <div id="detail-content"></div>
-      <div id="detail-jobs"></div>
-      <div class="panel panel-default cockpit-log-panel">
-        <div class="panel-heading" translatable="yes">Storage Log</div>
-        <div class="panel-body" id="storage-detail-log"></div>
-      </div>
-    </div>
   </div>
 
   <!-- DIALOGS -->
@@ -647,6 +488,7 @@
           <div class="modal-header">
             <h4 class="modal-title">{{Title}}</h4>
           </div>
+          {{#HasBody}}
           <div class="modal-body">
             {{#Alerts}}
             <div class="alert alert-danger">
@@ -672,13 +514,14 @@
             </table>
             {{/HasMDRaidMembers}}
             {{/Blocking}}
+            {{{Body}}}
             <table class="form-table-ct">
               {{#Fields}}
               <tr>
                 {{#TextInput}}
                 <td class="top">{{Title}}</td>
                 <td>
-                  <input class="form-control" type="text" {{#Value}}value="{{.}}"{{/Value}} data-field={{.}}>
+                  <input class="form-control" {{#disabled}}disabled{{/disabled}} type="text" {{#Value}}value="{{.}}"{{/Value}} data-field={{.}}>
                 </td>
                 {{/TextInput}}
                 {{#PassInput}}
@@ -727,7 +570,7 @@
                 </td>
                 {{/SizeSlider}}
                 {{#CheckBox}}
-                <td></td>
+                <td class="top">{{RowTitle}}</td>
                 <td>
                   <div class="checkbox">
                     <label>
@@ -736,6 +579,21 @@
                   </div>
                 </td>
                 {{/CheckBox}}
+                {{#CheckBoxText}}
+                <td class="top">{{RowTitle}}</td>
+                <td>
+                  <div class="dialog-checkbox-text" data-field={{.}}>
+                    <div class="checkbox">
+                      <label>
+                        <input type="checkbox" {{#Checked}}checked{{/Checked}}>
+                        {{Title}}
+                      </label>
+                    </div>
+                    <input class="form-control" type="text" {{^Checked}}hidden{{/Checked}}
+                           {{#Value}}value="{{.}}"{{/Value}}>
+                  </div>
+                </td>
+                {{/CheckBoxText}}
                 {{#SelectOne}}
                 <td class="top">{{Title}}</td>
                 <td>
@@ -797,6 +655,19 @@
                   </table>
                 </td>
                 {{/SelectRow}}
+                {{#ComboBox}}
+                <td class="top">{{Title}}</td>
+                <td>
+                  <div data-field={{.}} class="combobox-container">
+                    <div class="input-group">
+                      <input autocomplete="false" class="combobox form-control" type="text" {{#disabled}}disabled{{/disabled}} value={{Value}} />
+                      <span class="form-control-feedback caret"></span>
+                      <ul class="typeahead typeahead-long dropdown-menu">
+                      </ul>
+                    </div>
+                  </div>
+                </td>
+                {{/ComboBox}}
                 {{#Arrow}}
                 <td colspan="2">
                   <div data-field={{.}} class="dialog-arrow {{^Value}}collapsed{{/Value}}">
@@ -809,6 +680,7 @@
               {{/Fields}}
             </table>
           </div>
+          {{/HasBody}}
           <div class="modal-footer">
             {{#Teardown}}
             <div class="modal-footer-teardown">
@@ -839,17 +711,26 @@
                 {{/MDRaidMembers}}
               </table>
               {{/HasMDRaidMembers}}
+              {{#HasUnits}}
+              <p translate>The filesystem is in use by system services or login sessions.<br>
+                Proceeding will stop these services and sessions.</p>
+              <table class="table table-bordered">
+                {{#Units}}
+                <tr><td><span class="pull-right">{{Name}}</span>{{Unit}}</td></tr>
+                {{/Units}}
+              </table>
+              {{/HasUnits}}
             </div>
             {{/Teardown}}
             {{#Action}}
             {{#Danger}}<div class="modal-footer-danger">{{.}}</div>{{/Danger}}
             <div class="spinner spinner-sm pull-left" hidden></div>
-            <button class="btn btn-default" translatable="yes" data-dismiss="modal">Cancel</button>
-            <button class="btn {{#Danger}}btn-danger{{/Danger}}{{^Danger}}btn-primary{{/Danger}}"
+            <button class="btn btn-default" translatable="yes" data-action="cancel">Cancel</button>
+            <button class="btn {{#DangerButton}}btn-danger{{/DangerButton}}{{^DangerButton}}btn-primary{{/DangerButton}}"
                     data-action="apply">{{Title}}</button>
             {{/Action}}
             {{^Action}}
-            <button class="btn btn-default" translatable="yes" data-dismiss="modal">Close</button>
+            <button class="btn btn-default" translatable="yes" data-action="cancel">Close</button>
             {{/Action}}
           </div>
         </div>

@@ -25,6 +25,7 @@
 
     var mustache = require("mustache");
     require("patterns");
+    require("cockpit-components-file-autocomplete.css");
 
     var _ = cockpit.gettext;
 
@@ -54,8 +55,18 @@
             // Help SelectMany with counting
             if (f.SelectMany)
                 f.HasOptions = (f.Options.length > 0);
+
+            // Help CheckBoxText with detecting "false"
+            if (f.CheckBoxText)
+                f.Checked = (f.Value !== false);
         });
 
+        if (def.Action && def.Action.Danger)
+            def.Action.DangerButton = true;
+
+        function empty(obj) { return !obj || obj.length === 0; }
+
+        def.HasBody = !empty(def.Fields) || !empty(def.Alerts) || !empty(def.Blocking);
 
         function toggle_arrow(event) {
             /* jshint validthis:true */
@@ -126,6 +137,8 @@
         function setup_size_slider(field) {
             var value = field.Value || field.Max;
             var parent = $dialog.find('[data-field="' + field.SizeSlider + '"]');
+            var input = parent.find('.size-text');
+            var unit = parent.find('.size-unit');
             var slider = $("<div class='slider'>").
                 append($("<div class='slider-bar'>").
                     append($("<div class='slider-thumb'>")));
@@ -140,7 +153,8 @@
             parent.find('.size-unit').on('change', size_unit_changed);
 
             slider.prop("value", value / field.Max);
-            slider.trigger("change", [value / field.Max]);
+            parent.val(value);
+            input.val(cockpit.format_number(value / +unit.val()));
         }
 
         function size_slider_changed(event, value) {
@@ -160,8 +174,9 @@
             if (value > max)
                 value = max;
 
-            parent.val(value);
             input.val(cockpit.format_number(value / +unit.val()));
+            parent.val(value);
+            $(parent).trigger("change");
         }
 
         function size_text_changed(event) {
@@ -189,6 +204,7 @@
 
             slider.prop("value", value / max);
             parent.val(value);
+            $(parent).trigger("change");
         }
 
         function size_unit_changed(event) {
@@ -200,17 +216,111 @@
             input.val(cockpit.format_number(+parent.val() / +unit.val()));
         }
 
+        function size_update(field, value) {
+            var parent = $dialog.find('[data-field="' + field.SizeSlider + '"]');
+            var input = parent.find('.size-text');
+            var unit = parent.find('.size-unit');
+            var slider = parent.find('.slider');
+
+            if (typeof value == "number")
+                value = { Value: value };
+
+            if (value.Max !== undefined) {
+                field.Max = value.Max;
+                parent.data('max', field.Max);
+            }
+
+            if (value.Round !== undefined) {
+                field.Round = value.Round;
+                parent.data('round', field.Round);
+            }
+
+            if (value.Value !== undefined) {
+                slider.prop("value", value.Value / field.Max);
+                input.val(cockpit.format_number(value.Value / +unit.val()));
+                parent.val(value.Value);
+            }
+        }
+
         def.Fields.forEach(function (f) {
             if (f.SizeSlider) {
                 setup_size_slider(f);
             }
         });
 
+        // CheckBoxText
+
+        $dialog.on("change", ".dialog-checkbox-text input[type=checkbox]", function (event) {
+            var parent = $(event.target).parents("[data-field]");
+            var input = parent.find("input[type=text]");
+            input.toggle(event.target.checked);
+        });
+
+        /* ComboBoxes
+         */
+
+        $dialog.on("click", ".combobox-container .caret", function(ev) {
+            $(this).parents(".input-group").toggleClass("open");
+        });
+
+        $dialog.on("click", ".combobox-container li a", function(ev) {
+            $(this).parents(".input-group").find("input").val($(this).text()).trigger("change");
+            $(this).parents(".input-group").removeClass("open");
+        });
+
+        function combobox_set_choices(name, choices) {
+            if (typeof choices == 'function') {
+                $.when(choices(get_field_values())).then(function (result) {
+                    if (result !== false)
+                        combobox_set_choices(name, result);
+                });
+                return;
+            }
+
+            var $f = $dialog.find('[data-field="' + name + '"]');
+            var $ul = $f.find('ul');
+            $ul.empty().append(choices.map(function (c) {
+                return $('<li>').append($('<a>').text(c));
+            }));
+            $f.find(".caret").toggle(choices.length > 0);
+        }
+
+        var combobox_some_dynamic = false;
+
+        $dialog.find(".combobox-container .caret").hide();
+        def.Fields.forEach(function (f) {
+            if (f.ComboBox) {
+                if (typeof f.Choices == 'function')
+                    combobox_some_dynamic = true;
+                combobox_set_choices(f.ComboBox, f.Choices);
+            }
+        });
+
+        var combobox_timeout;
+
+        function combobox_reset_dynamic_choices() {
+            if (!combobox_some_dynamic)
+                return;
+
+            if (combobox_timeout)
+                window.clearTimeout(combobox_timeout);
+            combobox_timeout = window.setTimeout(function () {
+                def.Fields.forEach(function (f) {
+                    if (f.ComboBox && typeof f.Choices == 'function') {
+                        combobox_set_choices(f.ComboBox, f.Choices);
+                    }
+                });
+            }, 500);
+        }
+
+        /* Main
+         */
+
         var invisible = { };
 
         function get_name(f) {
             return (f.TextInput || f.PassInput || f.SelectOne || f.SelectMany || f.SizeInput ||
-                    f.SizeSlider || f.CheckBox || f.Arrow || f.SelectRow);
+                    f.SizeSlider || f.CheckBox || f.Arrow || f.SelectRow || f.CheckBoxText || f.ComboBox);
         }
 
         function get_field_values() {
@@ -242,8 +352,17 @@
                         if ($(e).hasClass('highlight-ct'))
                             vals[n] = f.Rows[i].value;
                     });
+                } else if (f.ComboBox) {
+                    vals[n] = $f.find('input[type=text]').val();
                 } else if (f.Arrow) {
                     vals[n] = !$f.hasClass('collapsed');
+                } else if (f.CheckBoxText) {
+                    var box = $f.find("input[type=checkbox]");
+                    var input = $f.find("input[type=text]");
+                    if (!box.prop('checked'))
+                        vals[n] = false;
+                    else
+                        vals[n] = input.val();
                 }
             });
 
@@ -258,6 +377,19 @@
                     var n = get_name(f);
                     invisible[n] = !f.visible(vals);
                     $dialog.find('[data-field="' + n + '"]').parents('tr').toggle(!invisible[n]);
+                }
+            });
+        }
+
+        function update_fields(trigger) {
+            def.Fields.forEach(function (f) {
+                if (f.TextInput && f.update) {
+                    $dialog.find('[data-field="' + f.TextInput + '"]').val(f.update(get_field_values(), trigger));
+                } else if (f.CheckBox && f.update) {
+                    $dialog.find('[data-field="' + f.CheckBox + '"]').prop('checked',
+                                                                           f.update(get_field_values(), trigger));
+                } else if (f.SizeSlider && f.update) {
+                    size_update(f, f.update(get_field_values(), trigger));
                 }
             });
         }
@@ -304,8 +436,12 @@
             return (errors.length === 0)? vals : null;
         }
 
-        $dialog.on('change input', function () {
+        $dialog.on('change input', function (event) {
             update_visibility();
+            combobox_reset_dynamic_choices();
+            var trigger = $(event.target).attr("data-field");
+            if (trigger)
+                update_fields(trigger);
         });
 
         function error_field_to_target(err) {
@@ -317,6 +453,16 @@
                 return err;
         }
 
+        function close() {
+            if (combobox_timeout)
+                window.clearTimeout(combobox_timeout);
+            $dialog.modal('hide');
+        }
+
+        $dialog.find('button[data-action="cancel"]').on('click', function () {
+            close();
+        });
+
         $dialog.find('button[data-action="apply"]').on('click', function () {
             var vals = get_validated_field_values();
             if (vals !== null) {
@@ -325,7 +471,7 @@
                     $dialog.dialog('wait', promise);
                     promise
                         .done(function (result) {
-                            $dialog.modal('hide');
+                            close();
                         })
                         .fail(function (err) {
                             if (def.Action.failure_filter)
@@ -339,7 +485,7 @@
                             }
                         });
                 } else {
-                    $dialog.modal('hide');
+                    close();
                 }
             }
         });

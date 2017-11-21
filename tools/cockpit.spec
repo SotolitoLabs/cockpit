@@ -20,6 +20,12 @@
 %define rhel 0
 %endif
 
+# for testing this already gets set in fedora.install, as we want the target
+# VERSION_ID, not the mock chroot's one
+%if "%{!?os_version_id:1}"
+%define os_version_id %(. /etc/os-release; echo $VERSION_ID)
+%endif
+
 %define _hardened_build 1
 
 # define to build the dashboard
@@ -51,7 +57,7 @@ BuildRequires: pkgconfig(polkit-agent-1) >= 0.105
 BuildRequires: pam-devel
 
 BuildRequires: autoconf automake
-BuildRequires: /usr/bin/python
+BuildRequires: /usr/bin/python2
 BuildRequires: intltool
 %if %{defined build_dashboard}
 BuildRequires: libssh-devel >= %{libssh_version}
@@ -119,18 +125,18 @@ machines.
 # generated and source file changes
 # Keep this in sync with tools/debian/rules.
 if [ -n "%{patches}" ]; then
-	git init
-	git config user.email "unused@example.com" && git config user.name "Unused"
-	git config core.autocrlf false && git config core.safecrlf false && git config gc.auto 0
-	git add -f . && git commit -a -q -m "Base" && git tag -a initial --message="initial"
-	git am --whitespace=nowarn %{patches}
-	touch -r $(git diff --name-only initial..HEAD) .git
-	rm -rf .git
+    git init
+    git config user.email "unused@example.com" && git config user.name "Unused"
+    git config core.autocrlf false && git config core.safecrlf false && git config gc.auto 0
+    git add -f . && git commit -a -q -m "Base" && git tag -a initial --message="initial"
+    git am --whitespace=nowarn %{patches}
+    touch -r $(git diff --name-only initial..HEAD) .git
+    rm -rf .git
 fi
 
 %build
 exec 2>&1
-%configure --disable-silent-rules --with-cockpit-user=cockpit-ws --with-branding=auto --with-selinux-config-type=etc_t %{?rhel:--without-storaged-iscsi-sessions} %{!?build_dashboard:--disable-ssh}
+%configure --disable-silent-rules --with-cockpit-user=cockpit-ws --with-selinux-config-type=etc_t %{?rhel:--without-storaged-iscsi-sessions} %{!?build_dashboard:--disable-ssh}
 make -j4 %{?extra_flags} all
 
 %check
@@ -205,8 +211,14 @@ find %{buildroot}%{_datadir}/%{name}/ostree -type f >> ostree.list
 echo '%dir %{_datadir}/%{name}/packagekit' >> packagekit.list
 find %{buildroot}%{_datadir}/%{name}/packagekit -type f >> packagekit.list
 
+echo '%dir %{_datadir}/%{name}/apps' >> packagekit.list
+find %{buildroot}%{_datadir}/%{name}/apps -type f >> packagekit.list
+
 echo '%dir %{_datadir}/%{name}/machines' > machines.list
 find %{buildroot}%{_datadir}/%{name}/machines -type f >> machines.list
+
+echo '%dir %{_datadir}/%{name}/ovirt' > ovirt.list
+find %{buildroot}%{_datadir}/%{name}/ovirt -type f >> ovirt.list
 
 # on CentOS systems we don't have the required setroubleshoot-server packages
 %if 0%{?centos}
@@ -259,7 +271,7 @@ cat kdump.list subscriptions.list sosreport.list networkmanager.list selinux.lis
 # dwz has trouble with the go binaries
 # https://fedoraproject.org/wiki/PackagingDrafts/Go
 %global _dwz_low_mem_die_limit 0
-%if 0%{?fedora} >= 27
+%if 0%{?fedora} >= 27 || 0%{?rhel} >= 8
 %global _debugsource_packages 1
 %global _debuginfo_subpackages 0
 %endif
@@ -274,6 +286,8 @@ cat kdump.list subscriptions.list sosreport.list networkmanager.list selinux.lis
 
 # -------------------------------------------------------------------------------
 # Sub-packages
+
+%define __lib lib
 
 %package bridge
 Summary: Cockpit bridge server-side component
@@ -315,6 +329,18 @@ The Cockpit components for managing virtual machines.
 
 %files machines -f machines.list
 
+%package ovirt
+Summary: Cockpit user interface for oVirt virtual machines
+Requires: %{name}-bridge >= %{required_base}
+Requires: %{name}-system >= %{required_base}
+Requires: libvirt
+Requires: libvirt-client
+
+%description ovirt
+The Cockpit components for managing oVirt virtual machines.
+
+%files ovirt -f ovirt.list
+
 %package ostree
 Summary: Cockpit user interface for rpm-ostree
 # Requires: Uses new translations functionality
@@ -351,15 +377,16 @@ Cockpit support for reading PCP metrics and loading PCP archives.
 
 %if %{defined build_dashboard}
 %package dashboard
-Summary: Cockpit SSH remoting and dashboard
+Summary: Cockpit remote servers and dashboard
 Requires: libssh >= %{libssh_version}
-Provides: %{name}-ssh
+Provides: %{name}-ssh = %{version}-%{release}
 # nothing depends on the dashboard, but we can't use it with older versions of the bridge
 Conflicts: %{name}-bridge < 135
 Conflicts: %{name}-ws < 135
 
 %description dashboard
-Cockpit support for remoting to other servers, bastion hosts, and a basic dashboard
+Cockpit support for connecting to remote servers (through ssh),
+bastion hosts, and a basic dashboard.
 
 %files dashboard -f dashboard.list
 %{_libexecdir}/cockpit-ssh
@@ -385,18 +412,46 @@ fi
 %endif
 %endif
 
+# storaged on RHEL 7.4 and Fedora < 27, udisks on newer ones
+# Recommends: not supported in RHEL < 8
 %package storaged
 Summary: Cockpit user interface for storage, using Storaged
 Requires: %{name}-shell >= %{required_base}
+%if (0%{?rhel} == 7 && "%{os_version_id}" == "7.4") || 0%{?centos} == 7
 Requires: storaged >= 2.1.1
-%if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
-Recommends: storaged-lvm2 >= 2.1.1
-Recommends: storaged-iscsi >= 2.1.1
-Recommends: device-mapper-multipath
-%else
 Requires: storaged-lvm2 >= 2.1.1
 Requires: storaged-iscsi >= 2.1.1
 Requires: device-mapper-multipath
+%else
+%if 0%{?rhel} == 7
+Requires: udisks2 >= 2.6
+# FIXME: udisks2 modules not yet available on 7.5
+%if "%{os_version_id}" != "7.5"
+Requires: udisks2-lvm2 >= 2.6
+Requires: udisks2-iscsi >= 2.6
+%endif
+Requires: device-mapper-multipath
+%else
+%if 0%{?fedora} >= 27 || 0%{?rhel} >= 8
+Requires: udisks2 >= 2.6
+Recommends: udisks2-lvm2 >= 2.6
+Recommends: udisks2-iscsi >= 2.6
+Recommends: device-mapper-multipath
+%else
+# Fedora < 27
+Requires: storaged >= 2.1.1
+Recommends: storaged-lvm2 >= 2.1.1
+Recommends: storaged-iscsi >= 2.1.1
+Recommends: device-mapper-multipath
+%endif
+%endif
+%endif
+%if 0%{?fedora}
+Requires: python3
+Requires: python3-dbus
+%else
+Requires: python
+Requires: python-dbus
 %endif
 BuildArch: noarch
 
@@ -446,7 +501,7 @@ Summary: Tests for Cockpit
 Requires: %{name}-bridge >= 138
 Requires: %{name}-system >= 138
 Requires: openssh-clients
-Provides: %{name}-test-assets
+Provides: %{name}-test-assets = %{version}-%{release}
 Obsoletes: %{name}-test-assets < 132
 
 %description tests
@@ -456,7 +511,7 @@ These files are not required for running Cockpit.
 %files tests
 %config(noreplace) %{_sysconfdir}/cockpit/cockpit.conf
 %{_datadir}/%{name}/playground
-%{_prefix}/lib/cockpit-test-assets
+%{_prefix}/%{__lib}/cockpit-test-assets
 
 %package integration-tests
 Summary: Integration tests for Cockpit
@@ -465,10 +520,14 @@ Requires: expect
 Requires: libvirt
 Requires: libvirt-client
 Requires: libvirt-daemon
+%if 0%{?rhel} >= 8 || 0%{?centos} >= 8 || 0%{?fedora} >= 27
+Requires: python2-libvirt
+%else
 Requires: libvirt-python
+%endif
 Requires: qemu-kvm
 Requires: npm
-Requires: python
+Requires: python2
 Requires: rsync
 Requires: xz
 Requires: openssh-clients
@@ -501,9 +560,12 @@ The Cockpit Web Service listens on the network, and authenticates users.
 %doc %{_mandir}/man8/pam_ssh_add.8.gz
 %config(noreplace) %{_sysconfdir}/%{name}/ws-certs.d
 %config(noreplace) %{_sysconfdir}/pam.d/cockpit
+%{_datadir}/%{name}/issue/active.issue
+%{_datadir}/%{name}/issue/inactive.issue
 %{_unitdir}/cockpit.service
 %{_unitdir}/cockpit.socket
-%{_prefix}/lib/firewalld/services/cockpit.xml
+%{_prefix}/%{__lib}/firewalld/services/cockpit.xml
+%{_prefix}/%{__lib}/tmpfiles.d/cockpit-tempfiles.conf
 %{_sbindir}/remotectl
 %{_libdir}/security/pam_ssh_add.so
 %{_libexecdir}/cockpit-ws
@@ -615,7 +677,7 @@ Summary: Cockpit user interface for Docker containers
 Requires: %{name}-bridge >= %{required_base}
 Requires: %{name}-shell >= %{required_base}
 Requires: /usr/bin/docker
-Requires: python
+Requires: python2
 
 %description docker
 The Cockpit components for interacting with Docker and user interface.
@@ -648,12 +710,13 @@ cluster. Installed on the Kubernetes master. This package is not yet complete.
 %endif
 
 %package packagekit
-Summary: Cockpit user interface for package updates
+Summary: Cockpit user interface for packages
 Requires: %{name}-bridge >= %{required_base}
 Requires: PackageKit
 
 %description packagekit
-The Cockpit component for installing package updates, via PackageKit.
+The Cockpit components for installing OS updates and Cockpit add-ons,
+via PackageKit.
 
 %files packagekit -f packagekit.list
 

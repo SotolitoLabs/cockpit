@@ -92,7 +92,7 @@ function passwd_self(old_pass, new_pass) {
             dfd.resolve();
         })
         .fail(function(ex) {
-            if (ex.constructor.name == "ProcessError")
+            if (ex.exit_status)
                 ex = new Error(failure);
             dfd.reject(ex);
         })
@@ -136,7 +136,7 @@ function passwd_change(user, new_pass) {
             dfd.resolve();
         })
         .fail(function(ex, response) {
-            if (ex.constructor.name == "ProcessError") {
+            if (ex.exit_status) {
                 console.log(ex);
                 if (response)
                     ex = new Error(response);
@@ -975,7 +975,7 @@ PageAccount.prototype = {
             $('#account-user-name').text("");
             $('#account-last-login').text("");
             $('#account-locked').prop('checked', false);
-            $('#account-roles').text("");
+            $('#account-change-roles-roles').html("");
             $('#account .breadcrumb .active').text("?");
         }
         update_accounts_privileged();
