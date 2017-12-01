@@ -1,0 +1,98 @@
+{
+    "web-service": 
+        {
+            "name"         : "web-service",
+            "label"        : "Web Server",
+            "path"         : "/",
+            "type"         : "container",
+            "enabled"      : "true",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/moximo-nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/moximo-nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/moximo-nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
+            "metadata"     : {}
+        },
+
+    "wp-service": 
+        {
+            "name"         : "wp-service",
+            "label"        : "Blog",
+            "path"         : "/php-apps/wordpress",
+            "type"         : "web",
+            "enabled"      : "true",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
+            "metadata"     : {}
+        },
+
+    "file-service": 
+        {
+            "name"         : "file-service",
+            "label"        : "File Sharing",
+            "type"         : "web",
+            "enabled"      : "true",
+            "path"         : "/php-apps/owncloud",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
+            "metadata"     : {}
+        },
+
+    "erp-service": 
+        {
+            "name"         : "erp-service",
+            "label"        : "ERP",
+            "type"         : "web",
+            "path"         : "/php-apps/odoo",
+            "enabled"      : "true",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
+            "metadata"     : {}
+        },
+
+    "mail-service": 
+        {
+            "name"         : "mail-service",
+            "label"        : "Mail Service",
+            "type"         : "web",
+            "enabled"      : "true",
+            "path"         : "/php-apps/roundcoube",
+            "pod_file"     : "/cockpit/@localhost/moximo/services/nginx-pod.json",     
+            "service_file" : "/cockpit/@localhost/moximo/services/nginx-service.json",
+            "rc_file"      : "/cockpit/@localhost/moximo/services/nginx-rc.json",
+            "json"         : {
+                                "pod"     : {},
+                                "service" : {},
+                                "rc"      : {}
+                                   
+            },
+            "metadata"     : {}
+        }
+
+
+}

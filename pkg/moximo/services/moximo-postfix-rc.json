@@ -1,0 +1,54 @@
+{
+  "kind": "ReplicationController",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "smtp-controller",
+    "labels": {
+      "state": "serving"
+    }
+  },
+  "spec": {
+    "replicas": 1,
+    "selector": {
+      "app": "moximo-smtp"
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "moximo-smtp"
+        }
+      },
+      "spec": {
+        "volumes": [
+
+            {"name": "postfix-etc",   "hostPath": {"path": "/var/sotolito/vols/postfix/etc/postfix"}},
+            {"name": "postfix-sasl",   "hostPath": {"path": "/var/sotolito/vols/postfix/etc/sasl"}},
+            {"name": "postfix-lib",   "hostPath": {"path": "/var/sotolito/vols/postfix/var/lib/postfix"}},
+            {"name": "postfix-spool",   "hostPath": {"path": "/var/sotolito/vols/postfix/var/spool/postfix"}}
+        ],
+        "containers": [
+          {
+            "name": "moximo-postfix",
+            "image": "sotolitolabs-cubie/postfix",
+            "ports": [
+              {
+                "containerPort": 25,
+                "protocol": "TCP"
+              }
+            ],
+            "volumeMounts": [
+ 	       {"name": "postfix-etc",   "mountPath":  "/etc/postfix"},
+               {"name": "postfix-sasl",  "mountPath":  "/etc/sasl"},
+               {"name": "postfix-lib",   "mountPath":  "/var/lib/postfix"},
+               {"name": "postfix-spool", "mountPath":  "/var/spool/postfix"}
+            ],
+
+            "imagePullPolicy": "IfNotPresent"
+          }
+        ],
+        "restartPolicy": "Always",
+        "dnsPolicy": "ClusterFirst"
+      }
+    }
+  }
+}
