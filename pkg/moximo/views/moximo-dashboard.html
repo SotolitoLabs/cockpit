@@ -126,7 +126,7 @@ Advanced view: <input type="checkbox" ng-model="advanced_view" aria-label="Toggl
             </div>
             <h2 class="card-pf-title" translate>Services</h2>
         </div>
-        <div class="card-pf-body">
+        <div class="card-pf-body" ng-init="get_moximo_services()">
             <div class="well blank-slate-pf spacious" ng-if="servicesState() == 'failed'">
                 <div class="blank-slate-pf-icon">
                     <i ng-if="failure.status == 403" class="fa fa-lock"></i>
@@ -142,34 +142,24 @@ Advanced view: <input type="checkbox" ng-model="advanced_view" aria-label="Toggl
                 <h3>No services present</h3>
                 <p translate>You can deploy an application to your cluster.</p>
             </div>
-            <table class="listing-ct dashboard-list" ng-if="servicesState() == 'ready'"
-                ng-class="{editable: editServices}">
+            <table class="listing-ct dashboard-list" ng-class="{editable: editServices}">
                 <thead>
                     <tr>
                         <th translate>Name</th>
                         <th translate>Address</th>
-                        <th translate>Containers</th>
-                        <th translate ng-if="settings.flavor == 'openshift'">Project</th>
-                        <th translate ng-if="settings.flavor != 'openshift'">Namespace</th>
-                        <th class="status"></th>
+                        <th class="status">Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr class="listing-ct-item"
-                            ng-repeat="service in moximo_services track by service.metadata.uid"
-                            data-name="{{service.metadata.name}}"
-                            ng-class="{'highlight-ct': service.metadata.uid == highlighted}"
-                            ng-click="jumpService($event, service)"
-                            ng-mouseover="highlight(service.metadata.uid)" ng-mouseout="highlight(null)"
-                            ng-if="!(service.metadata.namespace == 'default' && service.metadata.name == 'kubernetes')">
-                        <td>{{service.metadata.name}}</td>
+                            ng-repeat="service in moximo_services"
+                            ng-click="jumpService($event, service)">
+                        <td>{{service.label}}</td>
                         <td><kubernetes-address ng-init="item = service"></td>
-                        <td class="containers">{{serviceContainers(service)}}</td>
-                        <td>{{service.metadata.namespace}}</td>
                         <td class="status">
-                            <button title="Adjust" class="btn btn-default adjust-service pficon pficon-edit"
-                                data-id="{{id}}" ng-click="modifyService(service)"></button>
-                            <span kubernetes-status-icon status="serviceStatus(service)"></span>
+                            <input type="button" title="Adjust" class="dashboard-list.editable btn btn-default adjust-service pficon pficon-edit"
+                                data-id="{{service.metadata.id}}" ng-click="modifyService(service)" value="{{((service.live != null) ? 'Stop' : 'Start');}}" />
+                            <span kubernetes-status-icon status="moximoServiceStatus(service)"></span>
                         </td>
                     </tr>
                 </tbody>
