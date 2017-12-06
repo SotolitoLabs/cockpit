@@ -158,7 +158,10 @@ Advanced view: <input type="checkbox" ng-model="advanced_view" aria-label="Toggl
                         <td><kubernetes-address ng-init="item = service"></td>
                         <td class="status">
                             <input type="button" title="Adjust" class="dashboard-list.editable btn btn-default adjust-service pficon pficon-edit"
-                                data-id="{{service.metadata.id}}" ng-click="modifyService(service)" value="{{((service.live != null) ? 'Stop' : 'Start');}}" />
+                                data-id="{{service.metadata.id}}" ng-click="toggleService(service)" value="{{((service.live != null) ? 'Stop' : 'Start');}}" />
+
+                            <input type="button" title="Adjust" class="dashboard-list.editable btn btn-default adjust-service pficon pficon-edit"
+                                data-id="{{service.metadata.id}}" ng-click="modifyService(service)" value="Edit">
                             <span kubernetes-status-icon status="moximoServiceStatus(service)"></span>
                         </td>
                     </tr>

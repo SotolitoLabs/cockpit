@@ -6,7 +6,13 @@ moximo = angular.module('moximo', ['kubernetes', 'kubeClient',
         'kubernetes.details',
         'kubernetes.app',
         'kubernetes.graph',
-        'kubernetes.nodes'
+        'kubernetes.nodes',
+        'ui.bootstrap',
+//TEST
+        'kubernetes.date',
+        'kubernetes.listing',
+        'kubeUtils'
+
 ])
 
 moximo.config(['$routeProvider', function($routeProvider) {
@@ -29,8 +35,14 @@ moximo.controller('ViewCtrl',[
     '$location',
     '$http',
     '$interval',
+    '$modal',
+    /*'$modalInstance',
+    'dialogData',
+        "kubeMethods",
+        "kubeSelect",*/
     function($scope, loader, select, data, actions, itemActions,
-                 nodeActions, nodeData, $location, $http, $interval) {
+                 nodeActions, nodeData, $location, $http, $interval, $modal /*, $instance, dialogData, methods, select */) {
+//        angular.extend($scope, dialogData);
         $scope.services = select().kind("Service");
         $scope.mycounter = 1;
         console.log("services? " + $scope.services);
@@ -52,6 +64,7 @@ moximo.controller('ViewCtrl',[
         $scope.pvcs = select().kind("PersistentVolumeClaim");
         $scope.advanced_view = false;
         $scope.moximo_services = null;
+        $scope.currentService = "AAAA";
         console.log("advanced_view: " + $scope.advanced_view);
         get_moximo_services();
 
@@ -92,5 +105,26 @@ moximo.controller('ViewCtrl',[
         function moximoServiceStatus(service) {
             return true;
         }
+
+        //Modify Service
+        $scope.modifyService = function (service) {
+                console.log("Configuring service: " + service.name);
+                console.log("Service config: " + service.config[0].label);
+                $scope.currentService = service;
+                console.log("CURRENT SERVICE: " + $scope.currentService);
+                return $modal.open({
+                    animation: false,
+                    controller: 'ViewCtrl',
+                    templateUrl: 'views/config_service.html',
+                    resolve:  { items: function() { return $scope.currentService; } } /*{
+                        dialogData: function resolve() {
+                            console.log("in resolve func service: " + $scope.currentService);
+                            return { currentService: $scope.currentService };
+                        } 
+
+                    }*/,
+                }).result;
+        }
+
 }]);
 
