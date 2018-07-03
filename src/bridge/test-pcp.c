@@ -21,10 +21,10 @@
 
 #include "cockpitmetrics.h"
 #include "cockpitpcpmetrics.h"
-#include "mock-transport.h"
 
 #include "common/cockpittest.h"
 #include "common/cockpitjson.h"
+#include "common/mock-transport.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -35,9 +35,14 @@
 #include <pcp/pmapi.h>
 #include <pcp/impl.h>
 
+#if PM_VERSION_CURRENT < PM_VERSION(4,0,0)
+#include <pcp/impl.h>
+#define pmSpecLocalPMDA(command) __pmSpecLocalPMDA(command)
+#endif
+
 void (*mock_pmda_control) (const char *cmd, ...);
 
-static void
+static void *
 init_mock_pmda (void)
 {
   if (pmLoadNameSpace (SRCDIR "/src/bridge/mock-pmns") < 0)
@@ -46,14 +51,16 @@ init_mock_pmda (void)
       exit (0);
     }
 
-  g_assert (__pmLocalPMDA (PM_LOCAL_CLEAR, 0, NULL, NULL) >= 0);
-  g_assert (__pmLocalPMDA (PM_LOCAL_ADD, 333, "./mock-pmda.so", "mock_init") >= 0);
+  g_assert (pmSpecLocalPMDA ("clear") == NULL);
+  g_assert (pmSpecLocalPMDA ("add,333,./mock-pmda.so,mock_init") == NULL);
 
   void *handle = dlopen ("./mock-pmda.so", RTLD_NOW);
   g_assert (handle != NULL);
 
   mock_pmda_control = dlsym (handle, "mock_control");
   g_assert (mock_pmda_control != NULL);
+
+  return handle;
 }
 
 typedef struct AtTeardown {
@@ -294,7 +301,8 @@ static void
 test_metrics_units_noconv (TestCase *tc,
                            gconstpointer unused)
 {
-  cockpit_expect_message ("1234: direct: can't convert metric mock.seconds to units byte");
+  cockpit_expect_log ("cockpit-protocol", G_LOG_LEVEL_MESSAGE,
+                      "1234: direct: can't convert metric mock.seconds to units byte");
 
   JsonObject *options = json_obj("{ 'source': 'direct',"
                                  "  'metrics': [ { 'name': 'mock.seconds', 'units': 'byte' } ],"
@@ -583,12 +591,15 @@ int
 main (int argc,
       char *argv[])
 {
+  void *handle;
+  int ret;
+
   cockpit_test_init (&argc, &argv);
 
   if (chdir (BUILDDIR) < 0)
     g_assert_not_reached ();
 
-  init_mock_pmda ();
+  handle = init_mock_pmda ();
 
   g_test_add ("/metrics/compression", TestCase, NULL,
               setup, test_metrics_compression, teardown);
@@ -621,6 +632,8 @@ main (int argc,
   g_test_add ("/metrics/counter-across-meta", TestCase, NULL,
               setup, test_metrics_counter_across_meta, teardown);
 
+  ret = g_test_run ();
 
-  return g_test_run ();
+  dlclose (handle);
+  return ret;
 }

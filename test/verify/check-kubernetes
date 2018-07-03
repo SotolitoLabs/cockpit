@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -24,8 +24,9 @@ import unittest
 from testlib import *
 import kubelib
 
-@skipImage("No kubernetes packaged", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "fedora-i386")
+@skipImage("No kubernetes packaged", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "fedora-i386", "rhel-7", "rhel-7-5", "rhel-x", "centos-7")
 @skipImage("No cockpit-kubernetes packaged", "continuous-atomic", "fedora-atomic", "rhel-atomic")
+@skipPackage("cockpit-kubernetes")
 class TestKubernetes(kubelib.KubernetesCase, kubelib.KubernetesCommonTests):
 
     def setUp(self):
@@ -36,9 +37,12 @@ class TestKubernetes(kubelib.KubernetesCase, kubelib.KubernetesCommonTests):
 
         m.upload(["verify/files/mock-k8s-tiny-app.json"], "/tmp")
         self.wait_api_server()
+        # HACK: https://github.com/cockpit-project/cockpit/issues/9179 ; fix this in docker-images.setup instead and rebuild images
+        m.execute("docker tag gcr.io/google_containers/pause-amd64:3.0 k8s.gcr.io/pause-amd64:3.1 || true")
 
-@skipImage("No kubernetes packaged", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "fedora-i386")
+@skipImage("No kubernetes packaged", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "fedora-i386", "rhel-7", "rhel-7-5", "rhel-x", "centos-7")
 @skipImage("No cockpit-kubernetes packaged", "continuous-atomic", "fedora-atomic", "rhel-atomic")
+@skipPackage("cockpit-kubernetes")
 class TestConnection(kubelib.KubernetesCase):
     def testConnect(self):
         m = self.machine
@@ -56,7 +60,6 @@ class TestConnection(kubelib.KubernetesCase):
         m.execute("echo 'KUBE_API_PORT=\"--port=1111\"' >> /etc/kubernetes/apiserver")
         m.execute("sed -i s/8080/1111/g /etc/kubernetes/*")
         self.start_kubernetes()
-        self.wait_api_server(port=6443, scheme='https')
 
         # Setup the kube stuff in the right place
         m.upload(["verify/files/mock-kube-config-basic.json"], "/tmp")
@@ -224,8 +227,9 @@ class TestConnection(kubelib.KubernetesCase):
                                     "connection unexpectedly closed by peer",
                                     ".*: Error sending data: Broken pipe.*")
 
-@skipImage("No kubernetes packaged", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "fedora-i386")
+@skipImage("No kubernetes packaged", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "fedora-i386", "rhel-7", "rhel-7-5", "rhel-x", "centos-7")
 @unittest.skipIf(True, "Nulecule deploys temporarily removed.")
+@skipPackage("cockpit-kubernetes")
 class TestNulecule(kubelib.KubernetesCase):
     def setUp(self):
         kubelib.KubernetesCase.setUp(self)

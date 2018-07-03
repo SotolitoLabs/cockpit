@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -20,13 +19,15 @@
 import React from "react";
 import cockpit from 'cockpit';
 
-import { vmId } from '../helpers.es6';
+import { vmId, logDebug } from '../helpers.es6';
+
+import './consoles.css';
 
 const _ = cockpit.gettext;
 
 const Frame = ({ url, novncContainerId }) => {
     return (
-        <iframe src={url} className='machines-console-frame-vnc' frameBorder='0' name={novncContainerId} data-container-id={novncContainerId}>
+        <iframe src={url} className='machines-console-frame-vnc' frameBorder='0' name={novncContainerId} data-container-id={novncContainerId} title='VNC'>
             {_("Your browser does not support iframes.")}
         </iframe>
     );
@@ -36,10 +37,24 @@ Frame.propTypes = {
     novncContainerId: React.PropTypes.string.isRequired,
 };
 
+export const VncActions = ({ vm }) => {
+    const vmIdPrefix = vmId(vm.name);
+    return (
+        <span className='console-actions-pf'>
+            {_("Send shortcut")}
+            <button className='btn btn-default console-actions-buttons-pf' id={`${vmIdPrefix}-vnc-ctrl-alt-del`}>
+                Ctrl+Alt+Del
+            </button>
+        </span>
+    );
+};
+
 const Vnc = ({ vm, consoleDetail }) => {
     if (!consoleDetail) {
+        logDebug('Vnc component: console detail not yet provided');
         return null;
     }
+
     const vmIdPrefix = vmId(vm.name);
     const novncContainerId = `${vmIdPrefix}-novnc-frame-container`;
 
@@ -52,7 +67,7 @@ const Vnc = ({ vm, consoleDetail }) => {
     return (
         <div id={novncContainerId} className='machines-console-frame' style={{ height: '100px;' }}>
             <br />
-            <Frame url={`vnc.html${params}`} novncContainerId={novncContainerId}/>
+            <Frame url={`vnc.html${params}`} novncContainerId={novncContainerId} />
         </div>
     );
 };

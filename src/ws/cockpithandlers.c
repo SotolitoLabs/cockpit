@@ -252,6 +252,7 @@ static void
 add_page_to_environment (JsonObject *object)
 {
   static gint page_login_to = -1;
+  gboolean require_host = FALSE;
   JsonObject *page;
   const gchar *value;
 
@@ -268,7 +269,10 @@ add_page_to_environment (JsonObject *object)
                                                       G_FILE_TEST_IS_EXECUTABLE));
     }
 
+  require_host = cockpit_conf_bool ("WebService", "RequireHost", FALSE);
+
   json_object_set_boolean_member (page, "connect", page_login_to);
+  json_object_set_boolean_member (page, "require_host", require_host);
   json_object_set_object_member (object, "page", page);
 }
 
@@ -347,6 +351,7 @@ send_login_html (CockpitWebResponse *response,
   GBytes *url_bytes = NULL;
   CockpitWebFilter *filter2 = NULL;
   const gchar *url_root = NULL;
+  gchar *content_security_policy = NULL;
   gchar *cookie_line = NULL;
   gchar *base;
 
@@ -390,7 +395,7 @@ send_login_html (CockpitWebResponse *response,
           g_message ("%s", error->message);
           g_clear_error (&error);
         }
-      else
+      else if (po_bytes)
         {
           filter3 = cockpit_web_inject_new (marker, po_bytes, 1);
           g_bytes_unref (po_bytes);
@@ -414,13 +419,13 @@ send_login_html (CockpitWebResponse *response,
     {
       /* The login Content-Security-Policy allows the page to have inline <script> and <style> tags. */
       cookie_line = cockpit_auth_empty_cookie_value (path);
+      content_security_policy = cockpit_web_response_security_policy ("default-src 'self' 'unsafe-inline'",
+                                                                      cockpit_web_response_get_origin (response));
+
       cockpit_web_response_headers (response, 200, "OK", -1,
-                                    "Content-Type",
-                                    "text/html",
-                                    "Content-Security-Policy",
-                                    "default-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:",
-                                    "Set-Cookie",
-                                    cookie_line,
+                                    "Content-Type", "text/html",
+                                    "Content-Security-Policy", content_security_policy,
+                                    "Set-Cookie", cookie_line,
                                     NULL);
       if (cockpit_web_response_queue (response, bytes))
         cockpit_web_response_complete (response);
@@ -429,6 +434,7 @@ send_login_html (CockpitWebResponse *response,
     }
 
   g_free (cookie_line);
+  g_free (content_security_policy);
   g_strfreev (languages);
 }
 

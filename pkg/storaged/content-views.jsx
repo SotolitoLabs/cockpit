@@ -29,16 +29,17 @@ var StorageControls = require("./storage-controls.jsx");
 var FormatDialog = require("./format-dialog.jsx");
 
 var StorageButton = StorageControls.StorageButton;
-var StorageLink =   StorageControls.StorageLink;
+var StorageLink = StorageControls.StorageLink;
 
-var FilesystemTab   = require("./fsys-tab.jsx").FilesystemTab;
-var CryptoTab       = require("./crypto-tab.jsx").CryptoTab;
-var BlockVolTab     = require("./lvol-tabs.jsx").BlockVolTab;
-var PoolVolTab      = require("./lvol-tabs.jsx").PoolVolTab;
-var PVolTab         = require("./pvol-tabs.jsx").PVolTab;
+var FilesystemTab = require("./fsys-tab.jsx").FilesystemTab;
+var CryptoTab = require("./crypto-tab.jsx").CryptoTab;
+var BlockVolTab = require("./lvol-tabs.jsx").BlockVolTab;
+var PoolVolTab = require("./lvol-tabs.jsx").PoolVolTab;
+var PVolTab = require("./pvol-tabs.jsx").PVolTab;
 var MDRaidMemberTab = require("./pvol-tabs.jsx").MDRaidMemberTab;
-var PartitionTab    = require("./part-tab.jsx").PartitionTab;
-var SwapTab         = require("./swap-tab.jsx").SwapTab;
+var VDOBackingTab = require("./pvol-tabs.jsx").VDOBackingTab;
+var PartitionTab = require("./part-tab.jsx").PartitionTab;
+var SwapTab = require("./swap-tab.jsx").SwapTab;
 var UnrecognizedTab = require("./unrecognized-tab.jsx").UnrecognizedTab;
 
 var _ = cockpit.gettext;
@@ -69,16 +70,16 @@ function create_tabs(client, target, is_partition) {
         return str.indexOf(suffix, str.length - suffix.length) !== -1;
     }
 
-    var block = endsWith(target.iface, ".Block")? target : null;
+    var block = endsWith(target.iface, ".Block") ? target : null;
     var block_lvm2 = block && client.blocks_lvm2[block.path];
     var block_pvol = block && client.blocks_pvol[block.path];
 
-    var lvol = (endsWith(target.iface, ".LogicalVolume")?
-                target :
-                block_lvm2 && client.lvols[block_lvm2.LogicalVolume]);
+    var lvol = (endsWith(target.iface, ".LogicalVolume")
+        ? target
+        : block_lvm2 && client.lvols[block_lvm2.LogicalVolume]);
 
-    var is_filesystem         = (block && block.IdUsage == 'filesystem');
-    var is_crypto             = (block && block.IdUsage == 'crypto');
+    var is_filesystem = (block && block.IdUsage == 'filesystem');
+    var is_crypto = (block && block.IdUsage == 'crypto');
 
     var tabs = [ ];
     var row_action = null;
@@ -147,6 +148,8 @@ function create_tabs(client, target, is_partition) {
     } else if ((block && block.IdUsage == "raid") ||
                (block && client.mdraids[block.MDRaidMember])) {
         add_tab(_("RAID Member"), MDRaidMemberTab);
+    } else if (block && client.vdo_overlay.find_by_backing_block(block)) {
+        add_tab(_("VDO Backing"), VDOBackingTab);
     } else if (block && block.IdUsage == "other" && block.IdType == "swap") {
         add_tab(_("Swap"), SwapTab);
     } else if (block) {
@@ -156,7 +159,7 @@ function create_tabs(client, target, is_partition) {
     var tab_actions = [ ];
 
     function add_action(title, func, excuse) {
-        tab_actions.push(<StorageButton onClick={func} excuse={excuse}>{title}</StorageButton>);
+        tab_actions.push(<StorageButton key={title} onClick={func} excuse={excuse}>{title}</StorageButton>);
     }
 
     function lock() {
@@ -168,6 +171,18 @@ function create_tabs(client, target, is_partition) {
     }
 
     function unlock() {
+        if (!client.features.clevis)
+            return unlock_with_passphrase();
+        else {
+            return client.clevis_overlay.unlock(block)
+                    .then(null,
+                          function () {
+                              return unlock_with_passphrase();
+                          });
+        }
+    }
+
+    function unlock_with_passphrase() {
         var crypto = client.blocks_crypto[block.path];
         if (!crypto)
             return;
@@ -199,7 +214,7 @@ function create_tabs(client, target, is_partition) {
                                   return crypto.Unlock(vals.passphrase, {});
                               }
                           }
-                        });
+            });
         });
     }
 
@@ -265,15 +280,15 @@ function create_tabs(client, target, is_partition) {
                               Danger: danger,
                               Title: _("Delete"),
                               action: function () {
-                                  return utils.teardown_active_usage(client, usage).
-                                               then(function () {
-                                                   if (lvol)
-                                                       return lvol.Delete({ 'tear-down': { t: 'b', v: true }
-                                                       });
-                                                   else if (block_part)
-                                                       return block_part.Delete({ 'tear-down': { t: 'b', v: true }
-                                                       });
-                                               });
+                                  return utils.teardown_active_usage(client, usage)
+                                          .then(function () {
+                                              if (lvol)
+                                                  return lvol.Delete({ 'tear-down': { t: 'b', v: true }
+                                                  });
+                                              else if (block_part)
+                                                  return block_part.Delete({ 'tear-down': { t: 'b', v: true }
+                                                  });
+                                          });
                               }
                           }
             });
@@ -289,7 +304,7 @@ function create_tabs(client, target, is_partition) {
 
     return {
         renderers: tabs,
-        actions: [ <div>{tab_actions}</div> ],
+        actions: [ <div key="actions" >{tab_actions}</div> ],
         row_action: row_action,
     };
 }
@@ -320,6 +335,8 @@ function block_description(client, block) {
         } else {
             usage = C_("storage-id-desc", "Other Data");
         }
+    } else if (client.vdo_overlay.find_by_backing_block(block)) {
+        usage = C_("storage-id-desc", "VDO Backing");
     } else {
         usage = C_("storage-id-desc", "Unrecognized Data");
     }
@@ -339,8 +356,7 @@ function append_row(client, rows, level, key, name, desc, tabs, job_object) {
     if (job_object)
         last_column = (
             <span className="spinner spinner-sm spinner-inline"
-                  style={{visibility: client.path_jobs[job_object]? "visible" : "hidden"}}>
-            </span>);
+                  style={{visibility: client.path_jobs[job_object] ? "visible" : "hidden"}} />);
     if (tabs.row_action) {
         if (last_column) {
             last_column = <span>{last_column}{tabs.row_action}</span>;
@@ -356,11 +372,12 @@ function append_row(client, rows, level, key, name, desc, tabs, job_object) {
         { name: name, 'header': true },
         { name: last_column, tight: true },
     ];
+
     rows.push(
         <CockpitListing.ListingRow key={key}
                                    columns={cols}
                                    tabRenderers={tabs.renderers}
-                                   listingActions={tabs.actions}/>
+                                   listingActions={tabs.actions} />
     );
 }
 
@@ -377,7 +394,7 @@ function append_non_partitioned_block(client, rows, level, block, is_partition) 
     append_row(client, rows, level, block.path, utils.block_name(block), desc, tabs, block.path);
 
     if (cleartext_block)
-        append_device(client, rows, level+1, cleartext_block);
+        append_device(client, rows, level + 1, cleartext_block);
 }
 
 function append_partitions(client, rows, level, block) {
@@ -406,7 +423,7 @@ function append_partitions(client, rows, level, block) {
         ];
 
         rows.push(
-            <CockpitListing.ListingRow columns={cols}/>
+            <CockpitListing.ListingRow columns={cols} key={"free-space-" + rows.length.toString()} />
         );
     }
 
@@ -443,13 +460,17 @@ function append_device(client, rows, level, block) {
         append_non_partitioned_block(client, rows, level, block, null);
 }
 
+// TODO: this should be refactored to React component
+// The render method should collect _just_ data via more-or-less recent append_device() flow and
+// then return proper React component hierarchy based on this collected data.
+// Benefit: much easier debugging, better manipulation with "key" props and relying on well-tested React's functionality
 function block_rows(client, block) {
     var rows = [ ];
     append_device(client, rows, 0, block);
     return rows;
 }
 
-function block_content(client, block) {
+const BlockContent = ({ client, block, allow_partitions }) => {
     if (!block)
         return null;
 
@@ -481,7 +502,8 @@ function block_content(client, block) {
                             Title: _("Partitioning"),
                             Options: [
                                 { value: "dos", Title: _("Compatible with all systems and devices (MBR)") },
-                                { value: "gpt", Title: _("Compatible with modern system and hard disks > 2TB (GPT)"),
+                                { value: "gpt",
+                                  Title: _("Compatible with modern system and hard disks > 2TB (GPT)"),
                                   selected: true
                                 },
                                 { value: "empty", Title: _("No partitioning") }
@@ -497,35 +519,40 @@ function block_content(client, block) {
                               };
                               if (vals.erase != "no")
                                   options.erase = { t: 's', v: vals.erase };
-                              return utils.teardown_active_usage(client, usage).
-                                           then(function () {
-                                               return block.Format(vals.type, options);
-                                           });
+                              return utils.teardown_active_usage(client, usage)
+                                      .then(function () {
+                                          return block.Format(vals.type, options);
+                                      });
                           }
                       }
         });
     }
 
-    var format_disk_btn = (
-        <div className="pull-right">
-            <StorageButton onClick={format_disk} excuse={block.ReadOnly? _("Device is read-only") : null}>
-                {_("Create partition table")}
-            </StorageButton>
-        </div>);
+    var format_disk_btn = null;
+    if (allow_partitions)
+        format_disk_btn = (
+            <div className="pull-right" key="create-partition-table">
+                <StorageButton onClick={format_disk} excuse={block.ReadOnly ? _("Device is read-only") : null}>
+                    {_("Create partition table")}
+                </StorageButton>
+            </div>);
 
     return (
         <CockpitListing.Listing title={_("Content")}
-                                actions={format_disk_btn}>
+                                actions={[ format_disk_btn ]}
+                                emptyCaption="">
             { block_rows(client, block) }
         </CockpitListing.Listing>
     );
-}
+};
 
-var Block = React.createClass({
-    render: function () {
-        return block_content(this.props.client, this.props.block);
-    }
-});
+const Block = ({client, block, allow_partitions}) => {
+    return (
+        <BlockContent client={client}
+                      block={block}
+                      allow_partitions={allow_partitions !== false} />
+    );
+};
 
 function append_logical_volume_block(client, rows, level, block, lvol) {
     var tabs, desc;
@@ -536,9 +563,9 @@ function append_logical_volume_block(client, rows, level, block, lvol) {
         };
         tabs = create_tabs(client, block, false);
         append_row(client, rows, level, lvol.Name, utils.block_name(block), desc, tabs, block.path);
-        append_partitions(client, rows, level+1, block);
+        append_partitions(client, rows, level + 1, block);
     } else {
-        append_non_partitioned_block (client, rows, level, block, false);
+        append_non_partitioned_block(client, rows, level, block, false);
     }
 }
 
@@ -550,15 +577,15 @@ function append_logical_volume(client, rows, level, lvol) {
             size: lvol.Size,
             text: _("Pool for Thin Volumes")
         };
-        tabs = create_tabs (client, lvol, false);
+        tabs = create_tabs(client, lvol, false);
         append_row(client, rows, level, lvol.Name, lvol.Name, desc, tabs, false);
         client.lvols_pool_members[lvol.path].forEach(function (member_lvol) {
-            append_logical_volume (client, rows, level+1, member_lvol);
+            append_logical_volume(client, rows, level + 1, member_lvol);
         });
     } else {
         block = client.lvols_block[lvol.path];
         if (block)
-            append_logical_volume_block (client, rows, level, block, lvol);
+            append_logical_volume_block(client, rows, level, block, lvol);
         else {
             // If we can't find the block for a active
             // volume, Storaged or something below is
@@ -567,9 +594,9 @@ function append_logical_volume(client, rows, level, lvol) {
 
             desc = {
                 size: lvol.Size,
-                text: lvol.Active? _("Unsupported volume") : _("Inactive volume")
+                text: lvol.Active ? _("Unsupported volume") : _("Inactive volume")
             }
-            tabs = create_tabs (client, lvol, false);
+            tabs = create_tabs(client, lvol, false);
             append_row(client, rows, level, lvol.Name, lvol.Name, desc, tabs, false);
         }
     }
@@ -603,7 +630,8 @@ var VGroup = React.createClass({
                               { SelectOne: "purpose",
                                 Title: _("Purpose"),
                                 Options: [
-                                    { value: "block", Title: _("Block device for filesystems"),
+                                    { value: "block",
+                                      Title: _("Block device for filesystems"),
                                       selected: true
                                     },
                                     { value: "pool", Title: _("Pool for thinly provisioned volumes") }
@@ -661,10 +689,10 @@ var VGroup = React.createClass({
         var excuse = vgroup.FreeSize == 0 && _("No free space");
 
         var new_volume_link = (
-            <div className="pull-right">
+            <div className="pull-right" key="new-logical-volume">
                 <StorageLink onClick={create_logical_volume}
                              excuse={excuse}>
-                    <span className="pficon pficon-add-circle-o"></span>
+                    <span className="pficon pficon-add-circle-o" />
                     {" "}
                     {_("Create new Logical Volume")}
                 </StorageLink>
@@ -672,7 +700,7 @@ var VGroup = React.createClass({
 
         return (
             <CockpitListing.Listing title="Logical Volumes"
-                                    actions={new_volume_link}
+                                    actions={[ new_volume_link ]}
                                     emptyCaption={_("No Logical Volumes")}>
                 { vgroup_rows(self.props.client, vgroup) }
             </CockpitListing.Listing>

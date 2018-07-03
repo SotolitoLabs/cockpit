@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -102,8 +101,8 @@ export function vmConverter(vm) {
         description: vm.description,
         highAvailability: vm.high_availability,
         icons: {
-            largeId: vm.large_icon && vm.large_icon.id || undefined,
-            smallId: vm.small_icon && vm.small_icon.id || undefined,
+            largeId: vm.large_icon ? vm.large_icon.id : undefined,
+            smallId: vm.small_icon ? vm.small_icon.id : undefined,
         },
         memory: vm.memory,
         cpu: {
@@ -129,11 +128,11 @@ export function vmConverter(vm) {
 }
 
 function mapOvirtStatusToLibvirtState(ovirtStatus) {
-    switch (ovirtStatus) {// TODO: finish - add additional states
-        case 'up': return 'running';
-        case 'down': return 'shut off';
-        default:
-            return ovirtStatus;
+    switch (ovirtStatus) { // TODO: finish - add additional states
+    case 'up': return 'running';
+    case 'down': return 'shut off';
+    default:
+        return ovirtStatus;
     }
 }
 

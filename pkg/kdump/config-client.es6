@@ -17,8 +17,6 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-  /* jshint esversion:6 */
-
 import cockpit from 'cockpit';
 
 /* Parse an ini-style config file
@@ -35,7 +33,7 @@ export class ConfigFile {
 
         cockpit.event_target(this);
 
-        this._fileHandle = cockpit.file(filename, { superuser: superuser } );
+        this._fileHandle = cockpit.file(filename, { superuser: superuser });
         this._fileHandle.watch((rawContent) => {
             this._parseText(rawContent);
         });
@@ -58,7 +56,7 @@ export class ConfigFile {
      * outputObject["someKey"] = { index: 0, value: "foo", origLine: "someKey foo # comment", hasComment: true }
      * skipNotify: Don't notify about changes, e.g.to avoid multiple updates when writing a file
      */
-    _parseText(rawContent, skipNotify=false) {
+    _parseText(rawContent, skipNotify = false) {
         if (this._dataAvailable)
             this._dataAvailable.resolve();
 
@@ -75,7 +73,7 @@ export class ConfigFile {
         if (rawContent == this._rawContent)
             return;
 
-        //if (skipNotify === undefined)
+        // if (skipNotify === undefined)
         //    skipNotify = false;
 
         this._rawContent = rawContent;
@@ -94,7 +92,7 @@ export class ConfigFile {
             if (separatorIndex === -1)
                 return;
             let key = trimmed.substring(0, separatorIndex);
-            let value = trimmed.substring(separatorIndex+1).trim();
+            let value = trimmed.substring(separatorIndex + 1).trim();
 
             // value might have a comment at the end
             let commentIndex = value.indexOf("#");
@@ -127,7 +125,7 @@ export class ConfigFile {
         let linesToDelete = [];
         // first find the settings lines that have been disabled/deleted
         Object.keys(this._originalSettings).forEach((key) => {
-            if (!(key in settings))  {
+            if (!(key in settings)) {
                 let origEntry = this._originalSettings[key];
                 // if the line had a comment, keep it, otherwise delete
                 if (origEntry.comment !== undefined)
@@ -152,9 +150,10 @@ export class ConfigFile {
             lines[origEntry.index] = line;
         });
         // now delete the rows we want to delete
-        linesToDelete.sort().reverse().forEach((lineIndex) => {
-            lines.splice(lineIndex, 1);
-        });
+        linesToDelete.sort().reverse()
+                .forEach((lineIndex) => {
+                    lines.splice(lineIndex, 1);
+                });
 
         return lines.join("\n");
     }

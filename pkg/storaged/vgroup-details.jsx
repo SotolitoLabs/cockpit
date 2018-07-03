@@ -22,7 +22,7 @@ import React from "react";
 import utils from "./utils.js";
 import { StdDetailsLayout } from "./details.jsx";
 import Content from "./content-views.jsx";
-import { StorageButton, StorageBlockNavLink, StorageMultiAction } from "./storage-controls.jsx";
+import { StorageButton, StorageBlockNavLink } from "./storage-controls.jsx";
 import dialog from "./dialog.js";
 
 const _ = cockpit.gettext;
@@ -51,8 +51,8 @@ class VGroupSidebar extends React.Component {
                                 Title: _("Disks"),
                                 Options: (
                                     utils.get_available_spaces(client)
-                                         .filter(filter_inside_vgroup)
-                                         .map(utils.available_space_to_option)
+                                            .filter(filter_inside_vgroup)
+                                            .map(utils.available_space_to_option)
                                 ),
                                 EmptyWarning: _("No disks are available."),
                                 validate: function(disks) {
@@ -85,9 +85,9 @@ class VGroupSidebar extends React.Component {
 
             function pvol_empty_and_remove() {
                 return (vgroup.EmptyDevice(pvol.path, {})
-                              .then(function() {
-                                  vgroup.RemoveDevice(pvol.path, true, {});
-                              }));
+                        .then(function() {
+                            vgroup.RemoveDevice(pvol.path, true, {});
+                        }));
             }
 
             if (pvols.length === 1) {
@@ -107,11 +107,11 @@ class VGroupSidebar extends React.Component {
             return (
                 <tr>
                     <td className="storage-icon">
-                        <div><img src="images/storage-disk.png"></img></div>
+                        <div><img src="images/storage-disk.png" /></div>
                     </td>
                     <td>
-                        <StorageBlockNavLink client={client} block={ client.blocks[pvol.path] }/>
-                        <br></br>
+                        <StorageBlockNavLink client={client} block={ client.blocks[pvol.path] } />
+                        <br />
                         <span>
                             {cockpit.format(_("$0, $1 free"),
                                             utils.fmt_size(pvol.Size),
@@ -120,7 +120,7 @@ class VGroupSidebar extends React.Component {
                     </td>
                     <td className="storage-action">
                         <StorageButton onClick={remove_action} excuse={remove_excuse}>
-                            <span className="fa fa-minus"></span>
+                            <span className="fa fa-minus" />
                         </StorageButton>
                     </td>
                 </tr>);
@@ -132,7 +132,7 @@ class VGroupSidebar extends React.Component {
                     <span>{_("Physical Volumes")}</span>
                     <span className="pull-right">
                         <StorageButton onClick={add_disk}>
-                            <span className="fa fa-plus"></span>
+                            <span className="fa fa-plus" />
                         </StorageButton>
                     </span>
                 </div>
@@ -157,7 +157,7 @@ export class VGroupDetails extends React.Component {
             this.poll_timer = window.setInterval(() => { this.props.vgroup.Poll(); }, 2000);
         } else if (!needs_polling && this.poll_timer !== null) {
             window.clearInterval(this.poll_timer);
-            this.poll_timer =  null;
+            this.poll_timer = null;
         }
     }
 
@@ -185,10 +185,10 @@ export class VGroupDetails extends React.Component {
                           Action: {
                               Title: _("Rename"),
                               action: function (vals) {
-                                  return vgroup.Rename(vals.name, { }).
-                                                done(function () {
-                                                    location.go([ 'vg', vals.name ]);
-                                                });
+                                  return vgroup.Rename(vals.name, { })
+                                          .done(function () {
+                                              location.go([ 'vg', vals.name ]);
+                                          });
                               }
                           }
             });
@@ -214,31 +214,28 @@ export class VGroupDetails extends React.Component {
                               Danger: _("Deleting a volume group will erase all data on it."),
                               Title: _("Delete"),
                               action: function () {
-                                  return utils.teardown_active_usage(client, usage).
-                                               then(function () {
-                                                   return vgroup.Delete(true,
-                                                                        { 'tear-down': { t: 'b', v: true }
-                                                                        }).
-                                                                 done(function () {
-                                                                     location.go('/');
-                                                                 });
-                                               });
+                                  return utils.teardown_active_usage(client, usage)
+                                          .then(function () {
+                                              return vgroup.Delete(true,
+                                                                   { 'tear-down': { t: 'b', v: true }
+                                                                   })
+                                                      .done(function () {
+                                                          location.go('/');
+                                                      });
+                                          });
                               }
                           }
             });
         }
-
-        var actions = [
-            { title: _("Rename"), action: rename },
-            { title: _("Delete"), action: delete_ }
-        ];
 
         var header = (
             <div className="panel panel-default">
                 <div className="panel-heading">
                     {cockpit.format(_("Volume Group $0"), vgroup.Name)}
                     <span className="pull-right">
-                        <StorageMultiAction actions={actions} default={0}/>
+                        <StorageButton onClick={rename}>{_("Rename")}</StorageButton>
+                        { "\n" }
+                        <StorageButton kind="danger" onClick={delete_}>{_("Delete")}</StorageButton>
                     </span>
                 </div>
                 <div className="panel-body">
@@ -256,13 +253,13 @@ export class VGroupDetails extends React.Component {
             </div>
         );
 
-        var sidebar = <VGroupSidebar client={this.props.client} vgroup={vgroup}/>;
+        var sidebar = <VGroupSidebar client={this.props.client} vgroup={vgroup} />;
 
-        var content = <Content.VGroup client={this.props.client} vgroup={vgroup}/>;
+        var content = <Content.VGroup client={this.props.client} vgroup={vgroup} />;
 
-        return <StdDetailsLayout jobs={this.props.jobs}
+        return <StdDetailsLayout client={this.props.client}
                                  header={ header }
                                  sidebar={ sidebar }
-                                 content={ content }/>;
+                                 content={ content } />;
     }
 }

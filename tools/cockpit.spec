@@ -31,16 +31,36 @@
 # define to build the dashboard
 %define build_dashboard 1
 
+# build basic packages like cockpit-bridge
+%define build_basic 1
+# build optional extensions like cockpit-docker
+%define build_optional 1
+
+%define __lib lib
+
+# on RHEL 7.x we build subscriptions; superseded later by
+# external subscription-manager-cockpit
+%if 0%{?rhel} >= 7 && 0%{?rhel} < 8
+%define build_subscriptions 1
+%endif
+
+
 %define libssh_version 0.7.1
 %if 0%{?fedora} > 0 && 0%{?fedora} < 22
 %define libssh_version 0.6.0
+%endif
+
+%if 0%{?rhel} >= 8
+%global go_scl_prefix go-toolset-7-
+%else
+%global go_scl_prefix %{nil}
 %endif
 
 Name:           cockpit
 Summary:        A user interface for Linux servers
 
 License:        LGPLv2+
-URL:            http://cockpit-project.org/
+URL:            https://cockpit-project.org/
 
 Version:        0
 %if %{defined wip}
@@ -57,6 +77,10 @@ BuildRequires: pkgconfig(polkit-agent-1) >= 0.105
 BuildRequires: pam-devel
 
 BuildRequires: autoconf automake
+%if 0%{?fedora} || 0%{?rhel} >= 8
+BuildRequires: /usr/bin/python3
+%endif
+# FIXME: tools/ is not completely ported to Python 3 yet
 BuildRequires: /usr/bin/python2
 BuildRequires: intltool
 %if %{defined build_dashboard}
@@ -83,42 +107,32 @@ BuildRequires: xmlto
 # This is the "cockpit" metapackage. It should only
 # Require, Suggest or Recommend other cockpit-xxx subpackages
 
-Requires: %{name}-bridge = %{version}-%{release}
-Requires: %{name}-ws = %{version}-%{release}
-Requires: %{name}-system = %{version}-%{release}
+Requires: cockpit-bridge = %{version}-%{release}
+Requires: cockpit-ws = %{version}-%{release}
+Requires: cockpit-system = %{version}-%{release}
 
 # Optional components (for f24 we use soft deps)
 %if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
-Recommends: %{name}-dashboard = %{version}-%{release}
-Recommends: %{name}-networkmanager = %{version}-%{release}
-Recommends: %{name}-storaged = %{version}-%{release}
-Recommends: sscg >= 2.0.4
+%if 0%{?rhel} == 0
+Recommends: cockpit-dashboard = %{version}-%{release}
+%endif
+Recommends: (cockpit-networkmanager = %{version}-%{release} if NetworkManager)
+Recommends: (cockpit-storaged = %{version}-%{release} if udisks2)
+Recommends: (cockpit-packagekit = %{version}-%{release} if PackageKit)
+%if 0%{?rhel} >= 8
+Recommends: subscription-manager-cockpit
+%endif
 %ifarch x86_64 %{arm} aarch64 ppc64le i686 s390x
-Recommends: %{name}-docker = %{version}-%{release}
+Recommends: (cockpit-docker = %{version}-%{release} if /usr/bin/docker)
 %endif
-Suggests: %{name}-pcp = %{version}-%{release}
-Suggests: %{name}-kubernetes = %{version}-%{release}
-Suggests: %{name}-selinux = %{version}-%{release}
-Suggests: %{name}-packagekit = %{version}-%{release}
-
+Suggests: cockpit-pcp = %{version}-%{release}
+Suggests: cockpit-kubernetes = %{version}-%{release}
+Suggests: cockpit-selinux = %{version}-%{release}
+Suggests: cockpit-packagekit = %{version}-%{release}
 %endif
-
-%description
-Cockpit runs in a browser and can manage your network of GNU/Linux
-machines.
-
-%files
-%{_docdir}/%{name}/AUTHORS
-%{_docdir}/%{name}/COPYING
-%{_docdir}/%{name}/README.md
-%dir %{_datadir}/%{name}
-%{_datadir}/metainfo/cockpit.appdata.xml
-%{_datadir}/applications/cockpit.desktop
-%{_datadir}/pixmaps/cockpit.png
-%doc %{_mandir}/man1/cockpit.1.gz
 
 %prep
-%setup -q
+%setup -q -n cockpit-%{version}
 
 # Apply patches using git in order to support binary patches. Note that
 # we also reset mtimes since patches should be "complete" and include both
@@ -136,7 +150,13 @@ fi
 
 %build
 exec 2>&1
-%configure --disable-silent-rules --with-cockpit-user=cockpit-ws --with-selinux-config-type=etc_t %{?rhel:--without-storaged-iscsi-sessions} %{!?build_dashboard:--disable-ssh}
+%configure \
+    --disable-silent-rules \
+    --with-cockpit-user=cockpit-ws \
+    --with-selinux-config-type=etc_t \
+    %{?rhel:--without-storaged-iscsi-sessions} \
+    --with-appstream-data-packages='[ "appstream-data" ]' \
+    --with-nfs-client-package='"nfs-utils"'
 make -j4 %{?extra_flags} all
 
 %check
@@ -146,127 +166,172 @@ make -j4 check
 %install
 make install DESTDIR=%{buildroot}
 make install-tests DESTDIR=%{buildroot}
-make install-integration-tests DESTDIR=%{buildroot}
 mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/pam.d
 install -p -m 644 tools/cockpit.pam $RPM_BUILD_ROOT%{_sysconfdir}/pam.d/cockpit
 rm -f %{buildroot}/%{_libdir}/cockpit/*.so
-install -p -m 644 AUTHORS COPYING README.md %{buildroot}%{_docdir}/%{name}/
+install -p -m 644 AUTHORS COPYING README.md %{buildroot}%{_docdir}/cockpit/
 
 # On RHEL we don't yet show options for changing language
 %if 0%{?rhel}
-echo '{ "linguas": null }' > %{buildroot}%{_datadir}/%{name}/shell/override.json
+echo '{ "linguas": null }' > %{buildroot}%{_datadir}/cockpit/shell/override.json
 %endif
 
 # Build the package lists for resource packages
-echo '%dir %{_datadir}/%{name}/base1' > base.list
-find %{buildroot}%{_datadir}/%{name}/base1 -type f >> base.list
+echo '%dir %{_datadir}/cockpit/base1' > base.list
+find %{buildroot}%{_datadir}/cockpit/base1 -type f >> base.list
 echo '%{_sysconfdir}/cockpit/machines.d' >> base.list
+# RHEL 7 needs to keep cockpit-ssh in dashboard for backwards compat
+%if 0%{?rhel} == 7 || 0%{?centos} == 7
+find %{buildroot}%{_datadir}/cockpit/ssh -type f >> dashboard.list
+echo '%{_libexecdir}/cockpit-ssh' >> dashboard.list
+%else
+find %{buildroot}%{_datadir}/cockpit/ssh -type f >> base.list
+echo '%{_libexecdir}/cockpit-ssh' >> base.list
+%endif
 
 %if %{defined build_dashboard}
-echo '%dir %{_datadir}/%{name}/dashboard' >> dashboard.list
-find %{buildroot}%{_datadir}/%{name}/dashboard -type f >> dashboard.list
-find %{buildroot}%{_datadir}/%{name}/ssh -type f >> dashboard.list
+echo '%dir %{_datadir}/cockpit/dashboard' >> dashboard.list
+find %{buildroot}%{_datadir}/cockpit/dashboard -type f >> dashboard.list
 %else
-rm -rf %{buildroot}/%{_datadir}/%{name}/dashboard
-rm -rf %{buildroot}/%{_datadir}/%{name}/ssh
+rm -rf %{buildroot}/%{_datadir}/cockpit/dashboard
 touch dashboard.list
 %endif
 
-echo '%dir %{_datadir}/%{name}/pcp' >> pcp.list
-find %{buildroot}%{_datadir}/%{name}/pcp -type f >> pcp.list
+echo '%dir %{_datadir}/cockpit/pcp' >> pcp.list
+find %{buildroot}%{_datadir}/cockpit/pcp -type f >> pcp.list
 
-echo '%dir %{_datadir}/%{name}/realmd' >> system.list
-find %{buildroot}%{_datadir}/%{name}/realmd -type f >> system.list
+echo '%dir %{_datadir}/cockpit/realmd' >> system.list
+find %{buildroot}%{_datadir}/cockpit/realmd -type f >> system.list
 
-echo '%dir %{_datadir}/%{name}/tuned' >> system.list
-find %{buildroot}%{_datadir}/%{name}/tuned -type f >> system.list
+echo '%dir %{_datadir}/cockpit/tuned' >> system.list
+find %{buildroot}%{_datadir}/cockpit/tuned -type f >> system.list
 
-echo '%dir %{_datadir}/%{name}/shell' >> system.list
-find %{buildroot}%{_datadir}/%{name}/shell -type f >> system.list
+echo '%dir %{_datadir}/cockpit/shell' >> system.list
+find %{buildroot}%{_datadir}/cockpit/shell -type f >> system.list
 
-echo '%dir %{_datadir}/%{name}/systemd' >> system.list
-find %{buildroot}%{_datadir}/%{name}/systemd -type f >> system.list
+echo '%dir %{_datadir}/cockpit/systemd' >> system.list
+find %{buildroot}%{_datadir}/cockpit/systemd -type f >> system.list
 
-echo '%dir %{_datadir}/%{name}/users' >> system.list
-find %{buildroot}%{_datadir}/%{name}/users -type f >> system.list
+echo '%dir %{_datadir}/cockpit/users' >> system.list
+find %{buildroot}%{_datadir}/cockpit/users -type f >> system.list
 
-echo '%dir %{_datadir}/%{name}/kdump' >> kdump.list
-find %{buildroot}%{_datadir}/%{name}/kdump -type f >> kdump.list
+echo '%dir %{_datadir}/cockpit/kdump' >> kdump.list
+find %{buildroot}%{_datadir}/cockpit/kdump -type f >> kdump.list
 
-echo '%dir %{_datadir}/%{name}/sosreport' > sosreport.list
-find %{buildroot}%{_datadir}/%{name}/sosreport -type f >> sosreport.list
+echo '%dir %{_datadir}/cockpit/sosreport' > sosreport.list
+find %{buildroot}%{_datadir}/cockpit/sosreport -type f >> sosreport.list
 
-echo '%dir %{_datadir}/%{name}/subscriptions' > subscriptions.list
-find %{buildroot}%{_datadir}/%{name}/subscriptions -type f >> subscriptions.list
+%if %{defined build_subscriptions}
+echo '%dir %{_datadir}/cockpit/subscriptions' >> system.list
+find %{buildroot}%{_datadir}/cockpit/subscriptions -type f >> system.list
+%else
+rm -rf %{buildroot}/%{_datadir}/cockpit/subscriptions
+%endif
 
-echo '%dir %{_datadir}/%{name}/storaged' > storaged.list
-find %{buildroot}%{_datadir}/%{name}/storaged -type f >> storaged.list
+echo '%dir %{_datadir}/cockpit/storaged' > storaged.list
+find %{buildroot}%{_datadir}/cockpit/storaged -type f >> storaged.list
 
-echo '%dir %{_datadir}/%{name}/networkmanager' > networkmanager.list
-find %{buildroot}%{_datadir}/%{name}/networkmanager -type f >> networkmanager.list
+echo '%dir %{_datadir}/cockpit/networkmanager' > networkmanager.list
+find %{buildroot}%{_datadir}/cockpit/networkmanager -type f >> networkmanager.list
 
-echo '%dir %{_datadir}/%{name}/ostree' > ostree.list
-find %{buildroot}%{_datadir}/%{name}/ostree -type f >> ostree.list
+echo '%dir %{_datadir}/cockpit/ostree' > ostree.list
+find %{buildroot}%{_datadir}/cockpit/ostree -type f >> ostree.list
 
-echo '%dir %{_datadir}/%{name}/packagekit' >> packagekit.list
-find %{buildroot}%{_datadir}/%{name}/packagekit -type f >> packagekit.list
+echo '%dir %{_datadir}/cockpit/packagekit' >> packagekit.list
+find %{buildroot}%{_datadir}/cockpit/packagekit -type f >> packagekit.list
 
-echo '%dir %{_datadir}/%{name}/apps' >> packagekit.list
-find %{buildroot}%{_datadir}/%{name}/apps -type f >> packagekit.list
+echo '%dir %{_datadir}/cockpit/apps' >> packagekit.list
+find %{buildroot}%{_datadir}/cockpit/apps -type f >> packagekit.list
 
-echo '%dir %{_datadir}/%{name}/machines' > machines.list
-find %{buildroot}%{_datadir}/%{name}/machines -type f >> machines.list
+echo '%dir %{_datadir}/cockpit/machines' > machines.list
+find %{buildroot}%{_datadir}/cockpit/machines -type f >> machines.list
 
-echo '%dir %{_datadir}/%{name}/ovirt' > ovirt.list
-find %{buildroot}%{_datadir}/%{name}/ovirt -type f >> ovirt.list
+echo '%dir %{_datadir}/cockpit/ovirt' > ovirt.list
+find %{buildroot}%{_datadir}/cockpit/ovirt -type f >> ovirt.list
 
 # on CentOS systems we don't have the required setroubleshoot-server packages
 %if 0%{?centos}
-rm -rf %{buildroot}%{_datadir}/%{name}/selinux
+rm -rf %{buildroot}%{_datadir}/cockpit/selinux
 %else
-echo '%dir %{_datadir}/%{name}/selinux' > selinux.list
-find %{buildroot}%{_datadir}/%{name}/selinux -type f >> selinux.list
+echo '%dir %{_datadir}/cockpit/selinux' > selinux.list
+find %{buildroot}%{_datadir}/cockpit/selinux -type f >> selinux.list
 %endif
 
 %ifarch x86_64 %{arm} aarch64 ppc64le i686 s390x
-echo '%dir %{_datadir}/%{name}/docker' > docker.list
-find %{buildroot}%{_datadir}/%{name}/docker -type f >> docker.list
+echo '%dir %{_datadir}/cockpit/docker' > docker.list
+find %{buildroot}%{_datadir}/cockpit/docker -type f >> docker.list
 %else
-rm -rf %{buildroot}/%{_datadir}/%{name}/docker
+rm -rf %{buildroot}/%{_datadir}/cockpit/docker
 touch docker.list
 %endif
 
 %ifarch aarch64 x86_64 ppc64le s390x
 %if %{defined wip}
 %else
-rm %{buildroot}/%{_datadir}/%{name}/kubernetes/override.json
+rm %{buildroot}/%{_datadir}/cockpit/kubernetes/override.json
 %endif
-echo '%dir %{_datadir}/%{name}/kubernetes' > kubernetes.list
-find %{buildroot}%{_datadir}/%{name}/kubernetes -type f >> kubernetes.list
+echo '%dir %{_datadir}/cockpit/kubernetes' > kubernetes.list
+find %{buildroot}%{_datadir}/cockpit/kubernetes -type f >> kubernetes.list
 %else
-rm -rf %{buildroot}/%{_datadir}/%{name}/kubernetes
+rm -rf %{buildroot}/%{_datadir}/cockpit/kubernetes
 rm -f %{buildroot}/%{_libexecdir}/cockpit-kube-auth
 rm -f %{buildroot}/%{_libexecdir}/cockpit-kube-launch
 rm %{buildroot}/%{_libexecdir}/cockpit-stub
 touch kubernetes.list
 %endif
 
+# when not building basic packages, remove their files
+%if 0%{?build_basic} == 0
+for pkg in base1 branding motd kdump networkmanager realmd selinux shell sosreport ssh static storaged systemd tuned users; do
+    rm -r %{buildroot}/%{_datadir}/cockpit/$pkg
+done
+for data in applications doc locale man metainfo pixmaps; do
+    rm -r %{buildroot}/%{_datadir}/$data
+done
+for lib in systemd tmpfiles.d firewalld; do
+    rm -r %{buildroot}/%{_prefix}/%{__lib}/$lib
+done
+for libexec in cockpit-askpass cockpit-session cockpit-ws; do
+    rm %{buildroot}/%{_libexecdir}/$libexec
+done
+rm -r %{buildroot}/%{_libdir}/security %{buildroot}/%{_sysconfdir}/pam.d %{buildroot}/%{_sysconfdir}/motd.d %{buildroot}/%{_sysconfdir}/issue.d
+rm %{buildroot}/usr/bin/cockpit-bridge %{buildroot}/usr/sbin/remotectl
+rm -f %{buildroot}%{_libexecdir}/cockpit-ssh
+%endif
+
+# when not building optional packages, remove their files
+%if 0%{?build_optional} == 0
+for pkg in apps dashboard docker kubernetes machines ostree ovirt packagekit pcp playground; do
+    rm -rf %{buildroot}/%{_datadir}/cockpit/$pkg
+done
+# files from -tests
+rm -r %{buildroot}/%{_prefix}/%{__lib}/cockpit-test-assets %{buildroot}/%{_sysconfdir}/cockpit/cockpit.conf
+# files from -pcp
+rm -r %{buildroot}/%{_libexecdir}/cockpit-pcp %{buildroot}/%{_localstatedir}/lib/pcp/
+# files from -kubernetes
+rm -f %{buildroot}/%{_libexecdir}/cockpit-kube-auth %{buildroot}/%{_libexecdir}/cockpit-kube-launch %{buildroot}/%{_libexecdir}/cockpit-stub
+%endif
+
 sed -i "s|%{buildroot}||" *.list
 
 # Build the package lists for debug package, and move debug files to installed locations
-find %{buildroot}/usr/src/debug%{_datadir}/%{name} -type f -o -type l > debug.partial
+find %{buildroot}/usr/src/debug%{_datadir}/cockpit -type f -o -type l > debug.partial
 sed -i "s|%{buildroot}/usr/src/debug||" debug.partial
 sed -n 's/\.map\(\.gz\)\?$/\0/p' *.list >> debug.partial
 sed -i '/\.map\(\.gz\)\?$/d' *.list
 tar -C %{buildroot}/usr/src/debug -cf - . | tar -C %{buildroot} -xf -
 rm -rf %{buildroot}/usr/src/debug
 
-# On RHEL kdump, subscriptions, networkmanager, selinux, and sosreport are part of the system package
+# On RHEL kdump, networkmanager, selinux, and sosreport are part of the system package
 %if 0%{?rhel}
-cat kdump.list subscriptions.list sosreport.list networkmanager.list selinux.list >> system.list
+cat kdump.list sosreport.list networkmanager.list selinux.list >> system.list
+rm -f %{buildroot}/usr/share/metainfo/org.cockpit-project.cockpit-sosreport.metainfo.xml
+rm -f %{buildroot}/usr/share/pixmaps/cockpit-sosreport.png
 %endif
 
-%find_lang %{name}
+%if 0%{?build_basic}
+%find_lang cockpit
+%endif
 
 # dwz has trouble with the go binaries
 # https://fedoraproject.org/wiki/PackagingDrafts/Go
@@ -285,26 +350,48 @@ cat kdump.list subscriptions.list sosreport.list networkmanager.list selinux.lis
 %{nil}
 
 # -------------------------------------------------------------------------------
-# Sub-packages
+# Basic Sub-packages
 
-%define __lib lib
+%if 0%{?build_basic}
+
+%description
+Cockpit runs in a browser and can manage your network of GNU/Linux
+machines.
+
+%files
+%{_docdir}/cockpit/AUTHORS
+%{_docdir}/cockpit/COPYING
+%{_docdir}/cockpit/README.md
+%dir %{_datadir}/cockpit
+%{_datadir}/metainfo/cockpit.appdata.xml
+%{_datadir}/applications/cockpit.desktop
+%{_datadir}/pixmaps/cockpit.png
+%doc %{_mandir}/man1/cockpit.1.gz
+
 
 %package bridge
 Summary: Cockpit bridge server-side component
 Requires: glib-networking
+%if 0%{?rhel} != 7 && 0%{?centos} != 7
+Requires: libssh >= %{libssh_version}
+Provides: cockpit-ssh = %{version}-%{release}
+# cockpit-ssh moved from dashboard to bridge in 171
+Conflicts: cockpit-dashboard < 170.x
+%endif
 
 %description bridge
 The Cockpit bridge component installed server side and runs commands on the
 system on behalf of the web based user interface.
 
 %files bridge -f base.list
-%{_datadir}/%{name}/base1/bundle.min.js.gz
+%{_datadir}/cockpit/base1/bundle.min.js.gz
 %doc %{_mandir}/man1/cockpit-bridge.1.gz
 %{_bindir}/cockpit-bridge
 %{_libexecdir}/cockpit-askpass
 
 %package doc
 Summary: Cockpit deployment and developer guide
+BuildArch: noarch
 
 %description doc
 The Cockpit Deployment and Developer Guide shows sysadmins how to
@@ -312,124 +399,20 @@ deploy Cockpit on their machines as well as helps developers who want to
 embed or extend Cockpit.
 
 %files doc
-%exclude %{_docdir}/%{name}/AUTHORS
-%exclude %{_docdir}/%{name}/COPYING
-%exclude %{_docdir}/%{name}/README.md
-%{_docdir}/%{name}
+%exclude %{_docdir}/cockpit/AUTHORS
+%exclude %{_docdir}/cockpit/COPYING
+%exclude %{_docdir}/cockpit/README.md
+%{_docdir}/cockpit
 
-%package machines
-Summary: Cockpit user interface for virtual machines
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-system >= %{required_base}
-Requires: libvirt
-Requires: libvirt-client
-
-%description machines
-The Cockpit components for managing virtual machines.
-
-%files machines -f machines.list
-
-%package ovirt
-Summary: Cockpit user interface for oVirt virtual machines
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-system >= %{required_base}
-Requires: libvirt
-Requires: libvirt-client
-
-%description ovirt
-The Cockpit components for managing oVirt virtual machines.
-
-%files ovirt -f ovirt.list
-
-%package ostree
-Summary: Cockpit user interface for rpm-ostree
-# Requires: Uses new translations functionality
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-system >= %{required_base}
-%if 0%{?fedora} > 0 && 0%{?fedora} < 24
-Requires: rpm-ostree >= 2015.10-1
-%else
-Requires: /usr/libexec/rpm-ostreed
-%endif
-
-%description ostree
-The Cockpit components for managing software updates for ostree based systems.
-
-%files ostree -f ostree.list
-
-%package pcp
-Summary: Cockpit PCP integration
-Requires: %{name}-bridge >= %{required_base}
-Requires: pcp
-
-%description pcp
-Cockpit support for reading PCP metrics and loading PCP archives.
-
-%files pcp -f pcp.list
-%{_libexecdir}/cockpit-pcp
-%{_localstatedir}/lib/pcp/config/pmlogconf/tools/cockpit
-
-%post pcp
-# HACK - https://bugzilla.redhat.com/show_bug.cgi?id=1185764
-# We can't use "systemctl reload-or-try-restart" since systemctl might
-# be out of sync with reality.
-/usr/share/pcp/lib/pmlogger condrestart
-
-%if %{defined build_dashboard}
-%package dashboard
-Summary: Cockpit remote servers and dashboard
-Requires: libssh >= %{libssh_version}
-Provides: %{name}-ssh = %{version}-%{release}
-# nothing depends on the dashboard, but we can't use it with older versions of the bridge
-Conflicts: %{name}-bridge < 135
-Conflicts: %{name}-ws < 135
-
-%description dashboard
-Cockpit support for connecting to remote servers (through ssh),
-bastion hosts, and a basic dashboard.
-
-%files dashboard -f dashboard.list
-%{_libexecdir}/cockpit-ssh
-
-%post dashboard
-# HACK: Until policy changes make it downstream
-echo "Applying workaround for broken SELinux policy: https://bugzilla.redhat.com/show_bug.cgi?id=1381331" >&2
-if type semanage >/dev/null 2>&1; then
-    semanage fcontext -a %{_libexecdir}/cockpit-ssh -t cockpit_ws_exec_t || true
-    restorecon %{_libexecdir}/cockpit-ssh || true
-else
-    chcon -t cockpit_ws_exec_t %{_libexecdir}/cockpit-ssh || true
-fi
-%if 0%{?fedora} > 0 && 0%{?fedora} >= 26
-if type semodule >/dev/null 2>&1; then
-    tmp=$(mktemp -d)
-    echo 'module local 1.0; require { type cockpit_ws_exec_t; type cockpit_ws_t; class file execute_no_trans; } allow cockpit_ws_t cockpit_ws_exec_t:file execute_no_trans;' > "$tmp/local.te"
-    checkmodule -M -m -o "$tmp/local.mod" "$tmp/local.te"
-    semodule_package -o "$tmp/local.pp" -m "$tmp/local.mod"
-    semodule -i "$tmp/local.pp"
-    rm -rf "$tmp"
-fi
-%endif
-%endif
-
-# storaged on RHEL 7.4 and Fedora < 27, udisks on newer ones
-# Recommends: not supported in RHEL < 8
+# storaged on Fedora < 27, udisks on newer ones
+# Recommends: not supported in RHEL <= 7
 %package storaged
-Summary: Cockpit user interface for storage, using Storaged
-Requires: %{name}-shell >= %{required_base}
-%if (0%{?rhel} == 7 && "%{os_version_id}" == "7.4") || 0%{?centos} == 7
-Requires: storaged >= 2.1.1
-Requires: storaged-lvm2 >= 2.1.1
-Requires: storaged-iscsi >= 2.1.1
-Requires: device-mapper-multipath
-%else
-%if 0%{?rhel} == 7
+Summary: Cockpit user interface for storage, using udisks
+Requires: cockpit-shell >= %{required_base}
+%if 0%{?rhel} == 7 || 0%{?centos} == 7
 Requires: udisks2 >= 2.6
-# FIXME: udisks2 modules not yet available on 7.5
-%if "%{os_version_id}" != "7.5"
 Requires: udisks2-lvm2 >= 2.6
 Requires: udisks2-iscsi >= 2.6
-%endif
 Requires: device-mapper-multipath
 %else
 %if 0%{?fedora} >= 27 || 0%{?rhel} >= 8
@@ -445,8 +428,7 @@ Recommends: storaged-iscsi >= 2.1.1
 Recommends: device-mapper-multipath
 %endif
 %endif
-%endif
-%if 0%{?fedora}
+%if 0%{?fedora} || 0%{?rhel} >= 8
 Requires: python3
 Requires: python3-dbus
 %else
@@ -456,38 +438,43 @@ Requires: python-dbus
 BuildArch: noarch
 
 %description storaged
-The Cockpit component for managing storage.  This package uses Storaged.
+The Cockpit component for managing storage.  This package uses udisks.
 
 %files storaged -f storaged.list
 
 %package system
 Summary: Cockpit admin interface package for configuring and troubleshooting a system
 BuildArch: noarch
-Requires: %{name}-bridge >= %{version}-%{release}
+Requires: cockpit-bridge >= %{version}-%{release}
 Requires: shadow-utils
 Requires: grep
 Requires: libpwquality
 Requires: /usr/bin/date
-Provides: %{name}-realmd = %{version}-%{release}
-Provides: %{name}-shell = %{version}-%{release}
-Obsoletes: %{name}-shell < 127
-Provides: %{name}-systemd = %{version}-%{release}
-Provides: %{name}-tuned = %{version}-%{release}
-Provides: %{name}-users = %{version}-%{release}
+Provides: cockpit-realmd = %{version}-%{release}
+Provides: cockpit-shell = %{version}-%{release}
+Obsoletes: cockpit-shell < 127
+Provides: cockpit-systemd = %{version}-%{release}
+Provides: cockpit-tuned = %{version}-%{release}
+Provides: cockpit-users = %{version}-%{release}
 %if 0%{?rhel}
-Provides: %{name}-networkmanager = %{version}-%{release}
-Obsoletes: %{name}-networkmanager < 135
+Provides: cockpit-networkmanager = %{version}-%{release}
+Obsoletes: cockpit-networkmanager < 135
 Requires: NetworkManager
-Provides: %{name}-kdump = %{version}-%{release}
+Provides: cockpit-kdump = %{version}-%{release}
 Requires: kexec-tools
 # Optional components (only when soft deps are supported)
+%if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
+Recommends: polkit
+%endif
 %if 0%{?rhel} >= 8
 Recommends: NetworkManager-team
 Recommends: setroubleshoot-server >= 3.3.3
 %endif
-Provides: %{name}-selinux = %{version}-%{release}
-Provides: %{name}-sosreport = %{version}-%{release}
-Provides: %{name}-subscriptions = %{version}-%{release}
+Provides: cockpit-selinux = %{version}-%{release}
+Provides: cockpit-sosreport = %{version}-%{release}
+%endif
+%if %{defined build_subscriptions}
+Provides: cockpit-subscriptions = %{version}-%{release}
 Requires: subscription-manager >= 1.13
 %endif
 
@@ -496,56 +483,14 @@ This package contains the Cockpit shell and system configuration interfaces.
 
 %files system -f system.list
 
-%package tests
-Summary: Tests for Cockpit
-Requires: %{name}-bridge >= 138
-Requires: %{name}-system >= 138
-Requires: openssh-clients
-Provides: %{name}-test-assets = %{version}-%{release}
-Obsoletes: %{name}-test-assets < 132
-
-%description tests
-This package contains tests and files used while testing Cockpit.
-These files are not required for running Cockpit.
-
-%files tests
-%config(noreplace) %{_sysconfdir}/cockpit/cockpit.conf
-%{_datadir}/%{name}/playground
-%{_prefix}/%{__lib}/cockpit-test-assets
-
-%package integration-tests
-Summary: Integration tests for Cockpit
-Requires: curl
-Requires: expect
-Requires: libvirt
-Requires: libvirt-client
-Requires: libvirt-daemon
-%if 0%{?rhel} >= 8 || 0%{?centos} >= 8 || 0%{?fedora} >= 27
-Requires: python2-libvirt
-%else
-Requires: libvirt-python
-%endif
-Requires: qemu-kvm
-Requires: npm
-Requires: python2
-Requires: rsync
-Requires: xz
-Requires: openssh-clients
-Requires: fontconfig
-
-%description integration-tests
-This package contains Cockpit's integration tests for running in VMs.
-These are not required for running Cockpit.
-
-%files integration-tests
-%{_datadir}/%{name}/test
-%{_datadir}/%{name}/containers
-
 %package ws
 Summary: Cockpit Web Service
 Requires: glib-networking
 Requires: openssl
 Requires: glib2 >= 2.37.4
+%if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
+Recommends: sscg >= 2.3
+%endif
 Requires(post): systemd
 Requires(preun): systemd
 Requires(postun): systemd
@@ -553,16 +498,19 @@ Requires(postun): systemd
 %description ws
 The Cockpit Web Service listens on the network, and authenticates users.
 
-%files ws -f %{name}.lang
+%files ws -f cockpit.lang
 %doc %{_mandir}/man5/cockpit.conf.5.gz
 %doc %{_mandir}/man8/cockpit-ws.8.gz
 %doc %{_mandir}/man8/remotectl.8.gz
 %doc %{_mandir}/man8/pam_ssh_add.8.gz
-%config(noreplace) %{_sysconfdir}/%{name}/ws-certs.d
+%config(noreplace) %{_sysconfdir}/cockpit/ws-certs.d
 %config(noreplace) %{_sysconfdir}/pam.d/cockpit
-%{_datadir}/%{name}/issue/active.issue
-%{_datadir}/%{name}/issue/inactive.issue
+%config %{_sysconfdir}/issue.d/cockpit
+%config %{_sysconfdir}/motd.d/cockpit
+%{_datadir}/cockpit/motd/update-motd
+%{_datadir}/cockpit/motd/inactive.motd
 %{_unitdir}/cockpit.service
+%{_unitdir}/cockpit-motd.service
 %{_unitdir}/cockpit.socket
 %{_prefix}/%{__lib}/firewalld/services/cockpit.xml
 %{_prefix}/%{__lib}/tmpfiles.d/cockpit-tempfiles.conf
@@ -570,9 +518,9 @@ The Cockpit Web Service listens on the network, and authenticates users.
 %{_libdir}/security/pam_ssh_add.so
 %{_libexecdir}/cockpit-ws
 %attr(4750, root, cockpit-ws) %{_libexecdir}/cockpit-session
-%attr(775, -, wheel) %{_localstatedir}/lib/%{name}
-%{_datadir}/%{name}/static
-%{_datadir}/%{name}/branding
+%attr(775, -, wheel) %{_localstatedir}/lib/cockpit
+%{_datadir}/cockpit/static
+%{_datadir}/cockpit/branding
 
 %pre ws
 getent group cockpit-ws >/dev/null || groupadd -r cockpit-ws
@@ -591,14 +539,14 @@ test -f %{_bindir}/firewall-cmd && firewall-cmd --reload --quiet || true
 %systemd_postun_with_restart cockpit.service
 
 # -------------------------------------------------------------------------------
-# Conditional Sub-packages
+# Sub-packages that are part of cockpit-system in RHEL, but separate in Fedora
 
 %if 0%{?rhel} == 0
 
 %package kdump
 Summary: Cockpit user interface for kernel crash dumping
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-shell >= %{required_base}
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-shell >= %{required_base}
 Requires: kexec-tools
 BuildArch: noarch
 
@@ -609,8 +557,8 @@ The Cockpit component for configuring kernel crash dumping.
 
 %package sosreport
 Summary: Cockpit user interface for diagnostic reports
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-shell >= %{required_base}
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-shell >= %{required_base}
 Requires: sos
 BuildArch: noarch
 
@@ -619,24 +567,13 @@ The Cockpit component for creating diagnostic reports with the
 sosreport tool.
 
 %files sosreport -f sosreport.list
-
-%package subscriptions
-Summary: Cockpit subscription user interface package
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-shell >= %{required_base}
-Requires: subscription-manager >= 1.13
-BuildArch: noarch
-
-%description subscriptions
-This package contains the Cockpit user interface integration with local
-subscription management.
-
-%files subscriptions -f subscriptions.list
+/usr/share/metainfo/org.cockpit-project.cockpit-sosreport.metainfo.xml
+/usr/share/pixmaps/cockpit-sosreport.png
 
 %package networkmanager
 Summary: Cockpit user interface for networking, using NetworkManager
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-shell >= %{required_base}
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-shell >= %{required_base}
 Requires: NetworkManager
 # Optional components (only when soft deps are supported)
 %if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
@@ -655,8 +592,8 @@ The Cockpit component for managing networking.  This package uses NetworkManager
 
 %package selinux
 Summary: Cockpit SELinux package
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-shell >= %{required_base}
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-shell >= %{required_base}
 %if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
 Recommends: setroubleshoot-server >= 3.3.3
 %endif
@@ -670,55 +607,190 @@ utility setroubleshoot to diagnose and resolve SELinux issues.
 
 %endif
 
+%else # build basic packages
+
+# RPM requires this
+%description
+Dummy package from building optional packages only; never install or publish me.
+
+%endif # build basic packages
+
+# -------------------------------------------------------------------------------
+# Sub-packages that are optional extensions
+
+%if 0%{?build_optional}
+
+%package -n cockpit-tests
+Summary: Tests for Cockpit
+Requires: cockpit-bridge >= 138
+Requires: cockpit-system >= 138
+Requires: openssh-clients
+Provides: cockpit-test-assets = %{version}-%{release}
+Obsoletes: cockpit-test-assets < 132
+
+%description -n cockpit-tests
+This package contains tests and files used while testing Cockpit.
+These files are not required for running Cockpit.
+
+%files -n cockpit-tests
+%config(noreplace) %{_sysconfdir}/cockpit/cockpit.conf
+%{_datadir}/cockpit/playground
+%{_prefix}/%{__lib}/cockpit-test-assets
+
+%package -n cockpit-machines
+BuildArch: noarch
+Summary: Cockpit user interface for virtual machines
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-system >= %{required_base}
+Requires: libvirt
+Requires: libvirt-client
+# Optional components (for f24 we use soft deps)
+%if 0%{?fedora} >= 24 || 0%{?rhel} >= 8
+Recommends: virt-install
+%endif
+
+%description -n cockpit-machines
+The Cockpit components for managing virtual machines.
+
+If "virt-install" is installed, you can also create new virtual machines.
+
+%files -n cockpit-machines -f machines.list
+
+%package -n cockpit-machines-ovirt
+BuildArch: noarch
+Summary: Cockpit user interface for oVirt virtual machines
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-system >= %{required_base}
+Requires: libvirt
+Requires: libvirt-client
+# package of old name "cockpit-ovirt" was shipped on fedora only
+%if 0%{?fedora} >= 25
+Obsoletes: cockpit-ovirt < 161
+%endif
+
+%description -n cockpit-machines-ovirt
+The Cockpit components for managing oVirt virtual machines.
+
+%files -n cockpit-machines-ovirt -f ovirt.list
+
+%package -n cockpit-ostree
+BuildArch: noarch
+Summary: Cockpit user interface for rpm-ostree
+# Requires: Uses new translations functionality
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-system >= %{required_base}
+%if 0%{?fedora} > 0 && 0%{?fedora} < 24
+Requires: rpm-ostree >= 2015.10-1
+%else
+Requires: /usr/libexec/rpm-ostreed
+%endif
+
+%description -n cockpit-ostree
+The Cockpit components for managing software updates for ostree based systems.
+
+%files -n cockpit-ostree -f ostree.list
+
+%package -n cockpit-pcp
+Summary: Cockpit PCP integration
+Requires: cockpit-bridge >= %{required_base}
+Requires: pcp
+
+%description -n cockpit-pcp
+Cockpit support for reading PCP metrics and loading PCP archives.
+
+%files -n cockpit-pcp -f pcp.list
+%{_libexecdir}/cockpit-pcp
+%{_localstatedir}/lib/pcp/config/pmlogconf/tools/cockpit
+
+%post -n cockpit-pcp
+# HACK - https://bugzilla.redhat.com/show_bug.cgi?id=1185764
+# We can't use "systemctl reload-or-try-restart" since systemctl might
+# be out of sync with reality.
+/usr/share/pcp/lib/pmlogger condrestart
+
+%if %{defined build_dashboard}
+%package -n cockpit-dashboard
+Summary: Cockpit remote servers and dashboard
+%if 0%{?rhel} == 7 || 0%{?centos} == 7
+Requires: libssh >= %{libssh_version}
+Provides: cockpit-ssh = %{version}-%{release}
+# nothing depends on the dashboard, but we can't use it with older versions of the bridge
+Conflicts: cockpit-bridge < 135
+%else
+BuildArch: noarch
+Requires: cockpit-ssh >= 135
+%endif
+Conflicts: cockpit-ws < 135
+
+%description -n cockpit-dashboard
+Cockpit support for connecting to remote servers (through ssh),
+bastion hosts, and a basic dashboard.
+
+%files -n cockpit-dashboard -f dashboard.list
+
+%endif
+
 %ifarch x86_64 %{arm} aarch64 ppc64le i686 s390x
 
-%package docker
+%package -n cockpit-docker
 Summary: Cockpit user interface for Docker containers
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-shell >= %{required_base}
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-shell >= %{required_base}
 Requires: /usr/bin/docker
+Requires: /usr/lib/systemd/system/docker.service
+%if 0%{?fedora} || 0%{?rhel} >= 8
+Requires: python3
+%else
 Requires: python2
+%endif
 
-%description docker
+%description -n cockpit-docker
 The Cockpit components for interacting with Docker and user interface.
 This package is not yet complete.
 
-%files docker -f docker.list
+%files -n cockpit-docker -f docker.list
 
 %endif
 
 %ifarch aarch64 x86_64 ppc64le s390x
 
-%package kubernetes
+%package -n cockpit-kubernetes
 Summary: Cockpit user interface for Kubernetes cluster
 Requires: /usr/bin/kubectl
 # Requires: Needs newer localization support
-Requires: %{name}-bridge >= %{required_base}
-Requires: %{name}-shell >= %{required_base}
-BuildRequires: golang-bin
-BuildRequires: golang-src
+Requires: cockpit-bridge >= %{required_base}
+Requires: cockpit-shell >= %{required_base}
+BuildRequires: %{go_scl_prefix}golang-bin
+BuildRequires: %{go_scl_prefix}golang-src
 Provides: cockpit-stub = %{version}-%{release}
 
-%description kubernetes
+%description -n cockpit-kubernetes
 The Cockpit components for visualizing and configuring a Kubernetes
 cluster. Installed on the Kubernetes master. This package is not yet complete.
 
-%files kubernetes -f kubernetes.list
+%if 0%{?rhel} >= 8
+%enable_gotoolset7
+%endif
+
+%files -n cockpit-kubernetes -f kubernetes.list
 %{_libexecdir}/cockpit-kube-auth
 %{_libexecdir}/cockpit-kube-launch
 %{_libexecdir}/cockpit-stub
 %endif
 
-%package packagekit
+%package -n cockpit-packagekit
 Summary: Cockpit user interface for packages
-Requires: %{name}-bridge >= %{required_base}
+BuildArch: noarch
+Requires: cockpit-bridge >= %{required_base}
 Requires: PackageKit
 
-%description packagekit
+%description -n cockpit-packagekit
 The Cockpit components for installing OS updates and Cockpit add-ons,
 via PackageKit.
 
-%files packagekit -f packagekit.list
+%files -n cockpit-packagekit -f packagekit.list
+
+%endif # build optional extension packages
 
 # The changelog is automatically generated and merged
 %changelog

@@ -20,7 +20,7 @@
 # This library have to be run under root or other user who has rights
 # for targetcli and iscsi commands
 # you have to install: yum -y install targetcli iscsi-initiator-utils
-# !!!!!! at the end, please call "clear" function for destory all created iSCSI targets
+# !!!!!! at the end, please call "clear" function for destroy all created iSCSI targets
 # usecase:
 # import libdisc; a=libdisc.Disc('cockpit'); print a.adddisc('disc1'); print a.adddisc('disc2'); a.deldisc('disc2'); a.clear();"
 
@@ -54,7 +54,7 @@ class Disc():
         tmp = process.run("iscsiadm -m node" , shell = True)
         print(tmp.stdout)
         tmp = process.run("sleep 5; iscsiadm -m session -P 3 | tail -1" , shell = True)
-        tmp1 = re.search('Attached scsi disk\s+([a-z]*)\s+', tmp.stdout)
+        tmp1 = re.search(r'Attached scsi disk\s+([a-z]*)\s+', tmp.stdout)
         return "/dev/%s" % str(tmp1.group(1))
 
     def deldisc(self, name):
@@ -79,14 +79,14 @@ class DiscSimple():
         process.run("dd if=/dev/zero of=%s bs=1M count=1 seek=%d" % (outfile, size), shell = True)
         process.run("sudo losetup -f %s; sleep 1" % outfile, shell = True)
         tmp = process.run("sudo losetup -j %s" % outfile, shell = True)
-        tmp1 = re.search('(/dev/loop[0-9]+):\s+', tmp.stdout)
+        tmp1 = re.search(r'(/dev/loop[0-9]+):\s+', tmp.stdout)
         self.targetlist.append(name)
         return tmp1.group(1)
 
     def deldisc(self,name):
         outfile="%s%s" % (self.location, name)
         tmp = process.run("sudo losetup -j %s" % outfile, shell = True)
-        tmp1 = re.search('(/dev/loop[0-9]+):\s+', tmp.stdout)
+        tmp1 = re.search(r'(/dev/loop[0-9]+):\s+', tmp.stdout)
         process.run("sudo losetup -d %s" % tmp1.group(1), shell = True)
         self.targetlist.remove(name)
 

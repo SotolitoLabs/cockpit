@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -25,7 +24,7 @@ import MACHINES_CONFIG from '../machines/config.es6';
 import { setOvirtApiCheckResult } from './provider.es6';
 import { ovirtApiGet } from './ovirtApiAccess.es6';
 import { startOvirtPolling } from './ovirt.es6';
-import { loginInProgress, setHostname } from './actions.es6';
+import { loginInProgress, setHostname, setHostIPs } from './actions.es6';
 import installationDialog from './components/InstallationDialog.jsx';
 
 import store, { waitForReducerSubtreeInit } from './store.es6';
@@ -36,8 +35,20 @@ export function readConfiguration ({ dispatch }) {
     const promises = [];
     promises.push(doReadConfiguration({ dispatch }));
     promises.push(doReadHostname({ dispatch }));
+    promises.push(doReadIpAddresses({ dispatch }));
 
-    return cockpit.all(promises);
+    return cockpit.all(promises).done(setDefaultLibvirtConnection);
+}
+
+function setDefaultLibvirtConnection () {
+    // If hostname was found by doReadHostname() and VIRSH_CONNECTION_URI wasn't set in CONFIG_FILE
+    // (or CONFIG_FILE wasn't created) then auto calculate the Virsh connection URI as:
+    // qemu+tls://${hostName}/system
+    if (CONFIG.hostName && MACHINES_CONFIG.Virsh && MACHINES_CONFIG.Virsh.connections &&
+        Object.getOwnPropertyNames(MACHINES_CONFIG.Virsh.connections).indexOf('remote') === -1) {
+        MACHINES_CONFIG.Virsh.connections = {'remote': { params: ['-c', `qemu+tls://${CONFIG.hostName}/system`] }};
+    }
+    console.info('Libvirt connections to be used: ', JSON.stringify(MACHINES_CONFIG.Virsh));
 }
 
 /**
@@ -46,35 +57,40 @@ export function readConfiguration ({ dispatch }) {
  * @param dispatch
  */
 function doReadConfiguration ({ dispatch }) {
+    const onCancel = () => {
+        dispatch(loginInProgress(false));
+    };
+
     // Configuration can be changed by admin after installation
     // and so is kept in separate file (out of manifest.json)
     return cockpit.file(OVIRT_CONF_FILE).read()
-        .done((content) => {
-            if (!content) {
-                console.info('Configuration file empty, post-installation setup follows to generate: ', OVIRT_CONF_FILE);
-                installationDialog();
-                return;
-            }
+            .done((content) => {
+                if (!content) {
+                    console.info('Configuration file empty, post-installation setup follows to generate: ', OVIRT_CONF_FILE);
+                    installationDialog({ onCancel });
+                    return;
+                }
 
-            console.log(`Configuration file ${OVIRT_CONF_FILE} content is read ...`);
-            const config = JSON.parse(content);
-            console.log('... and parsed');
-            Object.assign(CONFIG, config);
+                console.log(`Configuration file ${OVIRT_CONF_FILE} content is read ...`);
+                const config = JSON.parse(content);
+                console.log('... and parsed');
+                Object.assign(CONFIG, config);
 
-            MACHINES_CONFIG.isDev = CONFIG.debug;
+                MACHINES_CONFIG.isDev = CONFIG.debug;
 
-            if (CONFIG.Virsh && CONFIG.Virsh.connections) {
-                MACHINES_CONFIG.Virsh = CONFIG.Virsh; // adjust pkg/machines
-                CONFIG.Virsh = null; // not used anywhere else within pkg/ovirt
-                logDebug('Connection params for virsh: ', JSON.stringify(MACHINES_CONFIG.Virsh));
-            }
+                if (CONFIG.Virsh && CONFIG.Virsh.connections) {
+                    MACHINES_CONFIG.Virsh = CONFIG.Virsh; // adjust pkg/machines
+                    CONFIG.Virsh = null; // not used anywhere else within pkg/ovirt
+                    logDebug('Connection params for virsh: ', JSON.stringify(MACHINES_CONFIG.Virsh));
+                }
 
-            logDebug(`Configuration parsed, using merged result: ${JSON.stringify(CONFIG)}`);
-            return doLogin({ dispatch });
-        }).fail( () => {
-            console.info('Failed to read configuration, post-installation setup follows to generate: ', OVIRT_CONF_FILE);
-            installationDialog();
-        });
+                logDebug(`Configuration parsed, using merged result: ${JSON.stringify(CONFIG)}`);
+                return doLogin({ dispatch });
+            })
+            .fail(() => {
+                console.info('Failed to read configuration, post-installation setup follows to generate: ', OVIRT_CONF_FILE);
+                installationDialog({ onCancel });
+            });
 }
 
 function storeSsoUri (location) {
@@ -89,15 +105,36 @@ function storeSsoUri (location) {
 function doReadHostname ({ dispatch }) {
     let hostname = '';
     return cockpit.spawn(['hostname', '-f'], {'err': 'message'})
-        .stream(data => {
-            hostname += data;
-        }).done(() => {
-            hostname = hostname.trim();
-            logDebug('hostname read: ', hostname);
-            waitForReducerSubtreeInit(() => dispatch(setHostname(hostname)));
-        }).fail(ex => {
-            console.error("Getting 'hostname' failed:", ex);
-        });
+            .stream(data => {
+                hostname += data;
+            })
+            .done(() => {
+                hostname = hostname.trim();
+                logDebug('hostname read: ', hostname);
+                CONFIG.hostName = hostname;
+
+                waitForReducerSubtreeInit(() => dispatch(setHostname(hostname)));
+            })
+            .fail(ex => {
+                console.error("Getting 'hostname' failed:", ex);
+            });
+}
+
+function doReadIpAddresses ({ dispatch }) {
+    let output = '';
+    return cockpit.spawn(['hostname', '--all-ip-addresses'], {'err': 'message'})
+            .stream(data => {
+                output += data;
+            })
+            .done(() => {
+                // space separated list
+                const ips = output.split(' ');
+                logDebug('host ip addresses: ', ips);
+                waitForReducerSubtreeInit(() => dispatch(setHostIPs(ips)));
+            })
+            .fail(ex => {
+                console.error("Getting list of host ip addresses failed:", ex);
+            });
 }
 
 function doLogin ({ dispatch }) {
@@ -117,7 +154,7 @@ function doLogin ({ dispatch }) {
         window.sessionStorage.setItem('OVIRT_PROVIDER_TOKEN', token);
         logDebug(`doLogin(): token from params stored to sessionStorage, now removing the token hash from the url. `, token);
         window.top.location.hash = '';
-        return onLoginSuccessful({ dispatch, token});
+        return onLoginSuccessful({ dispatch, token });
     } else if (token) { // found in the sessionStorrage
         logDebug(`doLogin(): token found in sessionStorrage: ${token}`);
         return onLoginSuccessful({ dispatch, token });
@@ -127,7 +164,7 @@ function doLogin ({ dispatch }) {
     return false;
 }
 
-function onLoginSuccessful ({ dispatch , token }) {
+function onLoginSuccessful ({ dispatch, token }) {
     CONFIG.token = token;
 
     // Turn-off user notification about progress
@@ -181,7 +218,7 @@ function checkApiVersion ({ dispatch }) {
             console.error('Incompatible oVirt API version: ', apiMetaData);
 
             setOvirtApiCheckResult(false);
-            return ;
+            return;
         }
 
         const actual = apiMetaData['product_info']['version'];

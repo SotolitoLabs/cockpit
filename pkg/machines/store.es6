@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -17,14 +16,16 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
-import { applyMiddleware, createStore } from 'redux/dist/redux';
+
+import { createStore, applyMiddleware } from 'redux';
 import reducer from './reducers.es6';
-import { thunk } from './middlewares.es6';
+import thunkMiddleware from 'redux-thunk'
 
-const createStoreWithMiddleware = applyMiddleware(
-    thunk
-)(createStore);
-
-const store = createStoreWithMiddleware(reducer);
+const store = createStore(
+    reducer,
+    applyMiddleware(
+        thunkMiddleware, // lets us dispatch() functions
+    )
+);
 
 export default store;

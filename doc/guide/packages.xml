@@ -26,7 +26,7 @@
       along with dash, underscore, dot, and comma. No spaces are allowed.</para>
 
     <para>Cockpit uses the data directories from the
-      <ulink url="http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html">XDG Base Directory
+      <ulink url="https://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html">XDG Base Directory
         Specification</ulink>
       to locate packages. The <code>$XDG_DATA_DIRS</code> represents a colon separate list of system data
       directories, and <code>$XDG_DATA_HOME</code> is a user specific data directory. If the environment
@@ -91,8 +91,9 @@ $ cockpit-bridge --packages
             <ulink url="https://en.wikipedia.org/wiki/Content_Security_Policy">Content Security Policy</ulink>,
             which among other things does not allow inline styles or scripts. This can
             be overriden on a per-package basis, with this setting.</para>
-          <para>If the overriden content security policy does not contain a <code>default-src</code> or
-            <code>connect-src</code> these will be added to the policy from the manifest.</para>
+          <para>If the overriden content security policy does not contain a <code>default-src</code>,
+            <code>connect-src</code>, <code>base-uri</code>, <code>form-action</code>, <code>object-src</code>,
+            or <code>block-all-mixed-content</code> then these will be added to the policy from the manifest.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -117,7 +118,7 @@ $ cockpit-bridge --packages
       </varlistentry>
       <varlistentry>
         <term>priority</term>
-        <listitem><para>An optional number that specifies which package is prefered in cases
+        <listitem><para>An optional number that specifies which package is preferred in cases
           where there are conflicts. For example given two packages with the same
           <code>name</code> a package is chosen based on its priority.</para></listitem>
       </varlistentry>

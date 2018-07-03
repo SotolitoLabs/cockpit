@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -23,9 +23,7 @@ import parent
 from testlib import *
 from storagelib import *
 
-@skipImage("UDisks doesn't have support for LVM", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable")
-# HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1503100
-@skipImage("udisks2-lvm2 missing in RHEL 7.5", "rhel-7-5")
+@skipImage("UDisks doesn't have support for LVM", "debian-stable", "ubuntu-1604")
 class TestStorage(StorageCase):
     def testLvm(self):
         m = self.machine
@@ -49,6 +47,7 @@ class TestStorage(StorageCase):
 
         # Create a volume group out of two disks
         m.execute("vgcreate TEST1 %s %s" % (dev_1, dev_2))
+        b.wait_present("#vgroups")
         b.wait_in_text("#vgroups", "TEST1")
         b.click('tr:contains("TEST1")')
         b.wait_visible("#storage-detail")
@@ -71,7 +70,7 @@ class TestStorage(StorageCase):
         self.content_row_wait_in_col(1, 2, "one")
 
         # and remove it
-        m.execute("lvremove TEST1/one")
+        m.execute("lvremove -f TEST1/one")
         b.wait_not_in_text("#detail-content", "one")
 
         # remove a disk from the volume group
@@ -143,17 +142,8 @@ class TestStorage(StorageCase):
         self.dialog_cancel()
         self.dialog_wait_close()
 
-        # try to shrink it without a filesystem.
-        self.content_tab_info_action(1, 1, "Size")
-        self.dialog_wait_open()
-        self.dialog_wait_val("size", 20)
-        self.dialog_set_val("size", 10)
-        self.dialog_apply()
-        self.dialog_wait_error(None, "This logical volume cannot be made smaller.")
-        self.dialog_cancel()
-
         # grow it
-        self.content_tab_info_action(1, 1, "Size")
+        self.content_tab_action(1, 1, "Grow")
         self.dialog({ "size": 30 })
 
         # format and mount it
@@ -171,7 +161,7 @@ class TestStorage(StorageCase):
         b.wait_not_present(self.content_tab_info_row(1, 2, "Mounted At"))
 
         # shrink it, this time with a filesystem.
-        self.content_tab_info_action(1, 1, "Size")
+        self.content_tab_action(1, 1, "Shrink")
         self.dialog({ "size": 10 })
 
         # delete it
@@ -210,7 +200,7 @@ class TestStorage(StorageCase):
         b.wait_in_text("#detail-sidebar", "DISK2")
         b.wait_in_text("#detail-header .info-table-ct", "96 MiB")
 
-        self.content_tab_info_action(1, 1, "Size")
+        self.content_tab_action(1, 1, "Grow")
         self.dialog({ "size": 70 })
 
         # There is not enough free space to remove any of the disks.
@@ -227,7 +217,7 @@ class TestStorage(StorageCase):
         self.wait_in_storaged_configuration(mount_point_thin)
 
         # remove volume group
-        b.click_action_btn('.panel-heading:contains("Volume Group") .btn-group', "Delete")
+        b.click('.panel-heading:contains("Volume Group") button:contains("Delete")')
         self.confirm()
         b.wait_visible("#storage")
         self.assertEqual(m.execute("grep %s /etc/fstab || true" % mount_point_thin), "")

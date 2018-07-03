@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -21,53 +20,6 @@ import { combineReducers } from 'redux/dist/redux';
 import VMS_CONFIG from "./config.es6";
 import { logDebug } from './helpers.es6';
 
-// --- compatibility hack for IE
-if (!Array.prototype.findIndex) {
-    Array.prototype.findIndex = function (predicate) {
-        if (this === null) {
-            throw new TypeError('Array.prototype.findIndex called on null or undefined');
-        }
-        if (typeof predicate !== 'function') {
-            throw new TypeError('predicate must be a function');
-        }
-        var list = Object(this);
-        var length = list.length >>> 0;
-        var thisArg = arguments[1];
-        var value;
-
-        for (var i = 0; i < length; i++) {
-            value = list[i];
-            if (predicate.call(thisArg, value, i, list)) {
-                return i;
-            }
-        }
-        return -1;
-    };
-}
-
-// --- compatibility hack for PhantomJS
-if (typeof Object.assign != 'function') {
-    Object.assign = function (target) {
-        'use strict';
-        if (target === null) {
-            throw new TypeError('Cannot convert undefined or null to object');
-        }
-
-        target = Object(target);
-        for (var index = 1; index < arguments.length; index++) {
-            var source = arguments[index];
-            if (source !== null) {
-                for (var key in source) {
-                    if (Object.prototype.hasOwnProperty.call(source, key)) {
-                        target[key] = source[key];
-                    }
-                }
-            }
-        }
-        return target;
-    };
-}
-
 // --- helpers -------------------
 function getFirstIndexOfVm(state, field, value, connectionName) {
     return state.findIndex(e => {
@@ -77,21 +29,27 @@ function getFirstIndexOfVm(state, field, value, connectionName) {
 
 // --- reducers ------------------
 function config(state, action) {
-    state = state ? state : {
+    state = state || {
         provider: null,
         providerState: null,
-        refreshInterval: VMS_CONFIG.DefaultRefreshInterval
+        refreshInterval: VMS_CONFIG.DefaultRefreshInterval,
     };
 
     switch (action.type) {
-        case 'SET_PROVIDER':
-            return Object.assign({}, state, {provider: action.provider});
-        case 'SET_REFRESH_INTERVAL':
-            const newState = Object.assign({}, state);
-            newState.refreshInterval = action.refreshInterval;
-            return newState;
-        default:
-            return state;
+    case 'SET_PROVIDER':
+        return Object.assign({}, state, { provider: action.provider });
+    case 'SET_REFRESH_INTERVAL': {
+        const newState = Object.assign({}, state);
+        newState.refreshInterval = action.refreshInterval;
+        return newState;
+    }
+    case 'SET_HYPERVISOR_MAX_VCPU': {
+        const newState = Object.assign({}, state);
+        newState.hypervisorMaxVCPU = Object.assign({}, newState.hypervisorMaxVCPU, { [action.payload.connectionName]: action.payload.count });
+        return newState;
+    }
+    default:
+        return state;
     }
 }
 
@@ -113,7 +71,7 @@ function lazyComposedReducer({ parentReducer, getSubreducer, getSubstate, setSub
 }
 
 function vms(state, action) {
-    state = state ? state : [];
+    state = state || [];
 
     logDebug('reducer vms: action=' + JSON.stringify(action));
 
@@ -129,69 +87,147 @@ function vms(state, action) {
             vmCopy: Object.assign({}, state[index]), // TODO: consider immutableJs
         };
     }
+
     function replaceVm({ state, updatedVm, index }) {
         return state.slice(0, index)
-            .concat(updatedVm)
-            .concat(state.slice(index + 1));
+                .concat(updatedVm)
+                .concat(state.slice(index + 1));
     }
 
     switch (action.type) {
-        case 'UPDATE_ADD_VM':
-        {
-            const connectionName = action.vm.connectionName;
-            const index = action.vm.id ? getFirstIndexOfVm(state, 'id', action.vm.id, connectionName)
-                                       : getFirstIndexOfVm(state, 'name', action.vm.name, connectionName);
-            if (index < 0) { // add
-                return [...state, action.vm];
-            }
+    case 'UPDATE_ADD_VM': {
+        const connectionName = action.vm.connectionName;
+        const index = action.vm.id ? getFirstIndexOfVm(state, 'id', action.vm.id, connectionName)
+            : getFirstIndexOfVm(state, 'name', action.vm.name, connectionName);
+        if (index < 0) { // add
+            return [...state, action.vm];
+        }
 
-            const updatedVm = Object.assign({}, state[index], action.vm);
-            return replaceVm({ state, updatedVm, index });
-        }
-        case 'UPDATE_VM':
-        {
-            const indexedVm = findVmToUpdate(state, action.vm);
-            if (!indexedVm) {
-                return state;
-            }
-
-            let updatedVm;
-            if (action.vm['actualTimeInMs'] < 0) { // clear the usage data (i.e. VM went down)
-                logDebug(`Clearing usage data for vm '${action.vm.name}'`);
-                updatedVm = Object.assign(indexedVm.vmCopy, action.vm);
-                clearUsageData(updatedVm);
-            } else {
-                timeSampleUsageData(action.vm, indexedVm.vmCopy);
-                updatedVm = Object.assign(indexedVm.vmCopy, action.vm);
-            }
-
-            // replace whole object
-            return replaceVm({ state, updatedVm, index: indexedVm.index });
-        }
-        case 'VM_ACTION_FAILED': {
-            const indexedVm = findVmToUpdate(state, action.payload);
-            if (!indexedVm) { // already logged
-                return state;
-            }
-            const updatedVm = Object.assign(indexedVm.vmCopy, {
-                lastMessage: action.payload.message,
-                lastMessageDetail: action.payload.detail});
-
-            return replaceVm({ state, updatedVm, index: indexedVm.index });
-        }
-        case 'UNDEFINE_VM':
-        {
-            return state
-                .filter(vm => (action.connectionName !== vm.connectionName || action.name != vm.name ||
-                               (action.transientOnly && vm.persistent)));
-        }
-        case 'DELETE_UNLISTED_VMS':
-        {
-            return state
-                .filter(vm => (action.connectionName !== vm.connectionName || action.vmNames.indexOf(vm.name) >= 0) );
-        }
-        default: // by default all reducers should return initial state on unknown actions
+        const updatedVm = Object.assign({}, state[index], action.vm);
+        return replaceVm({ state, updatedVm, index });
+    }
+    case 'UPDATE_VM': {
+        const indexedVm = findVmToUpdate(state, action.vm);
+        if (!indexedVm) {
             return state;
+        }
+
+        let updatedVm;
+        if (action.vm['actualTimeInMs'] < 0) { // clear the usage data (i.e. VM went down)
+            logDebug(`Clearing usage data for vm '${action.vm.name}'`);
+            updatedVm = Object.assign(indexedVm.vmCopy, action.vm);
+            clearUsageData(updatedVm);
+        } else {
+            timeSampleUsageData(action.vm, indexedVm.vmCopy);
+            updatedVm = Object.assign(indexedVm.vmCopy, action.vm);
+        }
+
+        // replace whole object
+        return replaceVm({ state, updatedVm, index: indexedVm.index });
+    }
+    case 'VM_ACTION_FAILED': {
+        const indexedVm = findVmToUpdate(state, action.payload);
+        if (!indexedVm) { // already logged
+            return state;
+        }
+        const updatedVm = Object.assign(indexedVm.vmCopy, {
+            lastMessage: action.payload.message,
+            lastMessageDetail: action.payload.detail,
+        });
+
+        return replaceVm({ state, updatedVm, index: indexedVm.index });
+    }
+    case 'UNDEFINE_VM': {
+        return state
+                .filter(vm => (action.connectionName !== vm.connectionName || action.name != vm.name ||
+                    (action.transientOnly && vm.persistent)));
+    }
+    case 'DELETE_UNLISTED_VMS': {
+        return state
+                .filter(vm => (action.connectionName !== vm.connectionName || action.vmNames.indexOf(vm.name) >= 0));
+    }
+    default: // by default all reducers should return initial state on unknown actions
+        return state;
+    }
+}
+
+function systemInfo(state, action) {
+    state = state || {
+        libvirtService: {
+            name: 'unknown',
+            activeState: 'unknown',
+            unitState: 'unknown',
+        },
+        osInfoList: [],
+    };
+
+    switch (action.type) {
+    case 'UPDATE_OS_INFO_LIST': {
+        if (action.osInfoList instanceof Array) {
+            state.osInfoList = [...action.osInfoList];
+        }
+        return state;
+    }
+    case 'UPDATE_LIBVIRT_STATE': {
+        state.libvirtService = Object.assign({}, state.libvirtService, action.state);
+        return state;
+    }
+    default: // by default all reducers should return initial state on unknown actions
+        return state;
+    }
+}
+
+function ui(state, action) {
+    // transient properties
+    state = state || {
+        notifications: [],
+        vms: {}, // transient property
+    };
+    const addVm = () => {
+        const oldVm = state.vms[action.vm.name];
+        const vm = Object.assign({}, oldVm, action.vm);
+
+        state.vms = Object.assign({}, state.vms, {
+            [action.vm.name]: vm,
+        });
+    };
+
+    switch (action.type) {
+    case 'ADD_UI_VM': {
+        addVm();
+        return state;
+    }
+    case 'UPDATE_UI_VM': {
+        if (state.vms[action.vm.name]) {
+            addVm();
+        }
+        return state;
+    }
+    case 'DELETE_UI_VM':
+        delete state.vms[action.vm.name];
+        return state;
+    case 'ADD_NOTIFICATION': {
+        const notification = typeof action.notification === 'string' ? { message: action.notification } : action.notification;
+        const notifs = state.notifications;
+        notification.id = notifs.length > 0 ? notifs[notifs.length - 1].id + 1 : 1;
+
+        if (!notification.type) {
+            notification.type = 'info';
+        }
+
+        state.notifications = [...notifs, notification];
+        return state;
+    }
+    case 'CLEAR_NOTIFICATION': {
+        state.notifications = state.notifications.filter(error => error.id !== action.id);
+        return state;
+    }
+    case 'CLEAR_NOTIFICATIONS': {
+        state.notifications = [];
+        return state;
+    }
+    default:
+        return state;
     }
 }
 
@@ -215,8 +251,6 @@ function timeSampleUsageData(newVmRecord, previousVmRecord) {
 
             // store computed actual usage stats
             newVmRecord.cpuUsage = (100 * cpuTimeDiff / timeDiff).toFixed(1);
-
-            return;
         } else {
             logDebug(`timeSampleUsageData(): can't compute diff - missing previous record`);
             newVmRecord.cpuUsage = 0;
@@ -229,7 +263,9 @@ export default combineReducers({
         parentReducer: config,
         getSubreducer: (state) => (state.provider && state.provider.reducer) ? state.provider.reducer : undefined,
         getSubstate: (state) => state.providerState,
-        setSubstate: (state, subState) => Object.assign({}, state, {providerState: subState})
-    } ),
-    vms
+        setSubstate: (state, subState) => Object.assign({}, state, { providerState: subState }),
+    }),
+    vms,
+    systemInfo,
+    ui,
 });

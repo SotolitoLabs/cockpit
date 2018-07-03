@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # Compute dependencies of our cockpit-<module> packages to to -bridge/-shell,
 # by replacing %{required_base} with the requires["cockpit"] version from
 # pkg/<module>/manifest.json.in (this is done by tools/min-base-version).
@@ -34,7 +34,12 @@ curpkg = None
 pkg_base_dep = None
 for line in fileinput.input(sys.argv[1], inplace=True):
     if line.startswith("%package"):
-        curpkg = line.split()[1]
+        # translate package name into pkg/<page> name
+        curpkg = line.split()[-1]
+        if curpkg.startswith('cockpit-'):
+            curpkg = curpkg[8:]
+        if curpkg == "machines-ovirt":
+            curpkg = "ovirt"
         pkg_base_dep = None
     elif "%{required_base}" in line:
         assert curpkg, "spec file uses %{required_base} outside of %package stanza"

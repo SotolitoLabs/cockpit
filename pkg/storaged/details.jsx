@@ -25,7 +25,9 @@ import { BlockDetails } from "./block-details.jsx";
 import { DriveDetails } from "./drive-details.jsx";
 import { VGroupDetails } from "./vgroup-details.jsx";
 import { MDRaidDetails } from "./mdraid-details.jsx";
-import { Jobs } from "./job-views.jsx";
+import { VDODetails } from "./vdo-details.jsx";
+import { NFSDetails } from "./nfs-details.jsx";
+import { JobsPanel } from "./jobs-panel.jsx";
 
 const _ = cockpit.gettext;
 
@@ -45,7 +47,7 @@ export class StdDetailsLayout extends React.Component {
                         <div id="detail-content">
                             { this.props.content }
                         </div>
-                        <Jobs jobs={this.props.jobs}/>
+                        <JobsPanel client={this.props.client} />
                     </div>
                 </div>
             );
@@ -60,12 +62,11 @@ export class StdDetailsLayout extends React.Component {
                         <div id="detail-content">
                             { this.props.content }
                         </div>
-                        <Jobs jobs={this.props.jobs}/>
+                        <JobsPanel client={this.props.client} />
                     </div>
                 </div>
             );
         }
-
     }
 }
 
@@ -85,7 +86,6 @@ class Details extends React.Component {
 
     render() {
         var client = this.props.client;
-        var jobs = this.props.jobs;
 
         function go_up(event) {
             if (!event || event.button !== 0)
@@ -96,28 +96,38 @@ class Details extends React.Component {
         var body = null;
         var name = this.props.name;
         if (this.props.type == "block") {
-            var block = client.slashdevs_block[this.props.name];
+            var block = client.slashdevs_block["/dev/" + this.props.name];
             var drive = block && client.drives[block.Drive];
 
             if (drive) {
                 name = utils.drive_name(drive);
-                body = <DriveDetails client={client} jobs={jobs} drive={drive}/>;
+                body = <DriveDetails client={client} drive={drive} />;
             } else if (block) {
                 name = utils.block_name(block);
-                body = <BlockDetails client={client} jobs={jobs} block={block}/>;
+                body = <BlockDetails client={client} block={block} />;
             }
         } else if (this.props.type == "vgroup") {
             var vgroup = client.vgnames_vgroup[this.props.name];
             if (vgroup) {
                 name = vgroup.Name;
-                body =  <VGroupDetails client={client} jobs={jobs} vgroup={vgroup}/>;
+                body = <VGroupDetails client={client} vgroup={vgroup} />;
             }
         } else if (this.props.type == "mdraid") {
             var mdraid = client.uuids_mdraid[this.props.name];
             if (mdraid) {
                 name = utils.mdraid_name(mdraid);
-                body =  <MDRaidDetails client={client} jobs={jobs} mdraid={mdraid}/>;
+                body = <MDRaidDetails client={client} mdraid={mdraid} />;
             }
+        } else if (this.props.type == "vdo") {
+            var vdo = client.vdo_overlay.by_name[this.props.name];
+            if (vdo) {
+                name = vdo.name;
+                body = <VDODetails client={client} vdo={vdo} />;
+            }
+        } else if (this.props.type == "nfs") {
+            var entry = client.nfs.find_entry(name, this.props.name2);
+            if (entry)
+                body = <NFSDetails client={client} entry={entry} />;
         }
 
         if (!body)
@@ -127,7 +137,7 @@ class Details extends React.Component {
             <div>
                 <div className="col-md-12">
                     <ol className="breadcrumb">
-                        <li><a onClick={go_up}>{_("Storage")}</a></li>
+                        <li><a role="link" tabIndex="0" onClick={go_up}>{_("Storage")}</a></li>
                         <li className="active">{name}</li>
                     </ol>
                 </div>
@@ -137,11 +147,11 @@ class Details extends React.Component {
     }
 }
 
-export function init(client, jobs) {
+export function init(client) {
     var page = document.getElementById("storage-detail");
 
-    function show(type, name) {
-        React.render(<Details client={client} jobs={jobs} type={type} name={name}/>, page);
+    function show(type, name, name2) {
+        React.render(<Details client={client} type={type} name={name} name2={name2} />, page);
         page.style.display = "block";
     }
 

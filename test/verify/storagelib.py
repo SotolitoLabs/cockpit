@@ -32,7 +32,7 @@ class StorageCase(MachineCase):
         if "atomic" in os.getenv("TEST_OS", ""):
             self.skipTest("No storage on Atomic")
 
-        MachineCase.setUp(self)
+        super(StorageCase, self).setUp()
         self.storagectl_cmd = self.machine.execute("for cmd in storagedctl storagectl udisksctl; do if which $cmd 2>/dev/null; then break; fi; done").strip()
 
         if "udisksctl" in self.storagectl_cmd:
@@ -41,7 +41,7 @@ class StorageCase(MachineCase):
             ver = self.machine.execute("busctl --system get-property org.storaged.Storaged /org/storaged/Storaged/Manager org.storaged.Storaged.Manager Version || true")
         m = re.match('s "(.*)"', ver)
         if m:
-            self.storaged_version = map(int, m.group(1).split("."))
+            self.storaged_version = list(map(int, m.group(1).split(".")))
         else:
             self.storaged_version = [ 0 ]
 
@@ -70,16 +70,19 @@ class StorageCase(MachineCase):
 
     # Content
 
+    def content_row_tbody(self, index):
+        return "#detail-content > table > tbody:nth-of-type(%d)" % index
+
     def content_row_expand(self, index):
         b = self.browser
-        tbody = "#detail-content tbody:nth-of-type(%d)" % index
+        tbody = self.content_row_tbody(index)
         b.wait_present(tbody)
         if not "open" in (b.attr(tbody, "class") or ""):
             b.click(tbody + " tr.listing-ct-item")
             b.wait_present(tbody + ".open")
 
     def content_row_action(self, index, title):
-        btn = "#detail-content tbody:nth-of-type(%d) .listing-ct-item .listing-ct-actions button:contains(%s)" % (index, title)
+        btn = self.content_row_tbody(index) + " .listing-ct-item .listing-ct-actions button:contains(%s)" % title
         self.browser.wait_present(btn)
         self.browser.click(btn)
 
@@ -88,18 +91,18 @@ class StorageCase(MachineCase):
     # temporarily disappearing element, so we use self.retry.
 
     def content_row_wait_in_col(self, row_index, col_index, val):
-        col = "#detail-content tbody:nth-of-type(%d) .listing-ct-item :nth-child(%d)" % (row_index, col_index+1)
+        col = self.content_row_tbody(row_index) +" .listing-ct-item :nth-child(%d)" % (col_index + 1)
         self.retry(None, lambda: self.browser.is_present(col) and val in self.browser.text(col), None)
 
     def content_head_action(self, index, title):
         self.content_row_expand(index)
-        btn = "#detail-content tbody:nth-of-type(%d) .listing-ct-head .listing-ct-actions button:contains(%s)" % (index, title)
+        btn = self.content_row_tbody(index) + " .listing-ct-head .listing-ct-actions button:contains(%s)" % title
         self.browser.wait_present(btn)
         self.browser.click(btn)
 
     def content_tab_expand(self, row_index, tab_index):
-        tab_btn = "#detail-content tbody:nth-of-type(%d) .listing-ct-head li:nth-child(%d) a" % (row_index, tab_index)
-        tab = "#detail-content tbody:nth-of-type(%d) .listing-ct-body:nth-child(%d)" % (row_index, tab_index + 1)
+        tab_btn = self.content_row_tbody(row_index) + " .listing-ct-head li:nth-child(%d) a" % tab_index
+        tab = self.content_row_tbody(row_index) + " .listing-ct-body:nth-child(%d)" % (tab_index + 1)
         self.content_row_expand(row_index)
         self.browser.wait_present(tab_btn)
         self.browser.click(tab_btn)
@@ -113,31 +116,36 @@ class StorageCase(MachineCase):
         self.browser.wait_attr(btn, "disabled", None)
         self.browser.click(btn)
 
+    def wait_content_tab_action_disabled(self, row_index, tab_index, title):
+        tab = self.content_tab_expand(row_index, tab_index)
+        btn = tab + " button.disabled:contains(%s)" % title
+        self.browser.wait_present(btn)
+
     # To check what's in a tab, we need to open the row and select the
     # tab.
     #
     # However, sometimes we open the wrong row or the wrong tab
     # because the right row or right tab still has to be created and
     # take its right place.  If the right row or tab finally appears,
-    # it wont be open at that point and we will miss it if we only
+    # it won't be open at that point and we will miss it if we only
     # open a row/tab once.  So we just run the whole process in a big
     # retry loop.
     #
     # XXX - Clicking a button in a tab has the same problem, but we
     # ignore that for now.
 
-    def content_tab_wait_in_info(self, row_index, tab_index, title, val):
+    def content_tab_wait_in_info(self, row_index, tab_index, title, val, alternate_val=None):
         b = self.browser
 
         def setup():
             pass
 
         def check():
-            row = "#detail-content tbody:nth-of-type(%d)" % row_index
+            row = self.content_row_tbody(row_index)
             row_item = row + " tr.listing-ct-item"
             tab_btn = row + " .listing-ct-head li:nth-child(%d) a" % tab_index
             tab = row + " .listing-ct-body:nth-child(%d)" % (tab_index + 1)
-            cell = tab + " table.info-table-ct tr:contains(%s) td:nth-child(2)" % title
+            cell = tab + " table.info-table-ct tr:contains(%s) > td:nth-child(2)" % title
 
             if not b.is_present(row + ".open"):
                 if not b.is_present(row_item):
@@ -155,7 +163,7 @@ class StorageCase(MachineCase):
 
             if not b.is_present(cell):
                 return False
-            return val in b.text(cell)
+            return val in b.text(cell) or (alternate_val is not None and alternate_val in b.text(cell))
 
         def teardown():
             pass
@@ -204,7 +212,15 @@ class StorageCase(MachineCase):
                 self.browser.set_checked(sel + " input[type=checkbox]", True)
                 self.browser.set_val(sel + " input[type=text]", val.val)
         else:
-            self.browser.set_val(self.dialog_field(field), val)
+            sel = self.dialog_field(field)
+            ftype = self.browser.attr(sel, "data-field-type")
+            if ftype == "select":
+                self.browser.click(sel + " button.dropdown-toggle")
+                self.browser.click(sel + " li[data-data=%s] a" % val)
+            elif ftype == "text-input":
+                self.browser.set_input_text(sel, val)
+            else:
+                self.browser.set_val(self.dialog_field(field), val)
 
     def dialog_set_expander(self, field, val):
         self.browser.call_js_func(
@@ -226,10 +242,10 @@ class StorageCase(MachineCase):
                                              })""", self.dialog_field(field))
 
     def dialog_is_present(self, field, label):
-        return self.browser.is_present('%s .checkbox:contains("%s") input' % (self.dialog_field(field), label))
+        return self.browser.is_present('%s :contains("%s") input' % (self.dialog_field(field), label))
 
     def dialog_select(self, field, label, val):
-        self.browser.set_checked('%s .checkbox:contains("%s") input' % (self.dialog_field(field), label), val)
+        self.browser.set_checked('%s :contains("%s") input' % (self.dialog_field(field), label), val)
 
     def dialog_wait_val(self, field, val):
         if isinstance(val, int):
@@ -248,10 +264,10 @@ class StorageCase(MachineCase):
         self.browser.wait_not_visible(self.dialog_field(field))
 
     def dialog_apply(self):
-        self.browser.click('#dialog [data-action="apply"]')
+        self.browser.click('#dialog button.apply')
 
     def dialog_cancel(self):
-        self.browser.click('#dialog [data-action="cancel"]')
+        self.browser.click('#dialog button.cancel')
 
     def dialog_wait_close(self):
         self.browser.wait_not_present('#dialog')

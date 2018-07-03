@@ -11,7 +11,8 @@
 
     var SERVICE = "org.freedesktop.realmd.Service";
     var PROVIDER = "org.freedesktop.realmd.Provider";
-    var KERBEROS = "org.freedesktop.realmd.KerberosMembership";
+    var KERBEROS = "org.freedesktop.realmd.Kerberos";
+    var KERBEROS_MEMBERSHIP = "org.freedesktop.realmd.KerberosMembership";
     var REALM = "org.freedesktop.realmd.Realm";
 
     function instance(realmd, mode, realm, button) {
@@ -27,6 +28,7 @@
         var operation = null;
         var checking = null;
         var checked = null;
+        var kerberos_membership = null;
         var kerberos = null;
 
         /* If in an operation first time cancel is clicked, cancel operation */
@@ -160,12 +162,15 @@
                         }
 
                         realm = null;
+                        kerberos_membership = null;
                         kerberos = null;
 
                         dfd.reject(new Error(message));
                     } else {
+                        kerberos_membership = realmd.proxy(KERBEROS_MEMBERSHIP, path);
+                        $(kerberos_membership).on("changed", update);
+
                         kerberos = realmd.proxy(KERBEROS, path);
-                        $(kerberos).on("changed", update);
 
                         realm = realmd.proxy(REALM, path);
                         $(realm).on("changed", update);
@@ -225,7 +230,7 @@
 
             var server = find_detail(realm, "server-software");
 
-            if (realm && kerberos && !kerberos.valid) {
+            if (realm && kerberos_membership && !kerberos_membership.valid) {
                 message = cockpit.format(_("Domain $0 is not supported"), realm.Name);
                 $(".realms-op-address-spinner").hide();
                 $(".realms-op-address-error").show().attr('title', message);
@@ -248,14 +253,14 @@
             }
 
             var placeholder = "";
-            if (kerberos) {
-                if (kerberos.SuggestedAdministrator)
-                    placeholder = cockpit.format(_("e.g. \"$0\""), kerberos.SuggestedAdministrator);
+            if (kerberos_membership) {
+                if (kerberos_membership.SuggestedAdministrator)
+                    placeholder = cockpit.format(_("e.g. \"$0\""), kerberos_membership.SuggestedAdministrator);
             }
             $(".realms-op-admin")[0].placeholder = placeholder;
 
             var list = $(".realms-op-auth .dropdown-menu");
-            var supported = (kerberos && kerberos.SupportedJoinCredentials) || [ ];
+            var supported = (kerberos_membership && kerberos_membership.SupportedJoinCredentials) || [ ];
             supported.push(["password", "administrator"]);
 
             var first = true;
@@ -320,6 +325,91 @@
             return creds;
         }
 
+        // Request and install a kerberos keytab and an SSL certificate for cockpit-ws (with IPA)
+        // This is opportunistic: Some realms might not use IPA, or an unsupported auth mechanism
+        function install_ws_credentials() {
+            // skip this on remote ssh hosts, only set up ws hosts
+            if (cockpit.transport.host !== "localhost")
+                return cockpit.resolve();
+
+            if (auth !== "password/administrator") {
+                console.log("Installing kerberos keytab and SSL certificate not supported for auth mode", auth);
+                return cockpit.resolve();
+            }
+
+            var user = $(".realms-op-admin").val();
+            var password = $(".realms-op-admin-password").val();
+
+            // ipa-getkeytab needs root to create the file, same for cert installation
+            var script = 'set -eu; [ $(id -u) = 0 ] || exit 0; ';
+            // not an IPA setup? cannot handle this
+            script += 'type ipa >/dev/null 2>&1 || exit 0; ';
+
+            script += 'HOST=$(hostname -f); ';
+
+            // IPA operations require auth; read password from stdin to avoid quoting issues
+            // if kinit fails, we can't handle this setup, exit cleanly
+            script += 'kinit ' + user + '@' + kerberos.RealmName + ' || exit 0; ';
+
+            // create a kerberos Service Principal Name for cockpit-ws, unless already present
+            script += 'service="HTTP/${HOST}@' + kerberos.RealmName + '"; ' +
+                      'ipa service-show "$service" || ipa service-add --ok-as-delegate=true --force "$service"; ';
+
+            // add cockpit-ws key, unless already present
+            script += 'mkdir -p /etc/cockpit; ';
+            script += 'klist -k /etc/cockpit/krb5.keytab | grep -qF "$service" || ' +
+                      'ipa-getkeytab -p HTTP/$HOST -k /etc/cockpit/krb5.keytab; ';
+
+            // request an SSL certificate; be sure to not leave traces of the .key on disk or
+            // get race conditions with file permissions; also, ipa-getcert
+            // cannot directly write into /etc/cockpit due to SELinux
+            script += 'if ipa-getcert request -f /run/cockpit/ipa.crt -k /run/cockpit/ipa.key -K HTTP/$HOST -w -v; then ' +
+                      '    mv /run/cockpit/ipa.crt /etc/cockpit/ws-certs.d/10-ipa.cert; ' +
+                      '    cat /run/cockpit/ipa.key  >> /etc/cockpit/ws-certs.d/10-ipa.cert; ' +
+                      '    rm -f /run/cockpit/ipa.key; ' +
+                      'fi; ';
+
+            // use a temporary keytab to avoid interfering with the system one
+            var proc = cockpit.script(script, [], { superuser: "require", err: "message",
+                                                    environ: ["KRB5CCNAME=/run/cockpit/keytab-setup"] });
+            proc.input(password);
+            return proc;
+        }
+
+        // Remove SPN from cockpit-ws keytab and SSL cert
+        function cleanup_ws_credentials() {
+            // skip this on remote ssh hosts, only set up ws hosts
+            if (cockpit.transport.host !== "localhost")
+                return cockpit.resolve();
+
+            var dfd = cockpit.defer();
+
+            kerberos = realmd.proxy(KERBEROS, realm.path);
+            kerberos.wait()
+                .done(function() {
+                    // ipa-rmkeytab needs root
+                    var script = 'set -eu; [ $(id -u) = 0 ] || exit 0; ';
+
+                    // clean up keytab
+                    script += '[ ! -e /etc/cockpit/krb5.keytab ] || ipa-rmkeytab -k /etc/cockpit/krb5.keytab -p ' +
+                        '"HTTP/$(hostname -f)@' + kerberos.RealmName + '"; ';
+
+                    // clean up certificate
+                    script += 'ipa-getcert stop-tracking -f /run/cockpit/ipa.crt -k /run/cockpit/ipa.key; ' +
+                              'rm -f /etc/cockpit/ws-certs.d/10-ipa.cert; ';
+
+                    cockpit.script(script, [], { superuser: "require", err: "message" })
+                        .done(dfd.resolve)
+                        .fail(function(ex) {
+                            console.log("Failed to clean up SPN from /etc/cockpit/krb5.keytab:", JSON.stringify(ex));
+                            dfd.resolve();
+                        });
+                })
+                .fail(dfd.resolve); // no Kerberos domain? nevermind then
+
+            return dfd.promise();
+        }
+
         var unique = 1;
 
         function perform() {
@@ -350,15 +440,15 @@
                         computer_ou = $(".realms-join-computer-ou").val();
                         if (computer_ou)
                             options["computer-ou"] = cockpit.variant('s', computer_ou);
-                        if (kerberos.valid) {
-                            call = kerberos.call("Join", [ credentials(), options ]);
+                        if (kerberos_membership.valid) {
+                            call = kerberos_membership.call("Join", [ credentials(), options ]).then(install_ws_credentials);
                         } else {
                             busy(null);
                             $(".realms-op-message").empty().text(_("Joining this domain is not supported"));
                             $(".realms-op-error").show();
                         }
                     } else if (mode == 'leave') {
-                        call = realm.Deconfigure(options);
+                        call = cleanup_ws_credentials().then(function() { realm.Deconfigure(options); });
                     }
 
                     if (!call) {
@@ -372,7 +462,7 @@
                             if (ex.name == "org.freedesktop.realmd.Error.Cancelled") {
                                 $(dialog).modal("hide");
                             } else {
-                                console.log("Failed to join domain: " + realm.Name + ": " + ex);
+                                console.log("Failed to " + mode + " domain: " + realm.Name + ": " + ex);
                                 $(".realms-op-message").empty().text(ex + " ");
                                 $(".realms-op-error").show();
                                 if (diagnostics) {
@@ -413,7 +503,9 @@
     function setup() {
         var $ = jQuery;
 
-        var element = $("<a>");
+        var element = $("<span>");
+        var link = $("<a>");
+        element.append(link);
 
         var realmd = cockpit.dbus("org.freedesktop.realmd");
         realmd.watch(MANAGER);
@@ -431,8 +523,8 @@
                 message = _("Cannot join a domain because realmd is not available on this system");
             else
                 message = cockpit.message(options);
+            link.addClass("disabled");
             element
-                .addClass("disabled")
                 .attr('title', message)
                 .tooltip({ container: 'body'})
                 .tooltip('fixTitle');
@@ -446,9 +538,9 @@
             permission = cockpit.permission({ admin: true });
 
             function update_realm_privileged() {
-                $(element).update_privileged(permission,
+                $(link).update_privileged(permission,
                         cockpit.format(_("The user <b>$0</b> is not permitted to modify realms"),
-                            permission.user ? permission.user.name : ''));
+                            permission.user ? permission.user.name : ''), null, element);
             }
 
             $(permission).on("changed", update_realm_privileged);
@@ -467,21 +559,21 @@
                 text = _("Join Domain");
             else
                 text = joined.map(function(x) { return x.Name; }).join(", ");
-            element.text(text);
+            link.text(text);
         }
 
         $(realms).on("changed", update_realms);
         update_realms();
 
         var dialog = null;
-        element.on("click", function() {
+        link.on("click", function() {
             if (dialog)
                 $(dialog).remove();
 
             if (joined && joined.length)
-                dialog = instance(realmd, 'leave', joined[0], element);
+                dialog = instance(realmd, 'leave', joined[0], link);
             else
-                dialog = instance(realmd, 'join', null, element);
+                dialog = instance(realmd, 'join', null, link);
 
             $(dialog)
                 .attr("id", "realms-op")

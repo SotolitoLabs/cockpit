@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -22,55 +21,111 @@ import VMS_CONFIG from './config.es6';
 
 const _ = cockpit.gettext;
 
-export function toGigaBytes(amount, currentUnit) {
-    let result;
-    switch (currentUnit) {
-        case 'B':
-            result = amount / 1024 / 1024 / 1024;
-            break;
-        case 'KiB':
-            result = amount / 1024 / 1024;
-            break;
-        default:
-            console.error(`toGigaBytes(): unknown unit: ${currentUnit}`);
-            result = amount / 1;
-    }
-
-    if (result < 1) {
-        result = result.toFixed(2);
+export function toReadableNumber(number) {
+    if (number < 1) {
+        return number.toFixed(2);
     } else {
-        const fixed1 = result.toFixed(1);
-        result = (result - fixed1 === 0) ? result.toFixed(0) : fixed1;
+        const fixed1 = number.toFixed(1);
+        return (number - fixed1 === 0) ? number.toFixed(0) : fixed1;
     }
-
-    return result;
 }
 
-export function toKiloBytes(amount, currentUnit) {
-    let result;
-    switch (currentUnit) {
-        case 'B':
-            result = amount / 1024;
-            break;
-        case 'KiB':
-            result = amount;
-            break;
-        case 'MiB':
-            result = amount * 1024;
-            break;
-        case 'GiB':
-            result = amount * 1024;
-            break;
-        default:
-            console.error(`toKiloBytes(): unknown unit: ${currentUnit}`);
-            result = amount / 1;
+export const units = {
+    B: {
+        name: "B",
+        base1024Exponent: 0,
+    },
+    KiB: {
+        name: "KiB",
+        base1024Exponent: 1,
+    },
+    MiB: {
+        name: "MiB",
+        base1024Exponent: 2,
+    },
+    GiB: {
+        name: "GiB",
+        base1024Exponent: 3,
+    },
+    TiB: {
+        name: "TiB",
+        base1024Exponent: 4,
+    },
+    PiB: {
+        name: "PiB",
+        base1024Exponent: 5,
+    },
+    EiB: {
+        name: "EiB",
+        base1024Exponent: 6,
+    },
+};
+
+const logUnitMap = {
+    '0': units.B,
+    '1': units.KiB,
+    '2': units.MiB,
+    '3': units.GiB,
+    '4': units.TiB,
+    '5': units.PiB,
+    '6': units.EiB,
+};
+
+function getPowerOf1024(exponent) {
+    return exponent === 0 ? 1 : Math.pow(1024, exponent);
+}
+
+function getLogarithmOfBase1024(value) {
+    return value > 0 ? (Math.floor(Math.log(value) / Math.log(1024))) : 0;
+}
+
+export function convertToBestUnit(input, inputUnit) {
+    return convertToUnitVerbose(input, inputUnit,
+                                logUnitMap[getLogarithmOfBase1024(convertToUnitVerbose(input, inputUnit, units.B).value)]);
+}
+
+export function convertToUnit(input, inputUnit, outputUnit) {
+    return convertToUnitVerbose(input, inputUnit, outputUnit).value;
+}
+
+export function convertToUnitVerbose(input, inputUnit, outputUnit) {
+    let result = {
+        value: 0,
+        unit: units.B.name,
+    };
+
+    input = Number(input);
+    if (isNaN(input)) {
+        console.error('input is not a number');
+        return result;
     }
+
+    if (input < 0) {
+        console.error(`input == ${input} cannot be less than zero`);
+        return result;
+    }
+
+    let inUnit = units[(typeof inputUnit === 'string' ? inputUnit : inputUnit.name)];
+    let outUnit = units[(typeof outputUnit === 'string' ? outputUnit : outputUnit.name)];
+
+    if (!inUnit || !outUnit) {
+        console.error(`unknown unit ${!inUnit ? inputUnit : outputUnit}`);
+        return result;
+    }
+
+    let exponentDiff = inUnit.base1024Exponent - outUnit.base1024Exponent;
+    if (exponentDiff < 0) {
+        result.value = input / getPowerOf1024(-1 * exponentDiff);
+    } else {
+        result.value = input * getPowerOf1024(exponentDiff);
+    }
+    result.unit = outUnit.name;
 
     return result;
 }
 
 export function isEmpty(str) {
-    return (!str || 0 === str.length);
+    return (!str || str.length === 0);
 }
 
 export function arrayEquals(arr1, arr2) {
@@ -92,6 +147,25 @@ export function logDebug(msg, ...params) {
 
 export function logError(msg, ...params) {
     console.error(msg, ...params);
+}
+
+export function digitFilter(event, allowDots = false) {
+    let accept = (allowDots && event.key === '.') || (event.key >= '0' && event.key <= '9') ||
+                 event.key === 'Backspace' || event.key === 'Delete' || event.key === 'Tab' ||
+                 event.key === 'ArrowLeft' || event.key === 'ArrowRight' ||
+                 event.key === 'ArrowUp' || event.key === 'ArrowDown' ||
+                 event.key === 'Home' || event.key === 'End';
+
+    if (!accept)
+        event.preventDefault();
+
+    return accept;
+}
+
+export function getTodayYearShifted(yearDifference) {
+    const result = new Date();
+    result.setFullYear(result.getFullYear() + yearDifference);
+    return result;
 }
 
 const transform = {
@@ -173,11 +247,6 @@ export function toFixedPrecision(value, precision) {
     return result;
 }
 
-
-function isFirefox () {
-    return window.navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
-}
-
 /**
  * Download given content as a file in the browser
  *
@@ -186,7 +255,7 @@ function isFirefox () {
  * @param mimeType
  * @returns {*}
  */
-export function fileDownload ({ data, fileName = 'myFile.dat', mimeType = 'application/octet-stream' }) {
+export function fileDownload({ data, fileName = 'myFile.dat', mimeType = 'application/octet-stream' }) {
     if (!data) {
         console.error('fileDownload(): no data to download');
         return false;
@@ -197,12 +266,13 @@ export function fileDownload ({ data, fileName = 'myFile.dat', mimeType = 'appli
     a.href = `data:${mimeType},${encodeURIComponent(data)}`;
     document.body.appendChild(a); // if not used further then at least within integration tests
 
-    // Workaround since I can't get CSP working on newer Firefox versions for this
-    if (!isFirefox() && 'download' in a) { // html5 A[download]
+    // Workaround since I can't get CSP working for this
+    /*
+    if ('download' in a) { // html5 A[download]
         logDebug('fileDownload() is using A.HREF');
         a.setAttribute('download', fileName);
         a.click();
-    } else { // do iframe dataURL download (old ch+FF):
+    } else */ { // do iframe dataURL download
         logDebug('fileDownload() is using IFRAME');
         const f = document.createElement('iframe');
         f.width = '1';
@@ -213,7 +283,7 @@ export function fileDownload ({ data, fileName = 'myFile.dat', mimeType = 'appli
         window.setTimeout(() => document.body.removeChild(f), 333);
     }
 
-    window.setTimeout(() => { // give phantomJS time ...
+    window.setTimeout(() => { // give test browser some time ...
         logDebug('removing temporary A.HREF for filedownload');
         document.body.removeChild(a);
     }, 5000);
@@ -222,4 +292,56 @@ export function fileDownload ({ data, fileName = 'myFile.dat', mimeType = 'appli
 
 export function vmId(vmName) {
     return `vm-${vmName}`;
+}
+
+export function mouseClick(fun) {
+    return function (event) {
+        if (!event || event.button !== 0)
+            return;
+        event.preventDefault();
+        return fun(event);
+    };
+}
+
+/**
+ * Let promise resolve itself in specified delay or force resolve it with 0 arguments
+ *
+ * @param promise
+ * @param delay of timeout in ms
+ * @param afterTimeoutHandler called only if promise succeeded after timeout
+ * @param afterTimeoutFailHandler called only if promise failed after timeout
+ * @returns new promise
+ */
+export function timeoutedPromise(promise, delay, afterTimeoutHandler, afterTimeoutFailHandler) {
+    const deferred = cockpit.defer();
+    let done = false;
+
+    let timer = window.setTimeout(() => {
+        if (!done) {
+            deferred.resolve();
+            done = true;
+        }
+    }, delay);
+
+    promise.then(function(/* ... */) {
+        if (!done) {
+            done = true;
+            window.clearTimeout(timer);
+            deferred.resolve.apply(deferred, arguments);
+        } else if (typeof afterTimeoutHandler === 'function') {
+            afterTimeoutHandler.apply(afterTimeoutFailHandler, arguments);
+        }
+    });
+
+    promise.catch(function(/* ... */) {
+        if (!done) {
+            done = true;
+            window.clearTimeout(timer);
+            deferred.reject.apply(deferred, arguments);
+        } else if (typeof afterTimeoutFailHandler === 'function') {
+            afterTimeoutFailHandler.apply(afterTimeoutFailHandler, arguments);
+        }
+    });
+
+    return deferred.promise;
 }

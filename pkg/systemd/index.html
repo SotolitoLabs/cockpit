@@ -9,6 +9,7 @@
     <link href="system.css" rel="stylesheet">
     <script src="../base1/jquery.js"></script>
     <script src="../base1/cockpit.js"></script>
+    <script src="../manifests.js"></script>
     <script src="../*/po.js"></script>
 </head>
 <body hidden>
@@ -76,7 +77,7 @@
           <span class="pficon pficon-close"></span>
         </button>
         <span class="pficon pficon-info"></span>
-        <pre id="motd" class="phantom"></pre>
+        <pre id="motd"></pre>
       </div>
     </div>
 
@@ -85,19 +86,25 @@
             <table class="info-table-ct">
                 <tr>
                     <td translatable="yes">Hardware</td>
-                    <td id="system_information_hardware_text"></td>
+                    <td><a id="system_information_hardware_text"></a></td>
                 </tr>
                 <tr id="system-info-asset-row">
                     <td translatable="yes">Asset Tag</td>
                     <td id="system_information_asset_tag_text"></td>
                 </tr>
-                <tr>
+                <tr id="system_information_machine_id_row">
                     <td translatable="yes">Machine ID</td>
-                    <td id="system_machine_id"></td>
+                    <td><span id="system_machine_id"></span></td>
                 </tr>
                 <tr id="system_information_os">
                     <td translatable="yes">Operating System</td>
                     <td id="system_information_os_text"></td>
+                </tr>
+                <tr id="system_information_updates">
+                    <td>
+                        <span id="system_information_updates_icon" hidden></span>
+                    </td>
+                    <td id="system_information_updates_text"></td>
                 </tr>
                 <tr id="system-ssh-keys">
                     <td translatable="yes">Secure Shell Keys</td>
@@ -110,8 +117,8 @@
                 </tr>
                 <tr>
                     <td translatable="yes">Host Name</td>
-                    <td><a class="hostname-privileged"
-                            id="system_information_hostname_button"></a></td>
+                    <td><span id="hostname-tooltip"><a class="hostname-privileged"
+                            id="system_information_hostname_button"></a></span></td>
                 </tr>
                 <tr id="system-info-domain" hidden>
                     <td translatable="yes">Domain</td>
@@ -120,22 +127,25 @@
                 </tr>
                 <tr>
                     <td translatable="yes">System Time</td>
-                    <td><a class="systime-privileged"
-                                id="system_information_systime_button"></a>
+                    <td><span id="systime-tooltip">
+                        <a class="systime-privileged"
+                           id="system_information_systime_button"></a></span>
                       <a hidden id="system_information_systime_ntp_status"
-                         tabindex="0" role="button" data-toggle="popover"
-                         data-trigger="focus" data-placement="top"
-                         data-html="true" data-content="">
+                         tabindex="0" role="button" data-toggle="tooltip"
+                         data-placement="bottom" data-html="true" >
                       </a>
                     </td>
                 </tr>
                 <tr>
-                    <td translatable="yes">Power Options</td>
+                    <td translatable="yes" id="system_information_power_options_label">Power Options</td>
                     <td id="shutdown-group">
                         <div class="btn-group">
                             <button class="btn btn-default btn-danger shutdown-privileged" data-action="restart"
                                 data-container="body" translatable="yes">Restart</button>
-                            <button data-toggle="dropdown" class="btn btn-default dropdown-toggle shutdown-privileged">
+                            <button data-toggle="dropdown" class="btn
+                                btn-default dropdown-toggle
+                                shutdown-privileged"
+                                aria-labelledby="system_information_power_options_label">
                                 <span class="caret"></span>
                             </button>
                             <ul role="menu" class="dropdown-menu">
@@ -169,9 +179,18 @@
                         </div>
                     </td>
                 </tr>
+                <tr id="system-information-enable-pcp" hidden>
+                    <td></td>
+                    <td>
+                        <a id="system-information-enable-pcp-link">
+                            <span class="pficon pficon-info"></span>
+                            <span translate>Enable persistent metrics…</span>
+                        </a>
+                    </td>
+                </tr>
             </table>
         </div>
-        <div id="server-graph-columns" class="col-md-8 col-lg-9">
+        <div id="server-graph-columns" class="col-md-8 col-lg-9" role="presentation">
             <div id="server-graph-toolbar" class="zoom-controls standard-zoom-controls">
                 <div class="dropdown">
                     <button class="btn btn-default dropdown-toggle" data-toggle="dropdown">
@@ -179,18 +198,18 @@
                         <div class="caret"></div>
                     </button>
                     <ul class="dropdown-menu" role="menu">
-                        <li role="presentation"><a role="menuitem" tabindex="-1"
+                        <li role="presentation"><a role="menuitem"
                             data-action="goto-now" translate>Go to now</a></li>
                         <li role="presentation" class="divider"></li>
-                        <li role="presentation"><a role="menuitem" tabindex="-1"
+                        <li role="presentation"><a role="menuitem"
                             data-range="300" translate>5 minutes</a></li>
-                        <li role="presentation"><a role="menuitem" tabindex="-1"
+                        <li role="presentation"><a role="menuitem"
                             data-range="3600" translate>1 hour</a></li>
-                        <li role="presentation"><a role="menuitem" tabindex="-1"
+                        <li role="presentation"><a role="menuitem"
                             data-range="21600" translate>6 hours</a></li>
-                        <li role="presentation"><a role="menuitem" tabindex="-1"
+                        <li role="presentation"><a role="menuitem"
                             data-range="86400" translate>1 day</a></li>
-                        <li role="presentation"><a role="menuitem" tabindex="-1"
+                        <li role="presentation"><a role="menuitem"
                             data-range="604800" translate>1 week</a></li>
                     </ul>
                 </div>
@@ -203,7 +222,7 @@
                 </div>
             </div>
             <div>
-              <span class="plot-unit" id="server_cpu_unit">%</span><a id="link-cpu" translate>CPU</a>
+              <span class="plot-unit" id="server_cpu_unit">%</span><a id="link-cpu"></a>
             </div>
             <div id="server_cpu_graph" class="server-graph zoomable-plot"></div>
             <br/>
@@ -225,6 +244,7 @@
     </div>
 
     <div id="cpu_status" hidden>
+        <div id="cpu_status_title">Yo!</div>
         <ul class="server-graph-legend">
             <li class="cpu-io-wait">
                 <i class="fa fa-square"></i>
@@ -349,8 +369,8 @@
       <div class="systime-inline">
         {{#NTPServers}}
         <form class="form-inline">
-          <button data-action="add" data-index={{index}} class="btn btn-default fa fa-plus"></button>
-          <button data-action="del" data-index={{index}} class="btn btn-default pficon-close"></button>
+          <button data-action="add" data-index="{{index}}" class="btn btn-default fa fa-plus"></button>
+          <button data-action="del" data-index="{{index}}" class="btn btn-default pficon-close"></button>
           <div class="form-group">
             <input type="text" class="form-control" value="{{Value}}" placeholder="{{Placeholder}}">
           </div>

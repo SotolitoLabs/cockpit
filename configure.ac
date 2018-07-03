@@ -19,7 +19,7 @@ AC_INIT([Cockpit],
         [m4_esyscmd([tools/git-version-gen .tarball])],
         [devel@lists.cockpit-project.org],
         [cockpit],
-        [http://www.cockpit-project.org/])
+        [https://cockpit-project.org/])
 
 # The above git-version-gen command can either use .git or a .tarball file
 # in the top level directory to determine the version. If that didn't work
@@ -269,12 +269,6 @@ else
   AC_MSG_ERROR(no. Please install intltool package)
 fi
 
-# phantomjs
-
-AC_PATH_PROG([PHANTOMJS], [phantomjs], [], [$srcdir/node_modules/.bin$PATH_SEPARATOR$PATH])
-AM_CONDITIONAL([WITH_PHANTOMJS], [test -n "$PHANTOMJS"])
-AC_SUBST([PHANTOMJS])
-
 # go
 
 AC_PATH_PROG([GOLANG], [go])
@@ -366,6 +360,26 @@ AC_ARG_WITH(networkmanager-needs-root,
 	    [with_networkmanager_needs_root=yes])
 AC_SUBST(with_networkmanager_needs_root)
 
+AC_ARG_WITH(appstream-config-packages,
+            AC_HELP_STRING([--with-appstream-config-packages=JSON],
+                           [List of packages that configure the system to retrieve AppStream collection metadata]),
+            [],
+            [with_appstream_config_packages='[[]]'])
+AC_SUBST(with_appstream_config_packages)
+
+AC_ARG_WITH(appstream-data-packages,
+            AC_HELP_STRING([--with-appstream-data-packages=JSON],
+                           [List of packages that contain AppStream collection metadata]),
+            [],
+            [with_appstream_data_packages='[[]]'])
+AC_SUBST(with_appstream_data_packages)
+
+AC_ARG_WITH(nfs-client-package,
+            AC_HELP_STRING([--with-nfs-client-package=JSON],
+                           [Package that is necessary for NFS clients, or 'false']),
+            [],
+            [with_nfs_client_package='false'])
+AC_SUBST(with_nfs_client_package)
 
 # Address sanitizer
 

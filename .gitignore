@@ -53,9 +53,9 @@ depcomp
 /containers/*/rpms
 /cockpit.service
 /cockpit-wrapper
-/bower_components/*
 /node_modules/*
 !/node_modules/README
+/package-lock.json
 /test-server
 /test-server-generated.c
 /test-server-generated.h
@@ -94,6 +94,8 @@ depcomp
 /cockpit-ws
 /cockpit-ws.8
 /po/cockpit.pot
+/po/*.in
+/po/*.pot
 /src/selinux/tmp
 /src/selinux/cockpit.pp
 /pkg/*/test-*.log
@@ -165,12 +167,14 @@ po*.js.gz
 /pkg/*/manifest.json
 
 .idea
+.vscode/
 
 # Test output
 Test*.log
 cockpit-*.tar*
 Test*.png
 Test*.html
+Test*.json
 
 /pkg/networkmanager/override.json
 /pkg/storaged/override.json

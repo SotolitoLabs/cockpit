@@ -32,6 +32,8 @@ var Listing = require('cockpit-components-listing.jsx');
 var Select = require('cockpit-components-select.jsx');
 var moment = require('moment');
 
+moment.locale(cockpit.language);
+
 var Dropdown = React.createClass({
     getDefaultProps: function () {
         return {
@@ -55,14 +57,14 @@ var Dropdown = React.createClass({
                     <span>{ this.props.actions[0].label }</span>
                 </button>
                 <button className="btn btn-default dropdown-toggle" data-toggle="dropdown">
-                    <div className="caret"></div>
+                    <div className="caret" />
                 </button>
                 <ul className="dropdown-menu dropdown-menu-right" role="menu">
                     {
                         this.props.actions.map(function (action, index) {
                             return (
                                 <li className={ action.disabled ? 'disabled' : '' }>
-                                    <a data-value={index} onClick={this.handleClick}>{action.label}</a>
+                                    <a data-value={index} role="link" tabIndex="0" onClick={this.handleClick}>{action.label}</a>
                                 </li>
                             );
                         }.bind(this))
@@ -119,11 +121,35 @@ var ContainerDetails = React.createClass({
             <div className='listing-ct-body'>
                 <dl>
                     <dt>{_("Id")}      </dt> <dd>{ container.Id }</dd>
-                    <dt>{_("Created")} </dt> <dd>{ container.Created }</dd>
+                    <dt>{_("Created")} </dt>
+                    <dd>{ moment(container.Created).isValid() ? moment(container.Created).calendar() : container.Created }</dd>
                     <dt>{_("Image")}   </dt> <dd>{ container.Image }</dd>
                     <dt>{_("Command")}</dt> <dd>{ util.render_container_cmdline(container) }</dd>
                     <dt>{_("State")}   </dt> <dd>{ util.render_container_state(container.State) }</dd>
                 </dl>
+            </div>
+        );
+    }
+});
+
+var ContainerProblems = React.createClass({
+    onItemClick: function (event) {
+        cockpit.jump(event.currentTarget.dataset.url, cockpit.transport.host);
+    },
+
+    render: function () {
+        var problem = this.props.problem;
+        var problem_cursors = [];
+        for (var i = 0; i < problem.length; i++) {
+            problem_cursors.push(<a data-url={problem[i][0]} className='list-group-item' role="link" tabIndex="0" onClick={this.onItemClick}>
+                <span className="pficon pficon-warning-triangle-o fa-lg" />
+                {problem[i][1]}
+            </a>)
+        }
+
+        return (
+            <div className='list-group dialog-list-ct'>
+                {problem_cursors}
             </div>
         );
     }
@@ -140,7 +166,8 @@ var ContainerList = React.createClass({
 
     getInitialState: function () {
         return {
-            containers: []
+            containers: [],
+            problems: {}
         };
     },
 
@@ -167,10 +194,10 @@ var ContainerList = React.createClass({
         util.confirm(cockpit.format(_("Please confirm deletion of $0"), docker.truncate_id(container.Id)),
                      _("Deleting a container will erase all data in it."),
                      _("Delete"))
-                         .done(function () {
-                             util.docker_container_delete(this.props.client, container.Id,
-                                 function() { }, function () { });
-                         }.bind(this));
+                .done(function () {
+                    util.docker_container_delete(this.props.client, container.Id,
+                                                 function() { }, function () { });
+                }.bind(this));
     },
 
     containersChanged: function () {
@@ -185,14 +212,50 @@ var ContainerList = React.createClass({
         this.setState({ containers: containers });
     },
 
+    setNewProblem: function (c_id, url, message) {
+        /* New problem is always displayed, no matter if the same problem is
+         * already shown. It is because user may be interested into dynamic
+         * watching of the problems occurring. After refreshing the site, only
+         * the latest occurrence is displayed.
+         */
+        var known_problems = this.state.problems;
+        if (c_id in known_problems)
+            known_problems[c_id].push([url, message]);
+        else
+            known_problems[c_id] = [[url, message]];
+        this.setState({ problems: known_problems });
+    },
+
+    newProblemOccurred: function (event, problem_path) {
+        util.find_container_log(this.problems_client, problem_path, this.setNewProblem);
+    },
+
     componentDidMount: function () {
+        var self = this;
+        this.problems_client = cockpit.dbus('org.freedesktop.problems', { superuser: "try" });
+        this.service = this.problems_client.proxy('org.freedesktop.Problems2', '/org/freedesktop/Problems2');
+        this.problems = this.problems_client.proxies('org.freedesktop.Problems2.Entry', '/org/freedesktop/Problems2/Entry');
+        this.problems.wait(function() {
+            if (typeof self.service.GetSession !== "undefined") {
+                self.service.GetSession()
+                        .done(function(session_path) {
+                            self.problems_client.call(session_path, "org.freedesktop.Problems2.Session", "Authorize", [{}]);
+                        });
+            }
+        });
+
         $(this.props.client).on('container.containers', this.containersChanged);
         $(this.props.client).on('container.container-details', this.containersChanged);
+        this.service.addEventListener("Crash", this.newProblemOccurred);
+
+        util.find_all_problems(this.problems, this.problems_client, this.service, self.setNewProblem);
     },
 
     componentWillUnmount: function () {
         $(this.props.client).off('container.containers', this.containersChanged);
         $(this.props.client).off('container.container-details', this.containersChanged);
+        this.service.removeEventListener("Crash", this.newProblemOccurred);
+        this.problems_client.close()
     },
 
     render: function () {
@@ -208,10 +271,12 @@ var ContainerList = React.createClass({
 
         var rows = filtered.map(function (container) {
             var isRunning = !!container.State.Running;
+            var hasProblem = false;
+            var shortContID = container.Id.slice(0, 12);
 
             var state;
             if (this.props.client.waiting[container.Id]) {
-                state = { element: <div className="spinner"></div>, tight: true }
+                state = { element: <div className="spinner" />, tight: true }
             } else {
                 state = util.render_container_status(container.State)
             }
@@ -219,6 +284,11 @@ var ContainerList = React.createClass({
             var image = container.Image;
             if (container.ImageID && image == container.ImageID)
                 image = docker.truncate_id(image);
+
+            if (shortContID in this.state.problems) {
+                hasProblem = true;
+                state = <div><span className="pficon pficon-warning-triangle-o" />{state}</div>
+            }
 
             var columns = [
                 { name: container.Name.replace(/^\//, ''), header: true },
@@ -260,15 +330,25 @@ var ContainerList = React.createClass({
                     data: { container: container }
                 }
             ];
+            if (hasProblem) {
+                var c_problems = this.state.problems[shortContID] || [];
+                tabs.push(
+                    {
+                        name: _("Problems"),
+                        renderer: ContainerProblems,
+                        data: { problem: c_problems }
+                    }
+                );
+            }
 
             return <Listing.ListingRow key={container.Id}
                                        columns={columns}
                                        tabRenderers={tabs}
                                        navigateToItem={ this.navigateToContainer.bind(this, container) }
-                                       listingActions={actions}/>;
+                                       listingActions={actions} />;
         }, this);
 
-        var columnTitles =  [ _("Name"), _("Image"), _("Command"), _("CPU"), _("Memory"), _("State")];
+        var columnTitles = [_("Name"), _("Image"), _("Command"), _("CPU"), _("Memory"), _("State")];
 
         var emptyCaption;
         if (this.props.onlyShowRunning) {
@@ -312,9 +392,9 @@ var ImageDetails = React.createClass({
                     <dt>{_("Tags")}</dt>       <dd>{ image.RepoTags.join(" ") }</dd>
                     <dt>{_("Entrypoint")}</dt> <dd>{ util.quote_cmdline(entrypoint) }</dd>
                     <dt>{_("Command")}</dt>    <dd>{ util.quote_cmdline(command) }</dd>
-                    <dt>{_("Created")}</dt>    <dd title={ created.toLocaleString() }>{ created.fromNow() }</dd>
+                    <dt>{_("Created")}</dt>    <dd title={ created.toLocaleString() }>{ created.calendar() }</dd>
                     <dt>{_("Author")}</dt>     <dd>{ image.Author}</dd>
-                    <dt>{_("Ports")}</dt>      <dd>{ ports.join(', ')  }</dd>
+                    <dt>{_("Ports")}</dt>      <dd>{ ports.join(', ') }</dd>
                 </dl>
             </div>
         );
@@ -333,10 +413,8 @@ var ImageSecurity = React.createClass({
 
         if (info.successful === false) {
             text = _("The scan from $time ($type) was not successful.");
-
         } else if (info.vulnerabilities.length === 0) {
             text = _("The scan from $time ($type) found no vulnerabilities.");
-
         } else {
             text = cockpit.ngettext('The scan from $time ($type) found one vulnerability:',
                                     'The scan from $time ($type) found $count vulnerabilities:',
@@ -391,7 +469,7 @@ var ImageInline = React.createClass({
             return (
                 <div className="curtains-ct blank-slate-pf">
                     <div className="blank-slate-pf-icon">
-                        <i className="fa fa-exclamation-circle"></i>
+                        <i className="fa fa-exclamation-circle" />
                     </div>
                     <h1>{_("This image does not exist.")}</h1>
                 </div>
@@ -404,9 +482,9 @@ var ImageInline = React.createClass({
             return (
                 <div className="listing-ct-inline">
                     <h3>{_("Details")}</h3>
-                    <ImageDetails image={image}/>
+                    <ImageDetails image={image} />
                     <h3>{_("Security")}</h3>
-                    <ImageSecurity image={image} info={vulnerableInfo}/>
+                    <ImageSecurity image={image} info={vulnerableInfo} />
                 </div>
             );
         }
@@ -414,7 +492,7 @@ var ImageInline = React.createClass({
         return (
             <div className="listing-ct-inline">
                 <h3>{_("Details")}</h3>
-                <ImageDetails image={image}/>
+                <ImageDetails image={image} />
             </div>
         );
     }
@@ -454,13 +532,13 @@ var ImageList = React.createClass({
             return;
 
         util.confirm(cockpit.format(_("Delete $0"), image.RepoTags[0]),
-                     _("Are you sure you want to delete this image?"), _("Delete")).
-            done(function () {
-                this.props.client.rmi(image.Id).
-                    fail(function(ex) {
-                        util.show_unexpected_error(ex);
-                    });
-            }.bind(this));
+                     _("Are you sure you want to delete this image?"), _("Delete"))
+                .done(function () {
+                    this.props.client.rmi(image.Id)
+                            .fail(function(ex) {
+                                util.show_unexpected_error(ex);
+                            });
+                }.bind(this));
     },
 
     showRunImageDialog: function (event) {
@@ -513,7 +591,7 @@ var ImageList = React.createClass({
             if (count > 0)
                 vulnerabilityColumn = (
                     <div>
-                        <span className="pficon pficon-warning-triangle-o"></span>
+                        <span className="pficon pficon-warning-triangle-o" />
                         &nbsp;
                         { cockpit.format(cockpit.ngettext('1 Vulnerability', '$0 Vulnerabilities', count), count) }
                     </div>
@@ -522,17 +600,17 @@ var ImageList = React.createClass({
 
         var element;
         if (this.props.client.waiting[image.Id]) {
-            element = <div className="spinner"></div>
+            element = <div className="spinner" />
         } else {
             element = <button className="btn btn-default btn-control-ct fa fa-play"
-                    onClick={ this.showRunImageDialog.bind(this) }
-                    data-image={image.Id} />
+                onClick={ this.showRunImageDialog.bind(this) }
+                data-image={image.Id} />
         }
 
         var columns = [
             { name: image.RepoTags[0], header: true },
             vulnerabilityColumn,
-            moment.unix(image.Created).fromNow(),
+            moment.unix(image.Created).calendar(),
             cockpit.format_bytes(image.VirtualSize),
             {
                 element: element,
@@ -569,7 +647,7 @@ var ImageList = React.createClass({
                                    columns={columns}
                                    tabRenderers={tabs}
                                    navigateToItem={ this.navigateToImage.bind(this, image) }
-                                   listingActions={actions}/>;
+                                   listingActions={actions} />;
     },
 
     render: function () {
@@ -580,9 +658,9 @@ var ImageList = React.createClass({
 
         var imageRows = filtered.map(this.renderRow, this);
 
-        var getNewImageAction = <a onClick={this.handleSearchImageClick} className="card-pf-link-with-icon pull-right">
-                                    <span className="pficon pficon-add-circle-o"></span>{_("Get new image")}
-                                </a>;
+        var getNewImageAction = <a role="link" tabIndex="0" onClick={this.handleSearchImageClick} className="card-pf-link-with-icon pull-right">
+            <span className="pficon pficon-add-circle-o" />{_("Get new image")}
+        </a>;
 
         var columnTitles = [ _("Name"), '', _("Created"), _("Size"), '' ];
 
@@ -613,9 +691,9 @@ var ImageList = React.createClass({
         return (
             <div>
                 <Listing.Listing title={_("Images")}
-                                 columnTitles={columnTitles}
-                                 emptyCaption={emptyCaption}
-                                 actions={getNewImageAction}>
+                    columnTitles={columnTitles}
+                    emptyCaption={emptyCaption}
+                    actions={getNewImageAction}>
                     {imageRows}
                 </Listing.Listing>
                 {pendingRows}

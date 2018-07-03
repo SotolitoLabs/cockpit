@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -29,7 +29,6 @@ import traceback
 
 sys.dont_write_bytecode = True
 
-import task
 from task import github
 from task import sink
 
@@ -43,6 +42,8 @@ def main():
     parser.add_argument('-j', '--jobs', dest="jobs", type=int,
             default=os.environ.get("TEST_JOBS", 1), help="Number of concurrent jobs")
     parser.add_argument('--rebase', help="Rebase onto the specific branch before testing")
+    parser.add_argument('--remote', help="The Git remote to use (instead of 'origin')",
+                        default="origin")
     parser.add_argument('-o', "--offline", action='store_true',
             help="Work offline, don''t fetch new data from origin for rebase")
     parser.add_argument('--publish', dest='publish', default=os.environ.get("TEST_PUBLISH", ""),
@@ -57,7 +58,7 @@ def main():
     github_revision = os.environ.get("GITHUB_REVISION")
 
     try:
-        task = PullTask(name, revision, opts.ref, opts.context, opts.rebase,
+        task = PullTask(name, revision, opts.ref, opts.context, opts.rebase, opts.remote,
                         github_revision=github_revision)
         ret = task.run(opts)
     except RuntimeError as ex:
@@ -69,12 +70,13 @@ def main():
     return 0
 
 class PullTask(object):
-    def __init__(self, name, revision, ref, context, base=None, github_revision=None):
+    def __init__(self, name, revision, ref, context, base, remote, github_revision):
         self.name = name
         self.revision = revision
         self.ref = ref
         self.context = context
         self.base = base
+        self.remote = remote
         self.github_revision = github_revision
 
         self.sink = None
@@ -124,9 +126,6 @@ class PullTask(object):
                 }]
             },
             "revision": self.github_revision,
-            "link": "log.html",
-            "extras": [ "https://raw.githubusercontent.com/cockpit-project/cockpit/master/bots/task/log.html" ],
-
             "onaborted": {
                 "github": {
                     "token": api.token,
@@ -146,9 +145,20 @@ class PullTask(object):
             }
         }
 
+        if self.context.startswith("cockpit/"):
+            # third-party project, link directly to text log
+            status["link"] = "log"
+        else:
+            # testing cockpit itself, use HTML log
+            status["link"] = "log.html"
+            status["extras"] = [ "https://raw.githubusercontent.com/cockpit-project/cockpit/{0}/bots/task/log.html".format(self.github_revision) ]
+
+
         # Include information about which base we're testing against
         if self.base:
-            commit = subprocess.check_output([ "git", "rev-parse", "origin/" + self.base ]).strip()
+            subprocess.check_call([ "git", "fetch", self.remote, self.base ])
+            commit = subprocess.check_output([ "git", "rev-parse", self.remote + "/" + self.base ],
+                                             universal_newlines=True).strip()
             status["base"] = commit
 
         (prefix, unused, image) = self.context.partition("/")
@@ -160,33 +170,18 @@ class PullTask(object):
         self.sink = sink.Sink(host, identifier, status)
 
     def rebase(self):
-        origin_base = "origin/" + self.base
+        remote_base = self.remote + "/" + self.base
 
         # Rebase this branch onto the base, but only if it's not already an ancestor
         try:
-            if subprocess.call([ "git", "merge-base", "--is-ancestor", origin_base, "HEAD" ]) != 0:
-                sys.stderr.write("Rebasing onto " + origin_base + " ...\n")
-                subprocess.check_call([ "git", "rebase", origin_base ])
+            if subprocess.call([ "git", "merge-base", "--is-ancestor", remote_base, "HEAD" ]) != 0:
+                sys.stderr.write("Rebasing onto " + remote_base + " ...\n")
+                subprocess.check_call([ "git", "reset", "HEAD" ])
+                subprocess.check_call([ "git", "rebase", remote_base ])
         except subprocess.CalledProcessError:
             subprocess.call([ "git", "rebase", "--abort" ])
             traceback.print_exc()
             return "Rebase failed"
-
-        try:
-            task.checkout(base=self.base)
-        except subprocess.CalledProcessError:
-            traceback.print_exc()
-            return "Rebase checkout of bots failed"
-
-        # If the bots directory changed during all of this, then respawn
-        if subprocess.call(["git", "diff", "--quiet", "--exit-code", "--staged", origin_base, "--", "bots/"]) == 1:
-            assert "TEST_INVOKE_RESPAWN" not in os.environ
-            os.environ["TEST_INVOKE_RESPAWN"] = "1"
-            sys.stderr.write("Rebase complete ... respawning\n")
-            if self.sink:
-                self.stop_publishing(None)
-            os.execv(__file__, sys.argv)
-            assert False, "not reached"
 
         return None
 
@@ -196,17 +191,22 @@ class PullTask(object):
         try:
             # Download all the additional images so that even older branches find them
             subprocess.check_call([ os.path.join(BOTS, "image-download"),
-                "candlepin", "fedora-stock", "fedora-23-stock", "fedora-26",
+                "candlepin", "fedora-stock", "fedora-23-stock",
                 "ipa", "openshift", "selenium"
-            ])
-
-            # Download some additional necessary state
-            subprocess.check_call([ os.path.join(BOTS, "image-download"),
-                "--state", "tests-learn-1.nn"
             ])
 
         except subprocess.CalledProcessError:
             return "Downloading of additional images failed"
+
+        try:
+            # Download some additional necessary state
+            subprocess.check_call([ os.path.join(BOTS, "image-download"),
+                "--state", "tests-learn-2.nn", "tests-learn-5-3.model"
+            ])
+
+        except subprocess.CalledProcessError:
+            sys.stderr.write("Downloading of additional state failed")
+
 
         # The images not yet prepared are symlinked from the bots/images
         # directory into the test/images directory. This allows for other branches to
@@ -250,8 +250,11 @@ class PullTask(object):
         cmd = [ os.path.join(BOTS, "image-prepare") ]
         if prefix == "image" or prefix == "container":
             cmd += [ "--containers" ]
-        if verbose:
-            cmd += [ "--verbose" ]
+        cmd += [ "--verbose" ]
+
+        # Flush our own output before invoking the command
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         try:
             # Do the basic prepare
@@ -274,16 +277,9 @@ class PullTask(object):
         def mark_passed():
             if "github" in sink.status:
                 self.github_status_data["state"] = "success"
-        def mark_respawn():
-            if "github" in sink.status:
-                self.github_status_data["state"] = "pending"
-        if isinstance(ret, basestring):
+        if isinstance(ret, str):
             message = ret
             mark_failed()
-        elif ret is None:
-            message = "Rebased"
-            mark_respawn()
-            ret = 0 # A failure, but not for this script
         elif ret == 0:
             message = "Tests passed"
             mark_passed()
@@ -294,48 +290,50 @@ class PullTask(object):
         sink.status["message"] = message
         if "github" in sink.status:
             self.github_status_data["description"] = message
-        del sink.status["extras"]
+        try:
+            del sink.status["extras"]
+        except KeyError:
+            pass
         sink.flush()
 
         return ret
 
     def run(self, opts):
-        if "TEST_INVOKE_RESPAWN" not in os.environ:
-            head = subprocess.check_output([ "git", "rev-parse", "HEAD" ]).strip()
-            if self.ref:
-                if not opts.offline:
-                    subprocess.check_call([ "git", "fetch", "origin", self.ref ])
-                if not self.revision:
-                    self.revision = subprocess.check_output([ "git", "rev-parse", "FETCH_HEAD" ]).strip()
-                # Force a checkout of the ref if not already checked out
-                if not head.lower().startswith(self.revision.lower()):
-                    subprocess.check_call([ "git", "checkout", "-f", self.revision ])
+        if opts.publish:
+            self.start_publishing(opts.publish)
+            os.environ["TEST_ATTACHMENTS"] = self.sink.attachments
 
+        head = subprocess.check_output([ "git", "rev-parse", "HEAD" ], universal_newlines=True).strip()
+        if self.ref:
+            if not opts.offline:
+                subprocess.check_call([ "git", "fetch", self.remote, self.ref ])
             if not self.revision:
-                self.revision = head
+                self.revision = subprocess.check_output([ "git", "rev-parse", "FETCH_HEAD" ], universal_newlines=True).strip()
+            # Force a checkout of the ref if not already checked out
+            if not head.lower().startswith(self.revision.lower()):
+                subprocess.check_call([ "git", "checkout", "-f", self.revision ])
 
-            # Retrieve information about our base branch and master (for bots/)
-            if self.base and not opts.offline:
-                subprocess.check_call([ "git", "fetch", "origin", self.base, "master" ])
+        if not self.revision:
+            self.revision = head
 
-            # Clean out the test directory
-            subprocess.check_call([ "git", "clean", "-d", "--force", "--quiet", "-x", "--", "test/" ])
+        # Retrieve information about our base branch and master (for bots/)
+        if self.base and not opts.offline:
+            subprocess.check_call([ "git", "fetch", self.remote, self.base, "master" ])
 
-            os.environ["TEST_NAME"] = self.name
-            os.environ["TEST_REVISION"] = self.revision
+        # Clean out the test directory
+        subprocess.check_call([ "git", "clean", "-d", "--force", "--quiet", "-x", "--", "test/" ])
+
+        os.environ["TEST_NAME"] = self.name
+        os.environ["TEST_REVISION"] = self.revision
 
         # Split a value like verify/fedora-atomic
         (prefix, unused, value) = self.context.partition("/")
 
-        if prefix in [ 'selenium', 'container', 'avocado' ]:
-            image = 'fedora-26'
+        if prefix in [ 'selenium', 'avocado', 'container' ]:
+            image = 'fedora-27'
         else:
             image = value
         os.environ["TEST_OS"] = image
-
-        if opts.publish:
-            self.start_publishing(opts.publish)
-            os.environ["TEST_ATTACHMENTS"] = self.sink.attachments
 
         msg = "Testing {0} for {1} with {2} on {3}...\n".format(self.github_revision, self.name,
                                                                 self.context, HOSTNAME)
@@ -343,10 +341,8 @@ class PullTask(object):
 
         ret = None
 
-        # If a respawn then this is aleady done
-        if "TEST_INVOKE_RESPAWN" not in os.environ:
-            if self.base:
-                ret = self.rebase()
+        if self.base:
+            ret = self.rebase()
 
         test = os.path.join(BOTS, "..", "test")
 
@@ -365,16 +361,13 @@ class PullTask(object):
         elif prefix == "image" or prefix == "container":
             cmd = [ "timeout", "90m", os.path.join(test, "containers", "run-tests"),
                     "--container", value]
+        elif prefix == "cockpit":
+            cmd = [ "timeout", "90m", os.path.join(test, "run") ]
         else:
             ret = "Unknown context"
 
 
         env = os.environ.copy()
-        # COMPAT: we can only use the cache for new enough branches which have the test/bots split;
-        # don't destroy the old test/images symlink farm
-        if "TEST_DATA" in env and subprocess.call(['git', 'ls-tree', '-d', 'HEAD:bots/images'],
-                                                  stdout=DEVNULL, stderr=DEVNULL) != 0:
-            del env["TEST_DATA"]
         env["PATH"] = "{0}:{1}:{2}".format(env.get("PATH", "/bin:/sbin"), BOTS, test)
 
         # Setup network if necessary, any failures caught during testing
@@ -383,8 +376,12 @@ class PullTask(object):
             subprocess.call(["sudo", "-n", prep ], env=env)
 
         # Prepare the image to run
-        if not ret:
+        if not ret and prefix != "cockpit":
             ret = self.prepare(prefix, value, image, opts.verbose)
+
+        # Flush our own output before running command
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         # Actually run the tests
         if not ret:

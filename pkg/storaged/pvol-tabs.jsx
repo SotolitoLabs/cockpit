@@ -25,7 +25,7 @@ var utils = require("./utils.js");
 var React = require("react");
 var FormatDialog = require("./format-dialog.jsx");
 
-var FormatButton =  FormatDialog.FormatButton;
+var FormatButton = FormatDialog.FormatButton;
 
 var _ = cockpit.gettext;
 
@@ -37,16 +37,22 @@ var PVolTab = React.createClass({
         return (
             <div>
                 <div className="tab-actions">
-                    <FormatButton client={this.props.client} block={this.props.block}/>
+                    <FormatButton client={this.props.client} block={this.props.block} />
                 </div>
                 <table className="info-table-ct">
                     <tr>
                         <td>{_("Volume Group")}</td>
-                        <td>{vgroup? <a data-goto-vgroup={vgroup.Name}>{vgroup.Name}</a> : "-"}</td>
+                        <td>{vgroup
+                            ? <a role="link" tabIndex="0" onClick={() => cockpit.location.go([ "vg", vgroup.Name ])}>
+                                {vgroup.Name}
+                            </a>
+                            : "-"
+                        }
+                        </td>
                     </tr>
                     <tr>
                         <td>{_("Free")}</td>
-                        <td>{block_pvol? utils.fmt_size(block_pvol.FreeSize) : "-"}</td>
+                        <td>{block_pvol ? utils.fmt_size(block_pvol.FreeSize) : "-"}</td>
                     </tr>
                 </table>
             </div>
@@ -61,12 +67,44 @@ var MDRaidMemberTab = React.createClass({
         return (
             <div>
                 <div className="tab-actions">
-                    <FormatButton client={this.props.client} block={this.props.block}/>
+                    <FormatButton client={this.props.client} block={this.props.block} />
                 </div>
                 <table className="info-table-ct">
                     <tr>
                         <td>{_("RAID Device")}</td>
-                        <td>{mdraid? <a data-goto-mdraid={mdraid.UUID}>{utils.mdraid_name(mdraid)}</a> : "-"}</td>
+                        <td>{mdraid
+                            ? <a role="link" tabIndex="0" onClick={() => cockpit.location.go([ "mdraid", mdraid.UUID ])}>
+                                {utils.mdraid_name(mdraid)}
+                            </a>
+                            : "-"
+                        }
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        );
+    },
+});
+
+var VDOBackingTab = React.createClass({
+    render: function () {
+        var vdo = this.props.client.vdo_overlay.find_by_backing_block(this.props.block);
+
+        return (
+            <div>
+                <div className="tab-actions">
+                    <FormatButton client={this.props.client} block={this.props.block} />
+                </div>
+                <table className="info-table-ct">
+                    <tr>
+                        <td>{_("VDO Device")}</td>
+                        <td>{vdo
+                            ? <a role="link" tabIndex="0" onClick={() => cockpit.location.go([ "vdo", vdo.name ])}>
+                                {vdo.name}
+                            </a>
+                            : "-"
+                        }
+                        </td>
                     </tr>
                 </table>
             </div>
@@ -76,5 +114,6 @@ var MDRaidMemberTab = React.createClass({
 
 module.exports = {
     PVolTab:         PVolTab,
-    MDRaidMemberTab: MDRaidMemberTab
+    MDRaidMemberTab: MDRaidMemberTab,
+    VDOBackingTab:   VDOBackingTab
 };

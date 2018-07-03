@@ -61,9 +61,9 @@ var Curtains = React.createClass({
 
         var icon = this.props.icon;
         if (icon == 'waiting')
-            icon = <div className="spinner spinner-lg"></div>;
+            icon = <div className="spinner spinner-lg" />;
         else if (icon == 'error')
-            icon = <div className="pficon pficon-error-circle-o"></div>;
+            icon = <div className="pficon pficon-error-circle-o" />;
 
         return (
             <div className={ curtains + " blank-slate-pf" }>
@@ -95,7 +95,7 @@ var DismissableError = React.createClass({
                 <span className="pficon pficon-error-circle-o" />
                 <span>{this.props.children}</span>
                 <button type="button" className="close" aria-hidden="true" onClick={this.handleDismissError}>
-                    <span className="pficon pficon-close"/>
+                    <span className="pficon pficon-close" />
                 </button>
             </div>
         );
@@ -150,7 +150,7 @@ var SubscriptionStatus = React.createClass({
             if (isUnregistering) {
                 note = (
                     <div className="dialog-wait-ct">
-                        <div className="spinner spinner-sm"></div>
+                        <div className="spinner spinner-sm" />
                         <span>{ _("Unregistering system...") }</span>
                     </div>
                 );
@@ -212,18 +212,18 @@ var SubscriptionsPage = React.createClass({
                 },
             ];
             var columns = [ { name: itm.productName, 'header': true } ];
-            return <cockpitListing.ListingRow columns={columns} tabRenderers={tabRenderers}/>;
+            return <cockpitListing.ListingRow columns={columns} tabRenderers={tabRenderers} />;
         });
 
         return (
             <div className="container-fluid">
-            <SubscriptionStatus {...this.props }/>
-            <cockpitListing.Listing
+                <SubscriptionStatus {...this.props } />
+                <cockpitListing.Listing
                     title={ _("Installed products") }
                     emptyCaption={ _("No installed products on the system.") }
-                    >
-                {entries}
-            </cockpitListing.Listing>
+                >
+                    {entries}
+                </cockpitListing.Listing>
             </div>
         );
     },

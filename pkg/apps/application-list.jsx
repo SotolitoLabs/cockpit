@@ -20,8 +20,8 @@
 import cockpit from "cockpit";
 import React from "react";
 
-import PackageKit from "./packagekit";
-import { left_click, icon_url, show_error, launch, ProgressBar, CancelButton } from  "./utils.jsx";
+import PackageKit from "./packagekit.es6";
+import { left_click, icon_url, show_error, launch, ProgressBar, CancelButton } from "./utils.jsx";
 
 const _ = cockpit.gettext;
 
@@ -38,9 +38,9 @@ class ApplicationRow extends React.Component {
 
         function action(func, arg, progress_title) {
             self.setState({ progress_title: progress_title });
-            func(arg, (data) => self.setState({ progress: data })).
-                always(() => self.setState({ progress: null })).
-                fail(show_error);
+            func(arg, (data) => self.setState({ progress: data }))
+                    .finally(() => self.setState({ progress: null }))
+                    .catch(show_error);
         }
 
         function install() {
@@ -54,14 +54,14 @@ class ApplicationRow extends React.Component {
         var name, summary_or_progress, button;
 
         if (comp.installed) {
-            name = <a onClick={left_click(() => launch(comp))}>{comp.name}</a>;
+            name = <a role="link" tabIndex="0" onClick={left_click(() => launch(comp))}>{comp.name}</a>;
         } else {
             name = comp.name;
         }
 
         if (state.progress) {
-            summary_or_progress = <ProgressBar title={state.progress_title} data={state.progress}/>;
-            button = <CancelButton data={state.progress}/>;
+            summary_or_progress = <ProgressBar title={state.progress_title} data={state.progress} />;
+            button = <CancelButton data={state.progress} />;
         } else {
             if (state.error) {
                 summary_or_progress = (
@@ -70,9 +70,9 @@ class ApplicationRow extends React.Component {
                         <div className="alert alert-danger alert-dismissable">
                             <button className="close"
                                     onClick={left_click(() => { this.setState({ error: null }) })}>
-                                <span className="pficon pficon-close"/>
+                                <span className="pficon pficon-close" />
                             </button>
-                            <span className="pficon pficon-error-circle-o"/>
+                            <span className="pficon pficon-error-circle-o" />
                             {state.error}
                         </div>
                     </div>
@@ -90,7 +90,7 @@ class ApplicationRow extends React.Component {
 
         return (
             <tr onClick={left_click(() => cockpit.location.go(comp.id))}>
-                <td><img src={icon_url(comp.icon)}/></td>
+                <td><img src={icon_url(comp.icon)} role="presentation" /></td>
                 <td>{name}</td>
                 <td>{summary_or_progress}</td>
                 <td>{button}</td>
@@ -113,19 +113,22 @@ class ApplicationList extends React.Component {
         comps.sort((a, b) => a.name.localeCompare(b.name));
 
         function refresh() {
+            var config = cockpit.manifests["apps"].config || { };
             PackageKit.refresh(self.props.metainfo_db.origin_files,
-                               data => self.setState({ progress: data })).
-                always(() => self.setState({ progress: false })).
-                fail(show_error);
+                               config.appstream_config_packages || [ ],
+                               config.appstream_data_packages || [ ],
+                               data => self.setState({ progress: data }))
+                    .finally(() => self.setState({ progress: false }))
+                    .catch(show_error);
         }
 
         var refresh_progress, refresh_button, empty_caption, tbody, table_classes;
         if (this.state.progress) {
-            refresh_progress = <ProgressBar title={_("Checking for new applications")} data={this.state.progress}/>;
-            refresh_button = <CancelButton data={this.state.progress}/>;
+            refresh_progress = <ProgressBar title={_("Checking for new applications")} data={this.state.progress} />;
+            refresh_button = <CancelButton data={this.state.progress} />;
         } else {
             refresh_progress = null;
-            refresh_button = <button className="btn btn-default fa fa-refresh" onClick={left_click(refresh)}/>
+            refresh_button = <button className="btn btn-default fa fa-refresh" onClick={left_click(refresh)} />
         }
 
         table_classes = "table app-list";
@@ -133,11 +136,11 @@ class ApplicationList extends React.Component {
             if (this.props.metainfo_db.ready)
                 empty_caption = _("No applications installed or available");
             else
-                empty_caption = <div className="spinner spinner-sm"/>;
+                empty_caption = <div className="spinner spinner-sm" />;
             tbody = <tr className="app-list-empty"><td>{empty_caption}</td></tr>;
         } else {
             table_classes += " table-hover";
-            tbody = comps.map((c) => <ApplicationRow comp={c}/>);
+            tbody = comps.map((c) => <ApplicationRow comp={c} />);
         }
 
         return (

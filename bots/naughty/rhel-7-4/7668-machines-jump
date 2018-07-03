@@ -1,2 +1,0 @@
-  File "test/verify/check-dashboard", line 218, in testBasic
-    b.enter_page("/network", "10.111.113.3")

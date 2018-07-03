@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -32,15 +31,15 @@ export function isSameHostAddress(hostAddress) {
 export function toGigaBytes(amount, currentUnit) {
     let result;
     switch (currentUnit) {
-        case 'B':
-            result = amount / 1024 / 1024 / 1024;
-            break;
-        case 'KiB':
-            result = amount / 1024 / 1024;
-            break;
-        default:
-            console.error(`toGigaBytes(): unknown unit: ${currentUnit}`);
-            result = amount / 1;
+    case 'B':
+        result = amount / 1024 / 1024 / 1024;
+        break;
+    case 'KiB':
+        result = amount / 1024 / 1024;
+        break;
+    default:
+        console.error(`toGigaBytes(): unknown unit: ${currentUnit}`);
+        result = amount / 1;
     }
 
     if (result < 1) {
@@ -54,7 +53,7 @@ export function toGigaBytes(amount, currentUnit) {
 }
 
 export function valueOrDefault(value, def) {
-    return (value === undefined || value === null) ?  def : value;
+    return (value === undefined || value === null) ? def : value;
 }
 
 export function isNumeric(value) {
@@ -70,6 +69,10 @@ export function formatDateTime (milliseconds) {
     const date = new Date(milliseconds);
     const isYearDifferent = (now.getUTCFullYear() - date.getUTCFullYear()) !== 0;
 
+    if (isNaN(date.getTime())) {
+        return ''; // invalid date
+    }
+
     const options = {
         month: 'long',
         year: isYearDifferent ? 'numeric' : undefined,
@@ -80,6 +83,6 @@ export function formatDateTime (milliseconds) {
     };
 
     let localeString = date.toLocaleString(cockpit.language || 'en', options);
-    localeString = localeString.replace(/,([^,]*)$/,'$1'); // remove ',' before time
+    localeString = localeString.replace(/,([^,]*)$/, '$1'); // remove ',' before time
     return localeString;
 }

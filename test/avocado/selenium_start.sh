@@ -41,15 +41,13 @@ function wait_curl(){
     fi
 }
 
-# HACK: docker fails to start a container without /etc/resolv.conf
-touch /etc/resolv.conf
-
 # Make sure docker is up and running
 systemctl start docker
 
-docker run  -d -p 4444:4444 --name selenium-hub selenium/hub:2.48.2 2> >(grep -v 'Usage of loopback devices' >&2)
+docker run  -d -p 4444:4444 --name selenium-hub selenium/hub:3
 wait_curl /grid/console "Grid Console"
-docker run -d --link selenium-hub:hub selenium/node-chrome:2.48.2 2> >(grep -v 'Usage of loopback devices' >&2)
-wait_curl /grid/console "googlechrome"
-docker run -d --link selenium-hub:hub selenium/node-firefox:2.48.2 2> >(grep -v 'Usage of loopback devices' >&2)
-wait_curl /grid/console "firefox"
+docker run -d --link selenium-hub:hub selenium/node-chrome:3
+wait_curl /grid/console "browserName: chrome"
+# HACK: Fedora 27's python2-selenium does not work with :3
+docker run -d --link selenium-hub:hub selenium/node-firefox:2.53.1
+wait_curl /grid/console "browserName: firefox"

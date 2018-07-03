@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -198,7 +198,7 @@ class TestBasicDashboard(MachineCase, DashBoardHelpers):
         b.leave_page()
         b.wait_js_cond('ph_select("#machine-dropdown ul li").length == 3')
 
-        if m.image != "rhel-7-4":
+        if m.image != "rhel-7-5":
             b.click("#host-nav-link")
 
         b.click("#machine-link")
@@ -421,7 +421,7 @@ class TestDashboardEditLimits(MachineCase, DashBoardHelpers):
                 d[n] = {"visible":True,"address":n}
 
             m.execute("echo '{0}' > /etc/cockpit/machines.d/99-webui.json".format(json.dumps(d)))
-            return d.keys()
+            return list(d.keys())
 
         def check_limit(limit):
             b.click('#dashboard-add')

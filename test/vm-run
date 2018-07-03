@@ -21,17 +21,17 @@ import errno
 import os
 import subprocess
 import sys
+import re
 
-from common import testvm
-
-TEST = os.path.dirname(__file__)
-BOTS = os.path.normpath(os.path.join(TEST, "..", "bots"))
+from verify import parent
+import testvm
 
 NETWORK_SCRIPT="""
     set -ex
-	/bin/virsh net-destroy cockpit1 || true
-	/bin/virsh net-undefine cockpit1 || true
+    /bin/virsh net-destroy cockpit1 || true
+    /bin/virsh net-undefine cockpit1 || true
     /bin/virsh net-define /dev/stdin <<EOF
+
 <network ipv6='yes'>
   <name>cockpit1</name>
   <uuid>f3605fa4-0763-41ea-8143-49da3bf73263</uuid>
@@ -50,8 +50,19 @@ NETWORK_SCRIPT="""
   <ip family="ipv6" address="fd00:111:112::1" prefix="64"/>
 </network>
 EOF
-	/bin/virsh net-autostart cockpit1
-	/bin/virsh net-start cockpit1
+
+    if [ ! -u /usr/libexec/qemu-bridge-helper ]; then
+        chmod -v u+s /usr/libexec/qemu-bridge-helper
+    fi
+
+    for qemu_config in /etc/qemu-kvm/bridge.conf /etc/qemu/bridge.conf; do
+       if [ -e "$qemu_config" ] && ! grep -qF cockpit1 "$qemu_config"; then
+          echo "allow cockpit1" >> "$qemu_config"
+       fi
+    done
+
+    /bin/virsh net-autostart cockpit1
+    /bin/virsh net-start cockpit1
 """
 
 parser = argparse.ArgumentParser(description='Run a test machine')
@@ -88,11 +99,11 @@ try:
                                  networking=network.host(), memory_mb=memory, cpus=args.cpus)
 
     # Hack to make things easier for users who don't know about kubeconfig
-    if args.image == 'openshift':
+    if 'openshift' in args.image:
         kubeconfig = os.path.join(os.path.expanduser("~"), ".kube", "config")
         if not os.path.lexists(kubeconfig):
             d = os.path.dirname(kubeconfig)
-            src = os.path.abspath(os.path.join(BOTS, "images", "files", "openshift.kubeconfig"))
+            src = os.path.abspath(os.path.join(parent.BOTS_DIR, "images", "files", "openshift.kubeconfig"))
             if not os.path.exists(d):
                 os.makedirs(d)
             sys.stderr.write("image-run: linking kubeconfig into ~/.kube/config\n")
@@ -101,7 +112,7 @@ try:
     # Check that image is downloaded
     if not os.path.exists(machine.image_file):
         try:
-            ret = subprocess.call([ os.path.join(BOTS, "image-download"), args.image])
+            ret = subprocess.call([ os.path.join(parent.BOTS_DIR, "image-download"), args.image])
         except OSError as ex:
             if ex.errno != errno.ENOENT:
                 raise
@@ -111,13 +122,21 @@ try:
 
     machine.start()
 
+    # for a bridged network, up its interface with DHCP and show it in the console message
+    message = ""
+    if args.network and bridge:
+        machine.execute("nmcli connection modify 'System eth1' ipv4.method auto && nmcli connection up 'System eth1'")
+        output = machine.execute("ip -4 a show dev eth1")
+        ip = re.search("inet ([^/]+)", output).group(1)
+        message = "\nBRIDGE IP FROM HOST\n  %s\n" % ip
+
     # Graphics console necessary
     if "windows" in args.image:
         machine.graphics_console()
 
     # No graphics console necessary
     else:
-        machine.qemu_console()
+        machine.qemu_console(message)
 
 except testvm.Failure as ex:
     sys.stderr.write("vm-run: %s\n" % ex)

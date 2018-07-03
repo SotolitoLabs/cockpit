@@ -22,6 +22,8 @@
 
     var $ = require("jquery");
     var cockpit = require("cockpit");
+    var moment = require("moment");
+    moment.locale(cockpit.language);
 
     require("patterns");
 
@@ -168,6 +170,7 @@
             $('#container-details-ports-row').hide();
             $('#container-details-links-row').hide();
             $('#container-details-resource-row').hide();
+            $('#container-details-volumes-row').hide();
 
             var info = this.client.containers[this.container_id];
             util.docker_debug("container-details", this.container_id, info);
@@ -199,7 +202,8 @@
 
             $('#container-details-id').text(info.Id);
             $('#container-details-names').text(util.render_container_name(info.Name));
-            $('#container-details-created').text(info.Created);
+            $('#container-details-created').text(moment(info.Created).isValid() ?
+                                                 moment(info.Created).calendar() : info.Created);
 
             $('#container-details-image').text(info.Image);
             $('#container-details-image-id').text(info.ImageID);
@@ -225,6 +229,12 @@
             $('#container-details .cpu-shares').text(util.format_cpu_shares(info.CpuPriority));
 
             this.maybe_show_terminal(info);
+
+            var volume_bindings = info.HostConfig.Binds;
+            if (volume_bindings) {
+                $('#container-details-volumes-row').toggle(volume_bindings.length > 0);
+                $('#container-details-volumes').html(util.multi_line(volume_bindings));
+            }
         },
 
         update_links: function(info) {

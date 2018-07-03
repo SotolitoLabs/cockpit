@@ -22,7 +22,7 @@ import React from "react";
 import utils from "./utils.js";
 import { StdDetailsLayout } from "./details.jsx";
 import Content from "./content-views.jsx";
-import { StorageButton, StorageBlockNavLink, StorageMultiAction, StorageOnOff } from "./storage-controls.jsx";
+import { StorageButton, StorageBlockNavLink, StorageOnOff } from "./storage-controls.jsx";
 import dialog from "./dialog.js";
 
 const _ = cockpit.gettext;
@@ -47,8 +47,8 @@ class MDRaidSidebar extends React.Component {
                                 Title: _("Disks"),
                                 Options: (
                                     utils.get_available_spaces(client)
-                                         .filter(filter_inside_mdraid)
-                                         .map(utils.available_space_to_option)
+                                            .filter(filter_inside_mdraid)
+                                            .map(utils.available_space_to_option)
                                 ),
                                 EmptyWarning: _("No disks are available."),
                                 validate: function (disks) {
@@ -74,7 +74,8 @@ class MDRaidSidebar extends React.Component {
         var members = client.mdraids_members[mdraid.path] || [];
         var dynamic_members = (mdraid.Level != "raid0");
 
-        var n_spares = 0, n_recovering = 0;
+        var n_spares = 0;
+        var n_recovering = 0;
         mdraid.ActiveDevices.forEach(function(as) {
             if (as[2].indexOf("spare") >= 0) {
                 if (as[1] < 0)
@@ -126,20 +127,20 @@ class MDRaidSidebar extends React.Component {
             return (
                 <tr>
                     <td className="storage-icon">
-                        <div><img src="images/storage-disk.png"></img></div>
+                        <div><img src="images/storage-disk.png" /></div>
                     </td>
                     <td>
-                        {slot? slot : "-"} <StorageBlockNavLink client={client} block={block}/>
-                        <br/>
+                        {slot || "-"} <StorageBlockNavLink client={client} block={block} />
+                        <br />
                         <span className="state">{states}</span>
                     </td>
-                    { dynamic_members ?
-                      <td className="storage-action">
-                          <StorageButton onClick={remove} excuse={remove_excuse}>
-                              <span className="fa fa-minus"></span>
-                          </StorageButton>
-                      </td>
-                      : null }
+                    { dynamic_members
+                        ? <td className="storage-action">
+                            <StorageButton onClick={remove} excuse={remove_excuse}>
+                                <span className="fa fa-minus" />
+                            </StorageButton>
+                        </td>
+                        : null }
                 </tr>);
         }
 
@@ -151,13 +152,13 @@ class MDRaidSidebar extends React.Component {
             <div className="panel panel-default">
                 <div className="panel-heading">
                     <span>{_("Disks")}</span>
-                    {dynamic_members ?
-                     <span className="pull-right">
-                         <StorageButton onClick={add_disk} excuse={add_excuse}>
-                             <span className="fa fa-plus"></span>
-                         </StorageButton>
-                     </span>
-                     : null}
+                    {dynamic_members
+                        ? <span className="pull-right">
+                            <StorageButton onClick={add_disk} excuse={add_excuse}>
+                                <span className="fa fa-plus" />
+                            </StorageButton>
+                        </span>
+                        : null}
                 </div>
                 <table className="table">
                     <tbody>
@@ -192,7 +193,7 @@ export class MDRaidDetails extends React.Component {
             level += ", " + cockpit.format(_("$0 Chunk Size"), utils.fmt_size(mdraid.ChunkSize));
 
         function toggle_bitmap(val) {
-            return mdraid.SetBitmapLocation(utils.encode_filename(val? 'internal' : 'none'), {});
+            return mdraid.SetBitmapLocation(utils.encode_filename(val ? 'internal' : 'none'), {});
         }
 
         var bitmap = null;
@@ -201,7 +202,7 @@ export class MDRaidDetails extends React.Component {
             bitmap = (
                 <tr>
                     <td>{_("storage", "Bitmap")}</td>
-                    <td><StorageOnOff state={value} onChange={toggle_bitmap}/></td>
+                    <td><StorageOnOff state={value} onChange={toggle_bitmap} /></td>
                 </tr>
             );
         }
@@ -214,7 +215,7 @@ export class MDRaidDetails extends React.Component {
             );
             degraded_message = (
                 <div className="alert alert-danger">
-                    <span className="pficon pficon-error-circle-o"></span>
+                    <span className="pficon pficon-error-circle-o" />
                     <span>{_("The RAID Array is in a degraded state")}</span> - {text}
                 </div>
             );
@@ -230,15 +231,35 @@ export class MDRaidDetails extends React.Component {
         }
 
         function stop() {
+            var usage = utils.get_active_usage(client, block ? block.path : "");
+
+            if (usage.Blocking) {
+                dialog.open({ Title: cockpit.format(_("$0 is in active use"), utils.mdraid_name(mdraid)),
+                              Blocking: usage.Blocking,
+                              Fields: [ ]
+                });
+                return;
+            }
+
+            if (usage.Teardown) {
+                dialog.open({ Title: cockpit.format(_("Please confirm stopping of $0"),
+                                                    utils.mdraid_name(mdraid)),
+                              Teardown: usage.Teardown,
+                              Fields: [ ],
+                              Action: {
+                                  Title: _("Stop Device"),
+                                  action: function () {
+                                      return utils.teardown_active_usage(client, usage)
+                                              .then(function () {
+                                                  return mdraid.Stop({});
+                                              });
+                                  }
+                              }
+                });
+                return;
+            }
+
             return mdraid.Stop({});
-        }
-
-        function start_scrub() {
-            return mdraid.RequestSyncAction("repair", {});
-        }
-
-        function stop_scrub() {
-            return mdraid.RequestSyncAction("idle", {});
         }
 
         function delete_dialog() {
@@ -264,7 +285,7 @@ export class MDRaidDetails extends React.Component {
                     return wipe_members();
             }
 
-            var usage = utils.get_active_usage(client, block? block.path : "");
+            var usage = utils.get_active_usage(client, block ? block.path : "");
 
             if (usage.Blocking) {
                 dialog.open({ Title: cockpit.format(_("$0 is in active use"), utils.mdraid_name(mdraid)),
@@ -282,37 +303,34 @@ export class MDRaidDetails extends React.Component {
                               Title: _("Delete"),
                               Danger: _("Deleting a RAID device will erase all data on it."),
                               action: function () {
-                                  return utils.teardown_active_usage(client, usage).
-                                               then(delete_).
-                                               then(function () {
-                                                   location.go('/');
-                                               });
+                                  return utils.teardown_active_usage(client, usage)
+                                          .then(delete_)
+                                          .then(function () {
+                                              location.go('/');
+                                          });
                               }
                           }
             });
         }
-
-        var actions = [
-            { title: _("Start"),           action: start },
-            { title: _("Stop"),            action: stop },
-            { title: _("Start Scrubbing"), action: start_scrub },
-            { title: _("Stop Scrubbing"),  action: stop_scrub },
-            { title: _("Delete"),          action: delete_dialog }
-        ];
 
         var header = (
             <div className="panel panel-default">
                 <div className="panel-heading">
                     { cockpit.format(_("RAID Device $0"), utils.mdraid_name(mdraid)) }
                     <span className="pull-right">
-                        <StorageMultiAction actions={actions} default={running? 1 : 0}/>
+                        { running
+                            ? <StorageButton onClick={stop}>{_("Stop")}</StorageButton>
+                            : <StorageButton onClick={start}>{_("Start")}</StorageButton>
+                        }
+                        { "\n" }
+                        <StorageButton kind="danger" onClick={delete_dialog}>{_("Delete")}</StorageButton>
                     </span>
                 </div>
                 <div className="panel-body">
                     <table className="info-table-ct">
                         <tr>
                             <td>{_("storage", "Device")}</td>
-                            <td>{ block? utils.decode_filename(block.PreferredDevice) : "-" }</td>
+                            <td>{ block ? utils.decode_filename(block.PreferredDevice) : "-" }</td>
                         </tr>
                         <tr>
                             <td>{_("storage", "UUID")}</td>
@@ -329,20 +347,20 @@ export class MDRaidDetails extends React.Component {
                         { bitmap }
                         <tr>
                             <td>{_("storage", "State")}</td>
-                            <td>{ running? _("Running"): _("Not running") }</td>
+                            <td>{ running ? _("Running") : _("Not running") }</td>
                         </tr>
                     </table>
                 </div>
             </div>
         );
 
-        var sidebar = <MDRaidSidebar client={this.props.client} mdraid={mdraid}/>;
+        var sidebar = <MDRaidSidebar client={this.props.client} mdraid={mdraid} />;
 
-        var content = <Content.Block client={this.props.client} block={block}/>;
+        var content = <Content.Block client={this.props.client} block={block} />;
 
-        return <StdDetailsLayout jobs={this.props.jobs} alert={degraded_message}
+        return <StdDetailsLayout client={this.props.client} alert={degraded_message}
                                  header={ header }
                                  sidebar={ sidebar }
-                                 content={ content }/>;
+                                 content={ content } />;
     }
 }

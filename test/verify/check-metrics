@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -98,12 +98,13 @@ class TestMetrics(MachineCase):
         # we only get as much as the qemu process itself gets.
 
         m.upload([ "verify/files/measure-cpu" ], "/var/lib/testvm/")
+        cmd = "$(which python3 || which python2) /var/lib/testvm/measure-cpu"
 
-        cpu_start = m.execute("/var/lib/testvm/measure-cpu start")
+        cpu_start = m.execute(cmd + " start")
         cpu_pid = m.spawn("while true; do true; done", "cpu-load.log")
         wait_for_plot("#server_cpu_graph", 20)
         m.execute("kill %d" % cpu_pid)
-        cpu_percentage = float(m.execute("/var/lib/testvm/measure-cpu stop '%s'" % cpu_start))
+        cpu_percentage = float(m.execute("%s stop '%s'" % (cmd, cpu_start)))
 
         print("Measured CPU", cpu_percentage)
         self.assertTrue(b.call_js_func("ph_flot_data_plateau", "#server_cpu_graph",
@@ -125,16 +126,14 @@ class TestMetrics(MachineCase):
         b.wait_js_func("ph_flot_data_plateau", "#server_disk_io_graph", 100*1024, None, 5, "disk io");
         m.execute("kill %d" % disk_pid)
 
-        # Network traffic through loopback. Should be ignored (fixed in 147)
-        if m.image not in ["rhel-7-4"]:
-            m.spawn("ping -w 5 -f -c 10000000 -s 50000  127.0.0.1", "load-net-lo.log")
-            try:
-                with b.wait_timeout(10):
-                    b.wait_js_func("ph_flot_data_plateau", "#server_network_traffic_graph", 300*1000, None, 5, "net io");
-                self.fail("Unexpected traffic graph for localhost")
-            except Error as ex:
-                if not ex.msg.startswith('timeout'):
-                    raise
+        # Network traffic through loopback. Should be ignored
+        m.spawn("ping -f -c 10000000 -s 50000  127.0.0.1", "load-net-lo.log")
+        try:
+            b.wait_js_func("ph_flot_data_plateau", "#server_network_traffic_graph", 300*1000, None, 5, "net io");
+            self.fail("Unexpected traffic graph for localhost")
+        except Error as ex:
+            if not ex.msg.startswith('timeout'):
+                raise
 
         # Network traffic through Ethernet.  Anything above 300 kb/s is good for now.
         #
@@ -148,7 +147,7 @@ class TestMetrics(MachineCase):
         if not iface:
             raise Exception("Couldn't find interface to sample")
 
-        m.execute("if type firewall-cmd >/dev/null 2>&1; then firewall-cmd --permanent --zone=public --add-port=2000/tcp && firewall-cmd --reload; fi")
+        m.execute("if firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --permanent --zone=public --add-port=2000/tcp && firewall-cmd --reload; fi")
 
         (eth_before, lo_before) = m.execute(r"grep -E '\b" + iface + r":' /proc/net/dev | awk '{print $2 + $10}'; "
                                             r"grep '\blo:' /proc/net/dev | awk '{print $2 + $10}'").strip().split()
@@ -176,7 +175,7 @@ class TestMetrics(MachineCase):
         m.execute("kill %d" % net_pid)
 
     @skipImage("No PCP available on Atomic", "fedora-atomic", "rhel-atomic", "continuous-atomic")
-    @skipImage("No PCP available on Debian 9/testing/unstable", "debian-stable", "debian-testing")
+    @skipImage("No PCP available on Debian 9/testing/unstable", "debian-stable")
     def testPcp(self):
         m = self.machine
 

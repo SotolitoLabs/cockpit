@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -25,7 +25,7 @@ from netlib import *
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": { },
-        "machine2": { "image": "fedora-26", "address": "10.111.113.2/20", "dhcp": True }
+        "machine2": { "image": "fedora-28", "address": "10.111.113.2/20", "dhcp": True }
     }
 
     def testBridge(self):
@@ -34,10 +34,9 @@ class TestNetworking(NetworkCase):
 
         self.login_and_go("/network")
 
-        # The second interface is connected to a different outside
-        # network than the first to avoid a cycle between the
-        # "cockpit1" bridge that all VMs are connected to, and the
-        # bridge we are creating here.
+        # The second interface is connected to a different outside network than
+        # the first to avoid a cycle between the bridge that all VMs are
+        # connected to, and the bridge we are creating here.
 
         iface1 = self.add_iface()
         iface2 = self.add_iface(vlan=1, activate=False)
@@ -66,6 +65,31 @@ class TestNetworking(NetworkCase):
         b.wait_visible("#networking")
         b.wait_not_present("#networking-interfaces tr[data-interface='tbridge']")
 
+    def testBridgeActive(self):
+        b = self.browser
+
+        self.login_and_go("/network")
+
+        iface = self.add_iface()
+        self.wait_for_iface(iface)
+        ip = b.text("#networking-interfaces tr[data-interface='%s'] td:nth-child(2)" % iface)
+
+        # Put an active interface into a bridge.  The bridge should
+        # get the same IP as the active interface.
+
+        b.click("button:contains('Add Bridge')")
+        b.wait_popup("network-bridge-settings-dialog")
+        b.set_val("#network-bridge-settings-dialog tr:contains('Name') input", "tbridge")
+        b.set_checked("input[data-iface='%s']" % iface, True)
+        b.click("#network-bridge-settings-dialog button:contains('Apply')")
+        b.wait_popdown("network-bridge-settings-dialog")
+        b.wait_present("#networking-interfaces tr[data-interface='tbridge']")
+
+        # Check that it has the interface enslaved and the right IP address
+        b.click("#networking-interfaces tr[data-interface='tbridge'] td:first-child")
+        b.wait_visible("#network-interface")
+        b.wait_present("#network-interface-slaves tr[data-interface='%s']" % iface)
+        b.wait_in_text("#network-interface .panel:contains('tbridge')", ip)
 
 if __name__ == '__main__':
     test_main()

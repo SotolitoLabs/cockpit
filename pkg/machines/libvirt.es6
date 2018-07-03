@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -22,9 +21,16 @@
  * Provider for Libvirt
  */
 import cockpit from 'cockpit';
+import service from '../lib/service.js';
 import $ from 'jquery';
+import createVmScript from 'raw!./scripts/create_machine.sh';
+import installVmScript from 'raw!./scripts/install_machine.sh';
+import getOSListScript from 'raw!./scripts/get_os_list.sh';
+import getLibvirtServiceNameScript from 'raw!./scripts/get_libvirt_service_name.sh';
+import store from './store.es6';
 
-import { updateOrAddVm,
+import {
+    updateOrAddVm,
     updateVm,
     getVm,
     getAllVms,
@@ -32,29 +38,46 @@ import { updateOrAddVm,
     undefineVm,
     deleteUnlistedVMs,
     vmActionFailed,
+    getOsInfoList,
+    updateOsInfoList,
+    checkLibvirtStatus,
+    updateLibvirtState,
+    setHypervisorMaxVCPU,
+    getHypervisorMaxVCPU,
 } from './actions.es6';
 
 import { usagePollingEnabled } from './selectors.es6';
 import { spawnScript, spawnProcess } from './services.es6';
 import {
-    toKiloBytes,
+    convertToUnit,
+    units,
     isEmpty,
     logDebug,
     rephraseUI,
     fileDownload,
 } from './helpers.es6';
 
+import {
+    prepareDisksParam,
+    prepareDisplaysParam,
+} from './libvirtUtils.es6';
+
+import {
+    setVmCreateInProgress,
+    setVmInstallInProgress,
+    finishVmCreateInProgress,
+    finishVmInstallInProgress,
+    removeVmCreateInProgress,
+    clearVmUiState,
+} from './components/create-vm-dialog/uiState.es6';
+
+import VCPUModal from './components/vcpuModal.jsx';
+
 import VMS_CONFIG from './config.es6';
 
 const _ = cockpit.gettext;
 
-// --- compatibility hack
-if (!String.prototype.startsWith) {
-    String.prototype.startsWith = function (searchString, position) {
-        position = position || 0;
-        return this.substr(position, searchString.length) === searchString;
-    };
-}
+const METADATA_NAMESPACE = "https://github.com/cockpit-project/cockpit/tree/master/pkg/machines";
 
 /**
  * Parse non-XML stdout of virsh.
@@ -76,7 +99,9 @@ function getValueFromLine(parsedLines, pattern) {
     const selectedLine = parsedLines.filter(line => {
         return line.trim().startsWith(pattern);
     });
-    return isEmpty(selectedLine) ? undefined : selectedLine.toString().trim().substring(pattern.length).trim();
+    return isEmpty(selectedLine) ? undefined : selectedLine.toString().trim()
+            .substring(pattern.length)
+            .trim();
 }
 
 /**
@@ -96,6 +121,17 @@ export function buildFailHandler({ dispatch, name, connectionName, message, extr
         }));
 }
 
+export function buildScriptTimeoutFailHandler(args, delay) {
+    let handler = buildFailHandler(args);
+    return ({ message, exception }) => {
+        window.setTimeout(() => {
+            handler({
+                exception: exception || message,
+            });
+        }, delay);
+    };
+}
+
 let LIBVIRT_PROVIDER = {};
 LIBVIRT_PROVIDER = {
     name: 'Libvirt',
@@ -104,10 +140,10 @@ LIBVIRT_PROVIDER = {
      * Initialize the provider.
      * Arguments are used for reference only, they are actually not needed for this Libvirt provider.
      *
-     * @param providerContext - see `getProviderContext()` in provider.es6
+     * @param providerContext - contains context details, like the dispatch function, see provider.es6
      * @returns {boolean} - true, if initialization succeeded; or Promise
      */
-    init(providerContext) {
+    init({ dispatch }) {
         // This is default provider - the Libvirt, so we do not need to use the providerContext param.
         // The method is here for reference only.
         return true; // or Promise
@@ -117,9 +153,13 @@ LIBVIRT_PROVIDER = {
     canShutdown: (vmState) => LIBVIRT_PROVIDER.canReset(vmState),
     canDelete: (vmState, vmId, providerState) => true,
     isRunning: (vmState) => LIBVIRT_PROVIDER.canReset(vmState),
-    canRun: (vmState) => vmState == 'shut off',
+    canRun: (vmState, hasInstallPhase) => !hasInstallPhase && vmState == 'shut off',
+    canInstall: (vmState, hasInstallPhase) => vmState != 'running' && hasInstallPhase,
     canConsole: (vmState) => vmState == 'running',
     canSendNMI: (vmState) => LIBVIRT_PROVIDER.canReset(vmState),
+    openVCPUModal: (params) => VCPUModal(params),
+
+    serialConsoleCommand: ({ vm }) => vm.displays['pty'] ? [ 'virsh', ...VMS_CONFIG.Virsh.connections[vm.connectionName].params, 'console', vm.name ] : false,
 
     /**
      * Read VM properties of a single VM (virsh)
@@ -135,10 +175,34 @@ LIBVIRT_PROVIDER = {
                 return spawnVirshReadOnly({connectionName, method: 'dumpxml', name}).then(domXml => {
                     parseDumpxml(dispatch, connectionName, domXml);
                     return spawnVirshReadOnly({connectionName, method: 'dominfo', name});
-                }).then(domInfo => {
-                    parseDominfo(dispatch, connectionName, name, domInfo);
-                }); // end of GET_VM return
+                })
+                        .then(domInfo => {
+                            parseDominfo(dispatch, connectionName, name, domInfo);
+                        }); // end of GET_VM return
             }
+        };
+    },
+
+    INIT_DATA_RETRIEVAL () {
+        logDebug(`${this.name}.INIT_DATA_RETRIEVAL():`);
+        return dispatch => {
+            dispatch(getOsInfoList());
+            return cockpit.script(getLibvirtServiceNameScript, null, { err: "message", environ: ['LC_ALL=en_US.UTF-8'] })
+                    .then(serviceName => {
+                        const match = serviceName.match(/([^\s]+)/);
+                        const name = match ? match[0] : null;
+                        dispatch(updateLibvirtState({ name }));
+                        if (name) {
+                            dispatch(getAllVms(null, name));
+                        } else {
+                            console.error("initialize failed: getting libvirt service name failed");
+                        }
+                        dispatch(getHypervisorMaxVCPU());
+                    })
+                    .fail((exception, data) => {
+                        dispatch(updateLibvirtState({ name: null }));
+                        console.error(`initialize failed: getting libvirt service name returned error: "${JSON.stringify(exception)}", data: "${JSON.stringify(data)}"`);
+                    });
         };
     },
 
@@ -147,72 +211,183 @@ LIBVIRT_PROVIDER = {
      *
      * @returns {Function}
      */
-    GET_ALL_VMS ({ connectionName }) {
+    GET_ALL_VMS ({ connectionName, libvirtServiceName }) {
         logDebug(`${this.name}.GET_ALL_VMS(connectionName='${connectionName}'):`);
         if (connectionName) {
             return dispatch => {
-                startEventMonitor(dispatch, connectionName);
+                dispatch(checkLibvirtStatus(libvirtServiceName));
+                startEventMonitor(dispatch, connectionName, libvirtServiceName);
                 doGetAllVms(dispatch, connectionName);
             };
         }
 
-        return dispatch => { // for all connections
-            return cockpit.user().done( loggedUser => {
-                const promises = Object.getOwnPropertyNames(VMS_CONFIG.Virsh.connections)
-                    .filter(
-                        // The 'root' user does not have its own qemu:///session just qemu:///system
-                        // https://bugzilla.redhat.com/show_bug.cgi?id=1045069
-                        connectionName => canLoggedUserConnectSession(connectionName, loggedUser))
-                    .map(connectionName => dispatch(getAllVms(connectionName)));
+        return unknownConnectionName(getAllVms, libvirtServiceName);
+    },
 
-                return cockpit.all(promises);
-            });
-        };
+    GET_OS_INFO_LIST () {
+        logDebug(`${this.name}.GET_OS_INFO_LIST():`);
+        return dispatch => cockpit.script(getOSListScript, null, { err: "message", environ: ['LC_ALL=en_US.UTF-8'] })
+                .then(osList => {
+                    parseOsInfoList(dispatch, osList);
+                })
+                .fail((exception, data) => {
+                    console.error(`get os list returned error: "${JSON.stringify(exception)}", data: "${JSON.stringify(data)}"`);
+                });
     },
 
     SHUTDOWN_VM ({ name, connectionName }) {
         logDebug(`${this.name}.SHUTDOWN_VM(${name}):`);
         return dispatch => spawnVirsh({connectionName,
-            method: 'SHUTDOWN_VM',
-            failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM SHUT DOWN action failed")}),
-            args: ['shutdown', name]
+                                       method: 'SHUTDOWN_VM',
+                                       failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM SHUT DOWN action failed") }),
+                                       args: ['shutdown', name]
         });
     },
 
     FORCEOFF_VM ({ name, connectionName }) {
         logDebug(`${this.name}.FORCEOFF_VM(${name}):`);
         return dispatch => spawnVirsh({connectionName,
-            method: 'FORCEOFF_VM',
-            failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM FORCE OFF action failed")}),
-            args: ['destroy', name]
+                                       method: 'FORCEOFF_VM',
+                                       failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM FORCE OFF action failed") }),
+                                       args: ['destroy', name]
+        }).then(() => {
+            dispatch(getVm(connectionName, name));
         });
     },
 
     REBOOT_VM ({ name, connectionName }) {
         logDebug(`${this.name}.REBOOT_VM(${name}):`);
         return dispatch => spawnVirsh({connectionName,
-            method: 'REBOOT_VM',
-            failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM REBOOT action failed")}),
-            args: ['reboot', name]
+                                       method: 'REBOOT_VM',
+                                       failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM REBOOT action failed") }),
+                                       args: ['reboot', name]
         });
     },
 
     FORCEREBOOT_VM ({ name, connectionName }) {
         logDebug(`${this.name}.FORCEREBOOT_VM(${name}):`);
         return dispatch => spawnVirsh({connectionName,
-            method: 'FORCEREBOOT_VM',
-            failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM FORCE REBOOT action failed")}),
-            args: ['reset', name]
+                                       method: 'FORCEREBOOT_VM',
+                                       failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM FORCE REBOOT action failed") }),
+                                       args: ['reset', name]
         });
     },
 
     START_VM ({ name, connectionName }) {
         logDebug(`${this.name}.START_VM(${name}):`);
         return dispatch => spawnVirsh({connectionName,
-            method: 'START_VM',
-            failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM START action failed")}),
-            args: ['start', name]
+                                       method: 'START_VM',
+                                       failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM START action failed") }),
+                                       args: ['start', name]
         });
+    },
+
+    CREATE_VM({ vmName, source, os, memorySize, storageSize, startVm }) {
+        logDebug(`${this.name}.CREATE_VM(${vmName}):`);
+        return dispatch => {
+            // shows dummy vm  until we get vm from virsh (cleans up inProgress)
+            setVmCreateInProgress(dispatch, vmName, { openConsoleTab: startVm });
+
+            if (startVm) {
+                setVmInstallInProgress(dispatch, vmName);
+            }
+
+            return cockpit.script(createVmScript, [
+                vmName,
+                source,
+                os,
+                memorySize,
+                storageSize,
+                startVm,
+            ], { err: "message", environ: ['LC_ALL=C'] })
+                    .done(() => {
+                        finishVmCreateInProgress(dispatch, vmName);
+                        if (startVm) {
+                            finishVmInstallInProgress(dispatch, vmName);
+                        }
+                    })
+                    .fail((exception, data) => {
+                        clearVmUiState(dispatch, vmName); // inProgress cleanup
+                        console.info(`spawn 'vm creation' returned error: "${JSON.stringify(exception)}", data: "${JSON.stringify(data)}"`);
+                    });
+        };
+    },
+
+    INSTALL_VM({ name, vcpus, currentMemory, metadata, disks, displays, connectionName }) {
+        logDebug(`${this.name}.INSTALL_VM(${name}):`);
+        return dispatch => {
+            // shows dummy vm until we get vm from virsh (cleans up inProgress)
+            // vm should be returned even if script fails
+            setVmInstallInProgress(dispatch, name);
+
+            return cockpit.script(installVmScript, [
+                name,
+                metadata.installSource,
+                metadata.osVariant,
+                convertToUnit(currentMemory, units.KiB, units.MiB),
+                vcpus,
+                prepareDisksParam(disks),
+                prepareDisplaysParam(displays),
+            ], { err: "message", environ: ['LC_ALL=C'] })
+                    .done(() => finishVmInstallInProgress(dispatch, name))
+                    .fail(({ message, exception }) => {
+                        finishVmInstallInProgress(dispatch, name, { openConsoleTab: false });
+                        const handler = buildScriptTimeoutFailHandler({
+                            dispatch,
+                            name,
+                            connectionName,
+                            message: _("INSTALL VM action failed"),
+                        }, VMS_CONFIG.WaitForRetryInstallVm);
+                        handler({ message, exception });
+                    });
+        };
+    },
+
+    SET_VCPU_SETTINGS ({ name, connectionName, count, max, sockets, cores, threads, isRunning }) {
+        logDebug(`${this.name}.SET_VCPU_SETTINGS(${name}):`);
+        return dispatch => spawnVirshReadOnly({
+            connectionName,
+            method: 'dumpxml',
+            name
+        }).then((domXml) => {
+            const domainElem = getDomainElem(domXml);
+
+            let cpuElem = domainElem.getElementsByTagName("cpu")[0];
+            if (!cpuElem) {
+                cpuElem = document.createElement("cpu");
+                domainElem.appendChild(cpuElem);
+            }
+            let topologyElem = cpuElem.getElementsByTagName("topology")[0];
+            if (!topologyElem) {
+                topologyElem = document.createElement("topology");
+                cpuElem.appendChild(topologyElem);
+            }
+            topologyElem.setAttribute("sockets", sockets);
+            topologyElem.setAttribute("threads", threads);
+            topologyElem.setAttribute("cores", cores);
+
+            let vcpuElem = domainElem.getElementsByTagName("vcpu")[0];
+            if (!vcpuElem) {
+                vcpuElem = document.createElement("vcpu");
+                domainElem.appendChild(vcpuElem);
+                vcpuElem.setAttribute("placement", "static");
+            }
+
+            vcpuElem.setAttribute("current", count);
+            vcpuElem.textContent = max;
+
+            const tmp = document.createElement("div");
+            tmp.appendChild(domainElem);
+
+            return createTempFile(tmp.innerHTML);
+        })
+                .then((tempFilename) => {
+                    return spawnVirsh({connectionName,
+                                       method: 'SET_VCPU_SETTINGS',
+                                       failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("SET VCPU SETTINGS action failed") }),
+                                       args: ['define', tempFilename.trim()]
+                    });
+                });
     },
 
     DELETE_VM ({ name, connectionName, options }) {
@@ -222,11 +397,11 @@ LIBVIRT_PROVIDER = {
             return spawnVirsh({ connectionName,
                                 method: 'DELETE_VM',
                                 args: [ 'destroy', name ]
-                              });
+            });
         }
 
         function undefine() {
-            let args = ['undefine', name, '--managed-save' ];
+            let args = ['undefine', name, '--managed-save'];
             if (options.storage) {
                 args.push('--storage');
                 args.push(options.storage.join(','));
@@ -234,7 +409,7 @@ LIBVIRT_PROVIDER = {
             return spawnVirsh({ connectionName,
                                 method: 'DELETE_VM',
                                 args: args
-                              });
+            });
         }
 
         return dispatch => {
@@ -250,9 +425,9 @@ LIBVIRT_PROVIDER = {
         logDebug(`${this.name}.CHANGE_NETWORK_STATE(${name}.${networkMac} ${state}):`);
         return dispatch => {
             spawnVirsh({connectionName,
-                method: 'CHANGE_NETWORK_STATE',
-                failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("CHANGE NETWORK STATE action failed")}),
-                args: ['domif-setlink', name, networkMac, state]
+                        method: 'CHANGE_NETWORK_STATE',
+                        failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("CHANGE NETWORK STATE action failed") }),
+                        args: ['domif-setlink', name, networkMac, state]
             }).then(() => {
                 dispatch(getVm(connectionName, name));
             });
@@ -261,17 +436,16 @@ LIBVIRT_PROVIDER = {
 
     USAGE_START_POLLING ({ name, connectionName }) {
         logDebug(`${this.name}.USAGE_START_POLLING(${name}):`);
-        return (dispatch => {
-            dispatch(updateVm({ connectionName, name, usagePolling: true}));
+        return dispatch => {
+            dispatch(updateVm({ connectionName, name, usagePolling: true }));
             dispatch(doUsagePolling(name, connectionName));
-        });
+        };
     },
 
     USAGE_STOP_POLLING ({ name, connectionName }) {
         logDebug(`${this.name}.USAGE_STOP_POLLING(${name}):`);
-        return dispatch => dispatch(updateVm({ connectionName, name, usagePolling: false}));
+        return dispatch => dispatch(updateVm({ connectionName, name, usagePolling: false }));
     },
-
 
     /**
      * Basic, but working.
@@ -293,12 +467,103 @@ LIBVIRT_PROVIDER = {
     SENDNMI_VM ({ name, connectionName }) {
         logDebug(`${this.name}.SENDNMI_VM(${name}):`);
         return dispatch => spawnVirsh({connectionName,
-            method: 'SENDNMI_VM',
-            failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM SEND Non-Maskable Interrrupt action failed")}),
-            args: ['inject-nmi', name]
+                                       method: 'SENDNMI_VM',
+                                       failHandler: buildFailHandler({ dispatch, name, connectionName, message: _("VM SEND Non-Maskable Interrrupt action failed") }),
+                                       args: ['inject-nmi', name]
         });
+    },
+
+    CHECK_LIBVIRT_STATUS({ serviceName }) {
+        logDebug(`${this.name}.CHECK_LIBVIRT_STATUS`);
+        return dispatch => {
+            const libvirtService = service.proxy(serviceName);
+            const dfd = cockpit.defer();
+
+            libvirtService.wait(() => {
+                let activeState = libvirtService.exists ? libvirtService.state : 'stopped';
+                let unitState = libvirtService.exists && libvirtService.enabled ? 'enabled' : 'disabled';
+
+                dispatch(updateLibvirtState({
+                    activeState,
+                    unitState,
+                }));
+                dfd.resolve();
+            });
+
+            return dfd.promise();
+        };
+    },
+
+    START_LIBVIRT({ serviceName }) {
+        logDebug(`${this.name}.START_LIBVIRT`);
+        return dispatch => {
+            return service.proxy(serviceName).start()
+                    .done(() => {
+                        dispatch(checkLibvirtStatus(serviceName));
+                    })
+                    .fail(exception => {
+                        console.info(`starting libvirt failed: "${JSON.stringify(exception)}"`);
+                    });
+        };
+    },
+
+    ENABLE_LIBVIRT({ enable, serviceName }) {
+        logDebug(`${this.name}.ENABLE_LIBVIRT`);
+        return dispatch => {
+            const libvirtService = service.proxy(serviceName);
+            const promise = enable ? libvirtService.enable() : libvirtService.disable();
+
+            return promise.fail(exception => {
+                console.info(`enabling libvirt failed: "${JSON.stringify(exception)}"`);
+            });
+        };
+    },
+    GET_HYPERVISOR_MAX_VCPU ({ connectionName }) {
+        logDebug(`${this.name}.GET_HYPERVISOR_MAX_VCPU:`);
+        if (connectionName) {
+            return dispatch => spawnVirsh({connectionName,
+                                           method: 'GET_HYPERVISOR_MAX_VCPU',
+                                           failHandler: buildFailHandler({ dispatch, connectionName, message: _("GET HYPERVISOR MAX VCPU action failed") }),
+                                           args: ['-r', 'maxvcpus']
+            }).then((count) => dispatch(setHypervisorMaxVCPU({ count, connectionName })));
+        }
+
+        return unknownConnectionName(getHypervisorMaxVCPU);
     }
 };
+
+function unknownConnectionName (action, libvirtServiceName) {
+    return dispatch => {
+        return cockpit.user().done(loggedUser => {
+            const promises = Object.getOwnPropertyNames(VMS_CONFIG.Virsh.connections)
+                    .filter(
+                        // The 'root' user does not have its own qemu:///session just qemu:///system
+                        // https://bugzilla.redhat.com/show_bug.cgi?id=1045069
+                        connectionName => canLoggedUserConnectSession(connectionName, loggedUser))
+                    .map(connectionName => dispatch(action(connectionName, libvirtServiceName)));
+
+            return cockpit.all(promises);
+        });
+    };
+}
+
+function createTempFile (content) {
+    const dfd = cockpit.defer();
+    cockpit.spawn(["mktemp", "/tmp/abc-script.XXXXXX"]).then(tempFilename => {
+        cockpit.file(tempFilename.trim())
+                .replace(content)
+                .done(() => {
+                    dfd.resolve(tempFilename);
+                })
+                .fail((ex, data) => {
+                    dfd.reject(ex, data, "Can't write to temporary file");
+                });
+    })
+            .fail((ex, data) => {
+                dfd.reject(ex, data, "Can't create temporary file");
+            });
+    return dfd.promise;
+}
 
 function canLoggedUserConnectSession (connectionName, loggedUser) {
     return connectionName !== 'session' || loggedUser.name !== 'root';
@@ -334,7 +599,7 @@ function spawnVirsh({connectionName, method, failHandler, args}) {
         const msg = `${method}() exception: '${ex}', data: '${data}', output: '${output}'`;
         if (failHandler) {
             logDebug(msg);
-            return ;
+            return;
         }
         console.warn(msg);
     });
@@ -344,15 +609,23 @@ function spawnVirshReadOnly({connectionName, method, name, failHandler}) {
     return spawnVirsh({connectionName, method, args: ['-r', method, name], failHandler});
 }
 
-function parseDumpxml(dispatch, connectionName, domXml) {
+function getDomainElem(domXml) {
     const xmlDoc = $.parseXML(domXml);
 
     if (!xmlDoc) {
         console.warn(`Can't parse dumpxml, input: "${domXml}"`);
-        return ;
+        return;
     }
 
-    const domainElem = xmlDoc.getElementsByTagName("domain")[0];
+    return xmlDoc.getElementsByTagName("domain")[0];
+}
+
+function parseDumpxml(dispatch, connectionName, domXml) {
+    const domainElem = getDomainElem(domXml);
+    if (!domainElem) {
+        return;
+    }
+
     const osElem = domainElem.getElementsByTagName("os")[0];
     const currentMemoryElem = domainElem.getElementsByTagName("currentMemory")[0];
     const vcpuElem = domainElem.getElementsByTagName("vcpu")[0];
@@ -360,6 +633,7 @@ function parseDumpxml(dispatch, connectionName, domXml) {
     const vcpuCurrentAttr = vcpuElem.attributes.getNamedItem('current');
     const devicesElem = domainElem.getElementsByTagName("devices")[0];
     const osTypeElem = osElem.getElementsByTagName("type")[0];
+    const metadataElem = getSingleOptionalElem(domainElem, "metadata");
 
     const name = domainElem.getElementsByTagName("name")[0].childNodes[0].nodeValue;
     const id = domainElem.getElementsByTagName("uuid")[0].childNodes[0].nodeValue;
@@ -367,28 +641,67 @@ function parseDumpxml(dispatch, connectionName, domXml) {
     const emulatedMachine = osTypeElem.getAttribute("machine");
 
     const currentMemoryUnit = currentMemoryElem.getAttribute("unit");
-    const currentMemory = toKiloBytes(currentMemoryElem.childNodes[0].nodeValue, currentMemoryUnit);
+    const currentMemory = convertToUnit(currentMemoryElem.childNodes[0].nodeValue, currentMemoryUnit, units.KiB);
 
-    const vcpus = (vcpuCurrentAttr && vcpuCurrentAttr.value) ? vcpuCurrentAttr.value : vcpuElem.childNodes[0].nodeValue;
+    const vcpus = parseDumpxmlForVCPU(vcpuElem, vcpuCurrentAttr);
 
     const disks = parseDumpxmlForDisks(devicesElem);
     const bootOrder = parseDumpxmlForBootOrder(osElem, devicesElem);
-    const cpuModel = parseDumpxmlForCpuModel(cpuElem);
+    const cpu = parseDumpxmlForCpu(cpuElem);
     const displays = parseDumpxmlForConsoles(devicesElem);
     const interfaces = parseDumpxmlForInterfaces(devicesElem);
 
+    const hasInstallPhase = parseDumpxmlMachinesMetadataElement(metadataElem, 'has_install_phase') === 'true';
+    const installSource = parseDumpxmlMachinesMetadataElement(metadataElem, 'install_source');
+    const osVariant = parseDumpxmlMachinesMetadataElement(metadataElem, 'os_variant');
+
+    const metadata = {
+        hasInstallPhase,
+        installSource,
+        osVariant,
+    };
+
+    const ui = resolveUiState(dispatch, name);
+
     dispatch(updateOrAddVm({
-        connectionName, name, id,
+        connectionName,
+        name,
+        id,
         osType,
         currentMemory,
         vcpus,
         disks,
         emulatedMachine,
-        cpuModel,
+        cpu,
         bootOrder,
         displays,
         interfaces,
+        metadata,
+        ui,
     }));
+}
+
+function resolveUiState(dispatch, name) {
+    const result = {
+        // used just the first time vm is shown
+        initiallyExpanded: false,
+        initiallyOpenedConsoleTab: false,
+    };
+
+    const uiState = store.getState().ui.vms[name];
+
+    if (uiState) {
+        result.initiallyExpanded = uiState.expanded;
+        result.initiallyOpenedConsoleTab = uiState.openConsoleTab;
+
+        if (uiState.installInProgress) {
+            removeVmCreateInProgress(dispatch, name);
+        } else {
+            clearVmUiState(dispatch, name);
+        }
+    }
+
+    return result;
 }
 
 function getSingleOptionalElem(parent, name) {
@@ -410,6 +723,7 @@ function parseDumpxmlForDisks(devicesElem) {
             const serialElem = getSingleOptionalElem(diskElem, 'serial');
             const aliasElem = getSingleOptionalElem(diskElem, 'alias');
             const readonlyElem = getSingleOptionalElem(diskElem, 'readonly');
+            const shareableElem = getSingleOptionalElem(diskElem, 'shareable');
             const bootElem = getSingleOptionalElem(diskElem, 'boot');
 
             const sourceHostElem = sourceElem ? getSingleOptionalElem(sourceElem, 'host') : undefined;
@@ -419,6 +733,10 @@ function parseDumpxmlForDisks(devicesElem) {
                 driver: {
                     name: driverElem ? driverElem.getAttribute('name') : undefined, // optional
                     type: driverElem ? driverElem.getAttribute('type') : undefined,
+                    cache: driverElem ? driverElem.getAttribute('cache') : undefined, // optional
+                    discard: driverElem ? driverElem.getAttribute('discard') : undefined, // optional
+                    io: driverElem ? driverElem.getAttribute('io') : undefined, // optional
+                    errorPolicy: driverElem ? driverElem.getAttribute('error_policy') : undefined, // optional
                 },
                 bootOrder: bootElem ? bootElem.getAttribute('order') : undefined,
                 type: diskElem.getAttribute('type'), // i.e.: file
@@ -433,11 +751,15 @@ function parseDumpxmlForDisks(devicesElem) {
                         name: sourceHostElem ? sourceHostElem.getAttribute('name') : undefined,
                         port: sourceHostElem ? sourceHostElem.getAttribute('port') : undefined,
                     },
+                    startupPolicy: sourceElem ? sourceElem.getAttribute('startupPolicy') : undefined, // optional startupPolicy of the disk
+
                 },
                 bus: targetElem.getAttribute('bus'), // i.e. scsi, ide
                 serial: serialElem ? serialElem.getAttribute('serial') : undefined, // optional serial number
                 aliasName: aliasElem ? aliasElem.getAttribute('name') : undefined, // i.e. scsi0-0-0-0, ide0-1-0
-                readonly: readonlyElem ? true : false,
+                readonly: !!readonlyElem,
+                shareable: !!shareableElem,
+                removable: targetElem.getAttribute('removable'),
             };
 
             if (disk.target) {
@@ -472,16 +794,16 @@ function parseDumpxmlForInterfaces(devicesElem) {
             const localElem = addressElem ? getSingleOptionalElem(addressElem, 'local') : null;
 
             const networkInterface = { // see https://libvirt.org/formatdomain.html#elementsNICS
-                type: interfaceElem.getAttribute('type'), //Only one required parameter
+                type: interfaceElem.getAttribute('type'), // Only one required parameter
                 managed: interfaceElem.getAttribute('managed'),
-                name: interfaceElem.getAttribute('name') ? interfaceElem.getAttribute('name') : undefined, //Name of interface
+                name: interfaceElem.getAttribute('name') ? interfaceElem.getAttribute('name') : undefined, // Name of interface
                 target: targetElem ? targetElem.getAttribute('dev') : undefined,
-                mac: macElem.getAttribute('address'), //MAC address
-                model: modelElem.getAttribute('type'), //Device model
+                mac: macElem.getAttribute('address'), // MAC address
+                model: modelElem.getAttribute('type'), // Device model
                 aliasName: aliasElem ? aliasElem.getAttribute('name') : undefined,
                 virtualportType: virtualportElem ? virtualportElem.getAttribute('type') : undefined,
                 driverName: driverElem ? driverElem.getAttribute('name') : undefined,
-                state: linkElem ? linkElem.getAttribute('state') : 'up', //State of interface, up/down (plug/unplug)
+                state: linkElem ? linkElem.getAttribute('state') : 'up', // State of interface, up/down (plug/unplug)
                 mtu: mtuElem ? mtuElem.getAttribute('size') : undefined,
                 source: {
                     bridge: sourceElem ? sourceElem.getAttribute('bridge') : undefined,
@@ -511,16 +833,24 @@ function getBootableDeviceType(device) {
     const tagName = device.tagName;
     let type = _("other");
     switch (tagName) {
-        case 'disk':
-            type = rephraseUI('bootableDisk', device.getAttribute('device')); // Example: disk, cdrom
-            break;
-        case 'interface':
-            type = rephraseUI('bootableDisk', 'interface');
-            break;
-        default:
-            console.info(`Unrecognized type of bootable device: ${tagName}`);
+    case 'disk':
+        type = rephraseUI('bootableDisk', device.getAttribute('device')); // Example: disk, cdrom
+        break;
+    case 'interface':
+        type = rephraseUI('bootableDisk', 'interface');
+        break;
+    default:
+        console.info(`Unrecognized type of bootable device: ${tagName}`);
     }
     return type;
+}
+
+function parseDumpxmlForVCPU(vcpuElem, vcpuCurrentAttr) {
+    const vcpus = {};
+    vcpus.count = (vcpuCurrentAttr && vcpuCurrentAttr.value) ? vcpuCurrentAttr.value : vcpuElem.childNodes[0].nodeValue;
+    vcpus.placement = vcpuElem.getAttribute("placement");
+    vcpus.max = vcpuElem.childNodes[0].nodeValue;
+    return vcpus;
 }
 
 function parseDumpxmlForBootOrder(osElem, devicesElem) {
@@ -560,14 +890,16 @@ function parseDumpxmlForBootOrder(osElem, devicesElem) {
             }
         }
     }
-    bootOrder.devices = bootableDevices.sort( (devA, devB) => devA.order - devB.order );
+    bootOrder.devices = bootableDevices.sort((devA, devB) => devA.order - devB.order);
     return bootOrder;
 }
 
-function parseDumpxmlForCpuModel(cpuElem) {
+function parseDumpxmlForCpu(cpuElem) {
     if (!cpuElem) {
-        return undefined;
+        return { topology: {} };
     }
+
+    const cpu = {};
 
     const cpuMode = cpuElem.getAttribute('mode');
     let cpuModel = '';
@@ -578,7 +910,18 @@ function parseDumpxmlForCpuModel(cpuElem) {
         }
     }
 
-    return rephraseUI('cpuMode', cpuMode) + (cpuModel ? ` (${cpuModel})` : '');
+    cpu.model = rephraseUI('cpuMode', cpuMode) + (cpuModel ? ` (${cpuModel})` : '');
+    cpu.topology = {};
+
+    const topologyElem = getSingleOptionalElem(cpuElem, 'topology');
+
+    if (topologyElem) {
+        cpu.topology.sockets = topologyElem.getAttribute('sockets');
+        cpu.topology.threads = topologyElem.getAttribute('threads');
+        cpu.topology.cores = topologyElem.getAttribute('cores');
+    }
+
+    return cpu;
 }
 
 function parseDumpxmlForConsoles(devicesElem) {
@@ -596,11 +939,24 @@ function parseDumpxmlForConsoles(devicesElem) {
             };
             if (display.type &&
                 (display.autoport ||
-                (display.address && (display.port || display.tlsPort)) )) {
+                (display.address && (display.port || display.tlsPort)))) {
                 displays[display.type] = display;
                 logDebug(`parseDumpxmlForConsoles(): graphics device found: ${JSON.stringify(display)}`);
             } else {
                 console.warn(`parseDumpxmlForConsoles(): mandatory properties are missing in dumpxml, found: ${JSON.stringify(display)}`);
+            }
+        }
+    }
+
+    // console type='pty'
+    const consoleElems = devicesElem.getElementsByTagName("console");
+    if (consoleElems) {
+        for (let i = 0; i < consoleElems.length; i++) {
+            const consoleElem = consoleElems[i];
+            if (consoleElem.getAttribute('type') === 'pty') {
+                // Definition of serial console is detected.
+                // So far no additional details needs to be parsed since the console is accessed via 'virsh console'.
+                displays['pty'] = {};
             }
         }
     }
@@ -623,6 +979,36 @@ function parseDominfo(dispatch, connectionName, name, domInfo) {
     return state;
 }
 
+function parseDumpxmlMachinesMetadataElement(metadataElem, name) {
+    if (!metadataElem) {
+        return null;
+    }
+    const subElems = metadataElem.getElementsByTagNameNS(METADATA_NAMESPACE, name);
+
+    return subElems.length > 0 ? subElems[0].textContent : null;
+}
+
+function parseOsInfoList(dispatch, osList) {
+    const osColumnsNames = ['shortId', 'name', 'version', 'family', 'vendor', 'releaseDate', 'eolDate', 'codename'];
+    let parsedList = [];
+
+    osList.split('\n').forEach(line => {
+        const osColumns = line.split('|');
+
+        const result = {};
+
+        for (let i = 0; i < osColumnsNames.length; i++) {
+            result[osColumnsNames[i]] = osColumns.length > i ? osColumns[i] : null;
+        }
+
+        if (result.shortId) {
+            parsedList.push(result);
+        }
+    });
+
+    dispatch(updateOsInfoList(parsedList));
+}
+
 function parseDommemstat(dispatch, connectionName, name, dommemstat) {
     const lines = parseLines(dommemstat);
 
@@ -638,30 +1024,30 @@ function parseDomstats(dispatch, connectionName, name, domstats) {
 
     const lines = parseLines(domstats);
 
-    const cpuTime = getValueFromLine(lines, 'cpu\.time=');
+    const cpuTime = getValueFromLine(lines, 'cpu.time=');
     // TODO: Add network usage statistics
 
     if (cpuTime) {
         dispatch(updateVm({connectionName, name, actualTimeInMs, cpuTime}));
     }
 
-   dispatch(updateVm({connectionName, name, disksStats: parseDomstatsForDisks(lines)}));
+    dispatch(updateVm({connectionName, name, disksStats: parseDomstatsForDisks(lines)}));
 }
 
 function parseDomstatsForDisks(domstatsLines) {
-    const count = getValueFromLine(domstatsLines, 'block\.count=');
+    const count = getValueFromLine(domstatsLines, 'block.count=');
     if (!count) {
-        return ;
+        return;
     }
 
     // Libvirt reports disk capacity since version 1.2.18 (year 2015)
     // TODO: If disk stats is required for old systems, find a way how to get it when 'block.X.capacity' is not present, consider various options for 'sources'
     const disksStats = {};
-    for (let i=0; i<count; i++) {
-        const target = getValueFromLine(domstatsLines, `block\.${i}\.name=`);
-        const physical = getValueFromLine(domstatsLines, `block\.${i}\.physical=`) || NaN;
-        const capacity = getValueFromLine(domstatsLines, `block\.${i}\.capacity=`) || NaN;
-        const allocation = getValueFromLine(domstatsLines, `block\.${i}\.allocation=`) || NaN;
+    for (let i = 0; i < count; i++) {
+        const target = getValueFromLine(domstatsLines, `block.${i}.name=`);
+        const physical = getValueFromLine(domstatsLines, `block.${i}.physical=`) || NaN;
+        const capacity = getValueFromLine(domstatsLines, `block.${i}.capacity=`) || NaN;
+        const allocation = getValueFromLine(domstatsLines, `block.${i}.allocation=`) || NaN;
 
         if (target) {
             disksStats[target] = {
@@ -670,7 +1056,7 @@ function parseDomstatsForDisks(domstatsLines) {
                 allocation,
             };
         } else {
-            console.warn(`parseDomstatsForDisks(): mandatory property is missing in domstats (block\.${i}\.name)`);
+            console.warn(`parseDomstatsForDisks(): mandatory property is missing in domstats (block.${i}.name)`);
         }
     }
     return disksStats;
@@ -688,7 +1074,7 @@ function buildConsoleVVFile(consoleDetail) {
 function doUsagePolling (name, connectionName) {
     logDebug(`doUsagePolling(${name}, ${connectionName})`);
 
-    const canFailHandler = ({exception, data}) => {
+    const canFailHandler = ({ exception, data }) => {
         console.info(`The 'virsh' command failed, as expected: "${JSON.stringify(exception)}", data: "${JSON.stringify(data)}"`);
         return cockpit.resolve();
     };
@@ -699,16 +1085,20 @@ function doUsagePolling (name, connectionName) {
             return;
         }
 
-        return spawnVirshReadOnly({connectionName, method: 'dommemstat', name, failHandler: canFailHandler})
-            .then(dommemstat => {
-                if (dommemstat) { // is undefined if vm is not running
-                    parseDommemstat(dispatch, connectionName, name, dommemstat);
-                    return spawnVirshReadOnly({connectionName, method: 'domstats', name, failHandler: canFailHandler});
-                }
-            }).then(domstats => {
-                if (domstats)
-                    parseDomstats(dispatch, connectionName, name, domstats);
-            }).then(() => dispatch(delayPolling(doUsagePolling(name, connectionName), null, name, connectionName)));
+        // Do polling even if following virsh calls fails. Might fail i.e. if a VM is not (yet) started
+        dispatch(delayPolling(doUsagePolling(name, connectionName), null, name, connectionName));
+
+        return spawnVirshReadOnly({ connectionName, method: 'dommemstat', name, failHandler: canFailHandler })
+                .then(dommemstat => {
+                    if (dommemstat) { // is undefined if vm is not running
+                        parseDommemstat(dispatch, connectionName, name, dommemstat);
+                        return spawnVirshReadOnly({ connectionName, method: 'domstats', name, failHandler: canFailHandler });
+                    }
+                })
+                .then(domstats => {
+                    if (domstats)
+                        parseDomstats(dispatch, connectionName, name, domstats);
+                });
     };
 }
 
@@ -721,7 +1111,13 @@ function handleEvent(dispatch, connectionName, line) {
 
     var match = eventRe.exec(line);
     if (!match) {
-        console.warn("Unable to parse event, ignoring:", line);
+        const error = "Unable to parse event, ignoring:";
+        if (line.toLowerCase().includes("failed to connect")) {
+            // known error: virsh process fails anyway
+            logDebug(error, line);
+        } else {
+            console.warn(error, line);
+        }
         return;
     }
     var [event_, name, info] = match.slice(1);
@@ -730,72 +1126,79 @@ function handleEvent(dispatch, connectionName, line) {
 
     // types and details: https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainEventID
     switch (event_) {
-        case 'lifecycle':
-            let type = info.split(' ')[0];
-            switch (type) {
-                case 'Undefined':
-                    dispatch(undefineVm(connectionName, name));
-                    break;
-
-                case 'Defined':
-                case 'Started':
-                    dispatch(getVm(connectionName, name));
-                    break;
-
-                case 'Stopped':
-                    dispatch(updateVm({connectionName, name, state: 'shut off', actualTimeInMs: -1}));
-                    // transient VMs don't have a separate Undefined event, so remove them on stop
-                    dispatch(undefineVm(connectionName, name, true));
-                    break;
-
-                case 'Suspended':
-                    dispatch(updateVm({connectionName, name, state: 'paused'}));
-                    break;
-
-                case 'Resumed':
-                    dispatch(updateVm({connectionName, name, state: 'running'}));
-                    break;
-
-                default:
-                    logDebug(`Unhandled lifecycle event type ${type} in event: ${line}`);
-            }
+    case 'lifecycle': {
+        let type = info.split(' ')[0];
+        switch (type) {
+        case 'Undefined':
+            dispatch(undefineVm(connectionName, name));
             break;
 
-        case 'metadata-change':
-        case 'device-added':
-        case 'device-removed':
-        case 'disk-change':
-        case 'tray-change':
-        case 'control-error':
-            // these (can) change what we display, so re-read the state
+        case 'Defined':
+        case 'Started':
             dispatch(getVm(connectionName, name));
             break;
 
+        case 'Stopped':
+            dispatch(updateVm({connectionName, name, state: 'shut off', actualTimeInMs: -1}));
+            // transient VMs don't have a separate Undefined event, so remove them on stop
+            dispatch(undefineVm(connectionName, name, true));
+            break;
+
+        case 'Suspended':
+            dispatch(updateVm({connectionName, name, state: 'paused'}));
+            break;
+
+        case 'Resumed':
+            dispatch(updateVm({connectionName, name, state: 'running'}));
+            break;
+
         default:
-            logDebug(`handleEvent ${connectionName} ${name}: ignoring event ${line}`);
+            logDebug(`Unhandled lifecycle event type ${type} in event: ${line}`);
+        }
+        break;
+    }
+    case 'metadata-change':
+    case 'device-added':
+    case 'device-removed':
+    case 'disk-change':
+    case 'tray-change':
+    case 'control-error':
+        // these (can) change what we display, so re-read the state
+        dispatch(getVm(connectionName, name));
+        break;
+
+    default:
+        logDebug(`handleEvent ${connectionName} ${name}: ignoring event ${line}`);
     }
 }
 
-function startEventMonitor(dispatch, connectionName) {
-    var output_buf = '';
+function startEventMonitor(dispatch, connectionName, libvirtServiceName) {
+    let output_buf = '';
 
     // set up event monitor for that connection; force PTY as otherwise the buffering
     // will not show every line immediately
     cockpit.spawn(['virsh'].concat(VMS_CONFIG.Virsh.connections[connectionName].params).concat(['-r', 'event', '--all', '--loop']), {'err': 'message', 'pty': true})
-        .stream(data => {
-            // buffer and line-split the output, there is no guarantee that we always get whole lines
-            output_buf += data;
-            let lines = output_buf.split('\n');
-            while (lines.length > 1)
-                handleEvent(dispatch, connectionName, lines.shift().trim());
-            output_buf = lines[0];
-        })
-        .fail(ex => {
+            .stream(data => {
+                if (data.startsWith("error: Disconnected from") || data.startsWith("error: internal error: client socket is closed")) {
+                // libvirt failed
+                    logDebug(data);
+                    return;
+                }
+
+                // buffer and line-split the output, there is no guarantee that we always get whole lines
+                output_buf += data;
+                let lines = output_buf.split('\n');
+                while (lines.length > 1)
+                    handleEvent(dispatch, connectionName, lines.shift().trim());
+                output_buf = lines[0];
+            })
+            .fail(ex => {
             // this usually happens if libvirtd gets stopped or isn't running; retry connecting every 10s
-            console.log("virsh event failed:", ex);
-            dispatch(deleteUnlistedVMs(connectionName, []));
-            dispatch(delayPolling(getAllVms(connectionName)));
-        });
+                logDebug("virsh event failed:", ex);
+                dispatch(checkLibvirtStatus(libvirtServiceName));
+                dispatch(deleteUnlistedVMs(connectionName, []));
+                dispatch(delayPolling(getAllVms(connectionName, libvirtServiceName)));
+            });
 }
 
 export default LIBVIRT_PROVIDER;

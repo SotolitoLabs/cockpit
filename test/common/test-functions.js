@@ -1,7 +1,7 @@
 /*
  * These are routines used by our testing code.
  *
- * jQuery is not necesarily present. Don't rely on it
+ * jQuery is not necessarily present. Don't rely on it
  * for routine operations.
  */
 
@@ -67,7 +67,9 @@ function ph_text (sel)
     var el = ph_find(sel);
     if (el.textContent === undefined)
         throw sel + " can not have text";
-    return el.textContent;
+    // 0xa0 is a non-breakable space, which is a rendering detail of Chromium
+    // and awkward to handle in tests; turn it into normal spaces
+    return el.textContent.replace(/\xa0/g, " ")
 }
 
 function ph_attr (sel, attr)
@@ -93,21 +95,25 @@ function ph_has_attr (sel, attr, val)
     return ph_attr(sel, attr) == val;
 }
 
+function ph_mouse_event(element, type) {
+    var ev = document.createEvent("MouseEvent");
+    ev.initMouseEvent(
+        type,
+        true /* bubble */, true /* cancelable */,
+        window, null,
+        0, 0, 0, 0, /* coordinates */
+        false, false, false, false, /* modifier keys */
+        0 /*left*/, null);
+
+    element.dispatchEvent(ev);
+}
+
 function ph_click(sel, force) {
     var el = ph_find(sel);
 
     /* The element has to be visible, and not collapsed */
     if (!force && (el.offsetWidth <= 0 || el.offsetHeight <= 0))
         throw sel + " is not visible";
-
-    var ev = document.createEvent("MouseEvent");
-    ev.initMouseEvent(
-        "click",
-        true /* bubble */, true /* cancelable */,
-        window, null,
-        0, 0, 0, 0, /* coordinates */
-        false, false, false, false, /* modifier keys */
-        0 /*left*/, null);
 
     /* The click has to actually work */
     var clicked = false;
@@ -117,8 +123,7 @@ function ph_click(sel, force) {
 
     el.addEventListener("click", click, true);
 
-    /* Now dispatch the event */
-    el.dispatchEvent(ev);
+    ph_mouse_event(el, "click");
 
     el.removeEventListener("click", click, true);
 
@@ -132,11 +137,9 @@ function ph_set_checked (sel, val)
     var el = ph_find(sel);
     if (el.checked === undefined)
         throw sel + " is not checkable";
-    el.checked = val;
 
-    var ev = document.createEvent("Event");
-    ev.initEvent("change", true, false);
-    el.dispatchEvent(ev);
+    if (el.checked != val)
+        ph_click(sel, true);
 }
 
 function ph_is_visible (sel)
@@ -179,4 +182,30 @@ function ph_go(href) {
 function ph_focus(sel)
 {
     ph_find(sel).focus();
+}
+
+function ph_wait_cond(cond, timeout) {
+    return new Promise((resolve, reject) => {
+        // poll every 100 ms for now;  FIXME: poll less often and re-check on mutations using
+        // https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver
+        let stepTimer = null;
+        let tm = window.setTimeout( () => {
+                if (stepTimer)
+                    window.clearTimeout(stepTimer);
+                reject("condition did not become true");
+            }, timeout);
+        function step() {
+            try {
+                if (cond()) {
+                    window.clearTimeout(tm);
+                    resolve();
+                    return;
+                }
+            } catch (err) {
+                reject(err);
+            }
+            stepTimer = window.setTimeout(step, 100);
+        }
+        step();
+    });
 }

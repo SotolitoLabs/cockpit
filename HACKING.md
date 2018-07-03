@@ -44,12 +44,31 @@ In addition, for testing, the following dependencies are required:
     $ sudo yum install curl expect \
         libvirt libvirt-client libvirt-daemon libvirt-python \
         python python-libguestfs python-lxml libguestfs-xfs \
-        libguestfs-tools qemu qemu-kvm rpm-build rsync xz
+        python3 libvirt-python3 \
+        libguestfs-tools qemu qemu-kvm rpm-build rsync xz \
+        chromium-headless
 
 ## Running the integration test suite
 
 Refer to the [testing README](test/README) for details on running
 the Cockpit integration tests locally.
+
+
+## Running eslint
+Cockpit uses [ESLint](https://eslint.org/) to automatically check
+JavaScript code style in `.jsx` and `.es6` files.
+
+The linter is executed within every build as a webpack preloader.
+
+For developer convenience, the ESLint can be started explicitly by:
+
+    $ npm run eslint
+
+Violations of some rules can be fixed automatically by:
+
+    $ npm run eslint:fix
+
+Rules configuration can be found in the `.eslintrc.json` file.
 
 ## Working on Cockpit using Vagrant
 
@@ -87,7 +106,7 @@ you can:
 It's easy to set up your local Linux machine for rapid development of Cockpit's
 javascript code. First install Cockpit on your local machine as described in:
 
-http://cockpit-project.org/running.html
+https://cockpit-project.org/running.html
 
 Next run this command from your top level Cockpit checkout directory, and make
 sure to run it as the same user that you'll use to log into Cockpit below.

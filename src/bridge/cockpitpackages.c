@@ -23,9 +23,10 @@
 
 #include "cockpitpackages.h"
 
-#include "cockpitchannel.h"
+#include "cockpitconnect.h"
 #include "cockpitdbusinternal.h"
 
+#include "common/cockpitchannel.h"
 #include "common/cockpithex.h"
 #include "common/cockpitjson.h"
 #include "common/cockpitlocale.h"
@@ -110,6 +111,7 @@ struct _CockpitPackages {
   gboolean dbus_inited;
   void (*on_change_callback) (gconstpointer data);
   gconstpointer on_change_callback_data;
+  gboolean reload_hint;
 };
 
 struct _CockpitPackage {
@@ -130,8 +132,6 @@ struct _CockpitPackage {
  * It is also *not* a security sensitive use case. The hashes are never shared
  * or compared between different users, only the same user (with same credentials)
  * on different machines.
- *
- * So we use the fastest, good ol' SHA1.
  */
 
 static gboolean   package_walk_directory   (GChecksum *own_checksum,
@@ -221,7 +221,7 @@ package_walk_file (GChecksum *own_checksum,
   if (own_checksum && bundle_checksum)
     {
       bytes = g_mapped_file_get_bytes (mapped);
-      string = g_compute_checksum_for_bytes (G_CHECKSUM_SHA1, bytes);
+      string = g_compute_checksum_for_bytes (G_CHECKSUM_SHA256, bytes);
       g_bytes_unref (bytes);
 
       /*
@@ -611,7 +611,7 @@ maybe_add_package (GHashTable *listing,
     paths = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 
   if (bundle_checksum)
-    own_checksum = g_checksum_new (G_CHECKSUM_SHA1);
+    own_checksum = g_checksum_new (G_CHECKSUM_SHA256);
 
   if (bundle_checksum || paths)
     {
@@ -730,7 +730,7 @@ build_packages (CockpitPackages *packages)
   g_free (packages->bundle_checksum);
   packages->bundle_checksum = NULL;
 
-  checksum = g_checksum_new (G_CHECKSUM_SHA1);
+  checksum = g_checksum_new (G_CHECKSUM_SHA256);
   if (build_package_listing (packages->listing, checksum, old_listing))
     {
       packages->bundle_checksum = g_strdup (g_checksum_get_string (checksum));
@@ -929,6 +929,9 @@ package_content (CockpitPackages *packages,
   gboolean gzipped;
   const gchar *type;
   gchar *policy;
+
+  if (!self_origin)
+    self_origin = cockpit_web_response_get_origin (response);
 
   globbing = g_str_equal (name, "*");
   if (globbing)
@@ -1180,7 +1183,7 @@ cockpit_packages_new (void)
     }
 
   cockpit_bridge_packages_port = (gint)g_inet_socket_address_get_port (G_INET_SOCKET_ADDRESS (address));
-  cockpit_channel_internal_address ("packages", address);
+  cockpit_connect_add_internal_address ("packages", address);
 
   g_debug ("package server port: %d", cockpit_bridge_packages_port);
 
@@ -1462,6 +1465,13 @@ packages_method_call (GDBusConnection *connection,
       cockpit_packages_reload (packages);
       g_dbus_method_invocation_return_value (invocation, NULL);
     }
+  else if (g_str_equal (method_name, "ReloadHint"))
+    {
+      if (packages->reload_hint)
+        cockpit_packages_reload (packages);
+      packages->reload_hint = TRUE;
+      g_dbus_method_invocation_return_value (invocation, NULL);
+    }
   else
     g_return_if_reached ();
 }
@@ -1494,8 +1504,13 @@ static GDBusMethodInfo packages_reload_method = {
   -1, "Reload", NULL, NULL, NULL
 };
 
+static GDBusMethodInfo packages_reload_hint_method = {
+  -1, "ReloadHint", NULL, NULL, NULL
+};
+
 static GDBusMethodInfo *packages_methods[] = {
   &packages_reload_method,
+  &packages_reload_hint_method,
   NULL
 };
 

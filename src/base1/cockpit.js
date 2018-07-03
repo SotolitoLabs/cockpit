@@ -26,8 +26,6 @@ try {
 
 var mock = mock || { };
 
-var phantom_checkpoint = phantom_checkpoint || function () { };
-
 (function() {
 "use strict";
 
@@ -99,7 +97,7 @@ function invoke_functions(functions, self, args) {
 /* -------------------------------------------------------------------------
  * Channels
  *
- * Public: http://cockpit-project.org/guide/latest/api-base1.html
+ * Public: https://cockpit-project.org/guide/latest/api-base1.html
  */
 
 var default_transport = null;
@@ -464,6 +462,8 @@ function Transport() {
         }
 
         check_health_timer = window.setInterval(function () {
+            if (self.ready)
+                ws.send("\n{ \"command\": \"ping\" }");
             if (!got_message) {
                 if (ignore_health_check) {
                     console.log("health check failure ignored");
@@ -549,7 +549,6 @@ function Transport() {
         else
             process_message(channel, payload);
 
-        phantom_checkpoint();
         return true;
     };
 
@@ -624,8 +623,9 @@ function Transport() {
             }
             self.close(data);
 
+        /* Any pings get sent back */
         } else if (data.command == "ping") {
-            /* 'ping' messages are ignored */
+            self.send_control(data);
 
         } else if (data.command == "hint") {
             if (process_hints)
@@ -1445,25 +1445,49 @@ function factory() {
     cockpit.format = function format(fmt, args) {
         if (arguments.length != 2 || !is_object(args) || args === null)
             args = Array.prototype.slice.call(arguments, 1);
-        return fmt.replace(fmt_re, function(m, x, y) { return args[x || y] || ""; });
+
+        function replace(m, x, y) {
+            var value = args[x || y];
+
+            /* Special-case 0 (also catches 0.0). All other falsy values return
+             * the empty string.
+             */
+            if (value === 0)
+                return '0';
+
+            return value || '';
+        }
+
+        return fmt.replace(fmt_re, replace);
     };
 
     cockpit.format_number = function format_number(number) {
-        /* non-zero values should never appear zero */
-        if (number > 0 && number < 0.1)
-            number = 0.1;
-        else if (number < 0 && number > -0.1)
-            number = -0.1;
+        /* We show 3 digits of precison but avoid scientific notation.
+         * We also show integers without digits after the comma.
+         *
+         * We want to localise the decimal place, but we never want to
+         * show thousands separators (to avoid ambiguity).  For this
+         * reason, for integers and large enough numbers, we use
+         * non-localised conversions (and in both cases, show no
+         * fractional part).
+         */
+	var lang = cockpit.language === undefined ? undefined : cockpit.language.replace('_', '-');
 
-        /* TODO: Make the decimal separator translatable */
-
-        /* only show as integer if we have a natural number */
         if (!number && number !== 0)
             return "";
         else if (number % 1 === 0)
             return number.toString();
+        else if (number > 0 && number <= 0.001)
+            return (0.001).toLocaleString(lang);
+        else if (number < 0 && number >= -0.001)
+            return (-0.001).toLocaleString(lang);
+        else if (number > 999 || number < -999)
+            return number.toFixed(0);
         else
-            return number.toFixed(1);
+            return number.toLocaleString(lang, {
+                maximumSignificantDigits: 3,
+                minimumSignificantDigits: 3
+            });
     };
 
     function format_units(number, suffixes, factor, separate) {
@@ -2090,6 +2114,15 @@ function factory() {
             process(beg, items, mapping);
             stash(beg, items, mapping);
         };
+
+        self.close = function () {
+            var grid, id;
+            for (id in registered) {
+                grid = registered[id];
+                if (grid && grid.grid)
+                    grid.grid.remove_sink(self);
+            }
+        };
     }
 
     cockpit.series = function series(interval, cache, fetch) {
@@ -2204,6 +2237,17 @@ function factory() {
             for (i = 0; i < ilen; i++) {
                 if (rows[i] === row) {
                     rows.splice(i, 1);
+                    break;
+                }
+            }
+        };
+
+        self.remove_sink = function remove_sink(sink) {
+            var i, len = sinks.length;
+            for (i = 0; i < len; i++) {
+                if (sinks[i].sink === sink) {
+                    sinks[i].links.remove();
+                    sinks.splice(i, 1);
                     break;
                 }
             }
@@ -2606,6 +2650,13 @@ function factory() {
             path = "/" + path.map(encodeURIComponent).join("/").replace("%40", "@").replace("%3D", "=").replace(/%2B/g, "+");
         else
             path = "" + path;
+
+        /* When host is not given (undefined), use current transport's host. If
+         * it is null, use localhost.
+         */
+        if (host === undefined)
+            host = cockpit.transport.host;
+
         var options = { command: "jump", location: path, host: host };
         cockpit.transport.inject("\n" + JSON.stringify(options));
     };
@@ -4219,12 +4270,24 @@ function factory() {
 
     var authority = null;
 
+    function check_superuser() {
+        var dfd = cockpit.defer();
+        var ch = cockpit.channel({ payload: "null", superuser: "require" });
+        ch.wait()
+            .then(function () { dfd.resolve(true); })
+            .fail(function () { dfd.resolve(false); })
+            .always(function () { ch.close(); });
+
+        return dfd.promise();
+    }
+
     function Permission(options) {
         var self = this;
         event_mixin(self, { });
 
         self.allowed = null;
-        self.user = options ? options.user : null;
+        self.user = options ? options.user : null; // pre-fill for unit tests
+        self.is_superuser = options ? options._is_superuser : null; // pre-fill for unit tests
 
         var group = null;
         var admin = false;
@@ -4239,20 +4302,11 @@ function factory() {
             if (user.id === 0)
                 return true;
 
-            if (user.groups) {
-                var allowed = false;
-                user.groups.forEach(function(name) {
-                    if (name == group) {
-                        allowed = true;
-                        return false;
-                    }
-                    if (admin && (name == "wheel" || name == "sudo")) {
-                        allowed = true;
-                        return false;
-                    }
-                });
-                return allowed;
-            }
+            if (group)
+                return !!(user.groups || []).includes(group);
+
+            if (admin)
+                return self.is_superuser;
 
             if (user.id === undefined)
                 return null;
@@ -4260,17 +4314,19 @@ function factory() {
             return false;
         }
 
-        if (self.user) {
+        if (self.user && self.is_superuser !== null) {
             self.allowed = decide(self.user);
         } else {
-            cockpit.user().done(function (user) {
-                self.user = user;
-                var allowed = decide(user);
-                if (self.allowed !== allowed) {
-                    self.allowed = allowed;
-                    self.dispatchEvent("changed");
-                }
-            });
+            cockpit.all(cockpit.user(), check_superuser())
+                .done(function (user, is_superuser) {
+                    self.user = user;
+                    self.is_superuser = is_superuser;
+                    var allowed = decide(user);
+                    if (self.allowed !== allowed) {
+                        self.allowed = allowed;
+                        self.dispatchEvent("changed");
+                    }
+                });
         }
 
         self.close = function close() {
@@ -4482,6 +4538,9 @@ function factory() {
 
         self.close = function close(options) {
             var i, len = channels.length;
+            if (self.series)
+                self.series.close();
+
             for (i = 0; i < len; i++)
                 channels[i].close(options);
         };
@@ -4504,17 +4563,13 @@ function factory() {
             window.parent.postMessage("\n{ \"command\": \"oops\" }", transport_origin);
     };
 
-    var old_onerror;
-
-    if (window.navigator.userAgent.indexOf("PhantomJS") == -1) {
-        old_onerror = window.onerror;
-        window.onerror = function(msg, url, line) {
-            cockpit.oops();
-            if (old_onerror)
-                return old_onerror(msg, url, line);
-            return false;
-        };
-    }
+    var old_onerror = window.onerror;
+    window.onerror = function(msg, url, line) {
+        cockpit.oops();
+        if (old_onerror)
+            return old_onerror(msg, url, line);
+        return false;
+    };
 
     return cockpit;
 } /* scope end */

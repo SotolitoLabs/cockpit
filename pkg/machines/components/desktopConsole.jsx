@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -21,6 +20,8 @@ import React from "react";
 import cockpit from 'cockpit';
 import { vmId } from '../helpers.es6';
 
+import './consoles.css';
+
 const _ = cockpit.gettext;
 
 const MoreInformationInstallVariant = ({ os, command, innerHtml }) => {
@@ -28,7 +29,7 @@ const MoreInformationInstallVariant = ({ os, command, innerHtml }) => {
         <li className='machines-desktop-install-instructs-item'>
             <div className='machines-desktop-install-instructs-row'>
                 <b>{os}:</b>&nbsp;
-                {innerHtml && <div dangerouslySetInnerHTML={{__html: innerHtml}}/>}
+                {innerHtml && <div dangerouslySetInnerHTML={{__html: innerHtml}} />}
                 {!innerHtml && <div className='machines-desktop-shell-command'>{command}</div>}
             </div>
         </li>
@@ -38,13 +39,13 @@ const MoreInformationInstallVariant = ({ os, command, innerHtml }) => {
 
 const MoreInformationContent = () => {
     const msg1 = cockpit.format(_("Clicking \"Launch Remote Viewer\" will download a .vv file and launch $0."),
-        '<i>Remote Viewer</i>');
+                                '<i>Remote Viewer</i>');
 
     const msg2 = cockpit.format(_("$0 is available for most operating systems. To install it, search for it in GNOME Software or run the following:"),
-        '<i>Remote Viewer</i>');
+                                '<i>Remote Viewer</i>');
 
     const downloadMsg = cockpit.format(_("Download the MSI from $0"),
-        '<a href="https://virt-manager.org/download/" target="_blank">virt-manager.org</a>');
+                                       '<a href="https://virt-manager.org/download/" target="_blank">virt-manager.org</a>');
 
     return (
         <div>
@@ -53,10 +54,10 @@ const MoreInformationContent = () => {
             <p className='machines-desktop-more-info-text' dangerouslySetInnerHTML={{__html: msg2}} />
 
             <ul className='machines-desktop-install-instructs'>
-                <MoreInformationInstallVariant os='RHEL, CentOS' command='sudo yum install virt-viewer'/>
-                <MoreInformationInstallVariant os='Fedora' command='sudo dnf install virt-viewer'/>
-                <MoreInformationInstallVariant os='Ubuntu, Debian' command='sudo apt-get install virt-viewer'/>
-                <MoreInformationInstallVariant os='Windows' innerHtml={downloadMsg}/>
+                <MoreInformationInstallVariant os='RHEL, CentOS' command='sudo yum install virt-viewer' />
+                <MoreInformationInstallVariant os='Fedora' command='sudo dnf install virt-viewer' />
+                <MoreInformationInstallVariant os='Ubuntu, Debian' command='sudo apt-get install virt-viewer' />
+                <MoreInformationInstallVariant os='Windows' innerHtml={downloadMsg} />
             </ul>
         </div>
     );
@@ -97,16 +98,16 @@ class MoreInformation extends React.Component {
     render() {
         if (!this.state.expanded) {
             return (
-                <a href='#' onClick={this.onClick}>
-                    <span className='fa fa-angle-right'/>&nbsp;
+                <a href='#' tabIndex="0" onClick={this.onClick}>
+                    <span className='fa fa-angle-right' />&nbsp;
                     {_("More Information")}
                 </a>);
         }
 
         return (
             <div className='machines-desktop-more-info-container'>
-                <a href='#' onClick={this.onClick}>
-                    <span className='fa fa-angle-down'/>&nbsp;
+                <a href='#' tabIndex="0" onClick={this.onClick}>
+                    <span className='fa fa-angle-down' />&nbsp;
                     {_("More Information")}
                 </a>
                 {this.getContent()}
@@ -123,7 +124,6 @@ const ConnectWithRemoteViewer = ({ vm, config, onDesktopConsole }) => {
 
     return (
         <td className='machines-desktop-main-col'>
-            <h2>{_("Connect with Remote Viewer")}</h2>
             <p className='machines-desktop-viewer-block'>
                 <button onClick={onLaunch} id={`${vmId(vm.name)}-consoles-launch`}>
                     {_("Launch Remote Viewer")}
@@ -145,8 +145,8 @@ const ManualConnectionDetails = ({ displays, idPrefix }) => {
     const vncAddress = displays.vnc && displays.vnc.address;
 
     // deduplicate the address if possible
-    const singleAddress = vncAddress && spiceAddress ?
-        (vncAddress === spiceAddress && vncAddress)
+    const singleAddress = vncAddress && spiceAddress
+        ? (vncAddress === spiceAddress && vncAddress)
         : (spiceAddress || vncAddress);
 
     return (
@@ -194,7 +194,7 @@ const ManualConnection = ({ displays, idPrefix }) => {
             <h2>{_("Manual Connection")}</h2>
             <p className='machines-desktop-manual-block'>{msg}</p>
             <p className='machines-desktop-manual-block'>
-                <ManualConnectionDetails displays={displays} idPrefix={idPrefix}/>
+                <ManualConnectionDetails displays={displays} idPrefix={idPrefix} />
             </p>
         </td>
     )
@@ -203,12 +203,10 @@ const ManualConnection = ({ displays, idPrefix }) => {
 const DesktopConsoleDownload = ({ vm, onDesktopConsole, config }) => {
     return (
         <div>
-            <br />
-            <hr className='machines-desktop-delimiter'/>
             <table className='machines-desktop-main'>
                 <tr>
                     <ConnectWithRemoteViewer config={config} vm={vm} onDesktopConsole={onDesktopConsole} />
-                    <ManualConnection displays={vm.displays} idPrefix={`${vmId(vm.name)}-consoles-manual`}/>
+                    <ManualConnection displays={vm.displays} idPrefix={`${vmId(vm.name)}-consoles-manual`} />
                 </tr>
             </table>
         </div>

@@ -24,26 +24,28 @@ var cockpit = require("cockpit");
 var React = require("react");
 var FormatDialog = require("./format-dialog.jsx");
 
-var FormatButton =  FormatDialog.FormatButton;
+var FormatButton = FormatDialog.FormatButton;
 
 var _ = cockpit.gettext;
 
-var UnrecognizedTab =  React.createClass({
+var UnrecognizedTab = React.createClass({
     render: function () {
         return (
             <div>
                 <div className="tab-actions">
-                    <FormatButton client={this.props.client} block={this.props.block}/>
+                    <FormatButton client={this.props.client} block={this.props.block} />
                 </div>
                 <table className="info-table-ct">
-                    <tr>
-                        <td>{_("Usage")}</td>
-                        <td>{this.props.block.IdUsage || "-"}</td>
-                    </tr>
-                    <tr>
-                        <td>{_("Type")}</td>
-                        <td>{this.props.block.IdType || "-"}</td>
-                    </tr>
+                    <tbody>
+                        <tr>
+                            <td>{_("Usage")}</td>
+                            <td>{this.props.block.IdUsage || "-"}</td>
+                        </tr>
+                        <tr>
+                            <td>{_("Type")}</td>
+                            <td>{this.props.block.IdType || "-"}</td>
+                        </tr>
+                    </tbody>
                 </table>
             </div>
         );

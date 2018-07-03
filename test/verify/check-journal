@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -22,6 +22,16 @@ import parent
 from testlib import *
 
 class TestJournal(MachineCase):
+    def setUp(self):
+        super(TestJournal, self).setUp()
+
+        if self.machine.image in ["rhel-7", "rhel-7-5", "centos-7", "rhel-atomic", "continuous-atomic"]:
+            self.python = "python"
+            self.crash_fn = "posix_kill"
+        else:
+            self.python = "python3"
+            self.crash_fn = "os_kill"
+
     def testBasic(self):
         b = self.browser
         b.wait_timeout(120)
@@ -64,7 +74,7 @@ class TestJournal(MachineCase):
             }
             """)
 
-        # Certain versions of journald wont set _SYSTEMD_UNIT
+        # Certain versions of journald won't set _SYSTEMD_UNIT
         # correctly for entries that are processed after the
         # originating process has already exited.  So we keep the
         # process around for a bit longer after the last line has been
@@ -94,7 +104,8 @@ ExecStart=/bin/sh -c 'for s in $(seq 10); do echo SLOW; sleep 0.1; done; sleep 1
         # HACK - https://bugzilla.redhat.com/show_bug.cgi?id=1352905
         #
         m.execute("! systemctl --quiet is-active ntp || (systemctl disable ntp && systemctl stop ntp)")
-        m.execute("! systemctl --quiet is-active chronyd || (systemctl disable chronyd && systemctl stop chronyd)")
+        m.execute("if systemctl --quiet is-active chrony; then systemctl disable chrony && systemctl stop chrony; fi")
+        m.execute("if systemctl --quiet is-active chronyd; then systemctl disable chronyd && systemctl stop chronyd; fi")
 
         m.execute("timedatectl set-ntp off; timedatectl set-time 2038-01-01")
 
@@ -251,13 +262,12 @@ ExecStart=/bin/sh -c 'for s in $(seq 10); do echo SLOW; sleep 0.1; done; sleep 1
         b = self.browser
         m = self.machine
 
-        m.execute(
-"""
-python -c '
+        m.execute(self.python +
+""" -c '
 import socket
 s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 s.connect("/run/systemd/journal/socket")
-s.send("MESSAGE=Hello \\01 World\\nPRIORITY=3\\nFOO=bar\\nBIN=a\\01b\\02c\\03\\n")'
+s.send(b"MESSAGE=Hello \\01 World\\nPRIORITY=3\\nFOO=bar\\nBIN=a\\01b\\02c\\03\\n")'
 """)
 
         self.login_and_go("/system/logs")
@@ -280,13 +290,12 @@ s.send("MESSAGE=Hello \\01 World\\nPRIORITY=3\\nFOO=bar\\nBIN=a\\01b\\02c\\03\\n
         b = self.browser
         m = self.machine
 
-        m.execute(
-"""
-python -c '
+        m.execute(self.python +
+""" -c '
 import socket
 s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 s.connect("/run/systemd/journal/socket")
-s.send("PRIORITY=3\\nFOO=bar\\n")'
+s.send(b"PRIORITY=3\\nFOO=bar\\n")'
 """)
 
         self.login_and_go("/system/logs")
@@ -298,17 +307,18 @@ s.send("PRIORITY=3\\nFOO=bar\\n")'
 
         b.wait_text("#journal-entry-message", "[no data]")
 
-    @skipImage("Newer version of ABRT required", "centos-7", "rhel-7", "fedora-i386", "fedora-testing", "rhel-7-4", "rhel-7-5")
-    @skipImage("ABRT not available", "debian-stable", "debian-testing", "ubuntu-stable", "ubuntu-1604", "rhel-atomic", "fedora-atomic", "continuous-atomic")
+    @skipImage("Newer version of ABRT required", "centos-7", "rhel-7", "fedora-i386", "rhel-7-5")
+    @skipImage("ABRT not available", "debian-stable", "debian-testing", "ubuntu-stable", "ubuntu-1604", "rhel-atomic", "fedora-atomic", "continuous-atomic", "rhel-x")
     def testAbrtSegv(self):
+        self.allow_core_dumps = True
         b = self.browser
         m = self.machine
 
         self.login_and_go("/system/logs")
 
-        m.execute("setenforce 0; ulimit -c unlimited; python -c 'import os; os.kill(os.getpid(), 11)' || true")
+        m.execute("ulimit -c unlimited; " + self.python + " -c 'import os; os.kill(os.getpid(), 11)' || true")
 
-        sel = "#journal-box .cockpit-logline .cockpit-log-message:contains('crashed in posix_kill')"
+        sel = "#journal-box .cockpit-logline .cockpit-log-message:contains('crashed in %s')" % self.crash_fn
         b.wait_present(sel)
         b.wait_visible(sel)
         b.click(sel)
@@ -320,7 +330,7 @@ s.send("PRIORITY=3\\nFOO=bar\\n")'
         wait_field("SYSLOG_IDENTIFIER", "abrt-notification")
 
         b.click("li:contains(Problem info)")
-        wait_field("crash_function", "posix_kill")
+        wait_field("crash_function", self.crash_fn)
 
         b.click("li:contains(Problem details)")
         sel = "#journal-entry-fields #accordion-markup .panel .panel-heading"
@@ -333,17 +343,18 @@ s.send("PRIORITY=3\\nFOO=bar\\n")'
         sel += " .panel-body:contains('signal: 11  executable: ')"
         b.wait_present(sel)
 
-    @skipImage("Newer version of ABRT required", "centos-7", "rhel-7", "fedora-i386", "fedora-testing", "rhel-7-4", "rhel-7-5")
-    @skipImage("ABRT not available", "debian-stable", "debian-testing", "ubuntu-stable", "ubuntu-1604", "rhel-atomic", "fedora-atomic", "continuous-atomic")
+    @skipImage("Newer version of ABRT required", "centos-7", "rhel-7", "fedora-i386", "rhel-7-5")
+    @skipImage("ABRT not available", "debian-stable", "debian-testing", "ubuntu-stable", "ubuntu-1604", "rhel-atomic", "fedora-atomic", "continuous-atomic", "rhel-x")
     def testAbrtDelete(self):
+        self.allow_core_dumps = True
         b = self.browser
         m = self.machine
 
         self.login_and_go("/system/logs")
 
-        m.execute("setenforce 0; ulimit -c unlimited; python -c 'import os; os.kill(os.getpid(), 11)' || true")
+        m.execute("ulimit -c unlimited; " + self.python + " -c 'import os; os.kill(os.getpid(), 11)' || true")
 
-        sel = "#journal-box .cockpit-logline .cockpit-log-message:contains('crashed in posix_kill')"
+        sel = "#journal-box .cockpit-logline .cockpit-log-message:contains('crashed in %s')" % self.crash_fn
         b.wait_present(sel)
         b.wait_visible(sel)
         b.click(sel)
@@ -356,22 +367,24 @@ s.send("PRIORITY=3\\nFOO=bar\\n")'
         b.click(sel)
 
         b.wait_visible("#journal-box")
-        b.wait_in_text('#journal-box', "crashed in posix_kill")
+        b.wait_in_text('#journal-box', "crashed in " + self.crash_fn)
 
-        sel = "#journal-box .cockpit-logline .cockpit-log-message:contains('crashed in posix_kill')"
+        sel = "#journal-box .cockpit-logline .cockpit-log-message:contains('crashed in %s')" % self.crash_fn
         b.click(sel)
 
         b.wait_present("#journal-entry-id")
         b.wait_in_text("#journal-entry-id", "python")
+        # details view should hide log view
         b.wait_present('.cockpit-log-panel')
-        b.wait_visible('.cockpit-log-panel')
-        b.wait_present("#journal-entry-message:contains('crashed in posix_kill')")
+        b.wait_not_visible('.cockpit-log-panel')
+        b.wait_present("#journal-entry-message:contains('crashed in %s')" % self.crash_fn)
         b.wait_not_present("#journal-entry-fields .nav")
 
 
-    @skipImage("Newer version of ABRT required", "centos-7", "rhel-7", "fedora-i386", "fedora-testing", "rhel-7-4", "rhel-7-5")
-    @skipImage("ABRT not available", "debian-stable", "debian-testing", "ubuntu-stable", "ubuntu-1604", "rhel-atomic", "fedora-atomic", "continuous-atomic")
+    @skipImage("Newer version of ABRT required", "centos-7", "rhel-7", "fedora-i386", "rhel-7-5")
+    @skipImage("ABRT not available", "debian-stable", "debian-testing", "ubuntu-stable", "ubuntu-1604", "rhel-atomic", "fedora-atomic", "continuous-atomic", "rhel-x")
     def testAbrtReport(self):
+        self.allow_core_dumps = True
         # The testing server is located at verify/files/mock-faf-server.py
         # Adjust Handler.known for for the expected succession of known/unknown problems
         b = self.browser
@@ -384,8 +397,8 @@ s.send("PRIORITY=3\\nFOO=bar\\n")'
 
         self.login_and_go("/system/logs")
 
-        m.execute("setenforce 0; ulimit -c unlimited; echo 'sleep 42m &' > slp; chmod u+x slp")
-        m.execute("./slp; pkill -SEGV sleep")
+        m.execute("ulimit -c unlimited; echo 'sleep 42m &' > slp; chmod u+x slp")
+        m.execute("./slp; pkill -x -SEGV sleep")
 
         sel = "#journal-box .cockpit-logline .cockpit-log-message:contains('crashed in __nanosleep()')"
         b.wait_present(sel)
@@ -402,6 +415,8 @@ s.send("PRIORITY=3\\nFOO=bar\\n")'
         b.wait_visible(sel)
         b.click(sel)
 
+        # jQuery magic on this page updates the whole frame for changing to "Reported" state
+        b.expect_load_frame("cockpit1:localhost/system/logs")
         sel = "#journal-entry-fields .nav .problem-btn:contains('Reported')"
         b.wait_present(sel)
         b.wait_visible(sel)
@@ -425,6 +440,8 @@ s.send("PRIORITY=3\\nFOO=bar\\n")'
         b.wait_visible(sel)
         b.click(sel)
 
+        # jQuery magic on this page updates the whole frame for changing to "Reported" state
+        b.expect_load_frame("cockpit1:localhost/system/logs")
         sel = "#journal-entry-fields .nav .problem-btn:contains('Reported')"
         b.wait_present(sel)
         b.wait_visible(sel)

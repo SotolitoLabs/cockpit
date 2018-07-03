@@ -23,10 +23,6 @@ import { show_modal_dialog } from "cockpit-components-dialog.jsx";
 
 const _ = cockpit.gettext;
 
-// Explicitly use React so that jshint doesn't complain.  The conversion to js inserts
-// references to React that jshint doesn't seem to see.
-React;
-
 export function left_click(fun) {
     return function (event) {
         if (!event || event.button !== 0)
@@ -43,14 +39,17 @@ export function icon_url(path_or_url) {
     if (path_or_url[0] != '/')
         return path_or_url;
 
-    var query = window.btoa(JSON.stringify({
+    var queryobj = {
         payload: "fsread1",
         binary: "raw",
         path: path_or_url,
-        external: {
-            "content-type": "image/png",
-        }
-    }));
+    }
+
+    if (path_or_url.endsWith(".svg")) {
+        queryobj.external = {"content-type": "image/svg+xml"}
+    }
+
+    var query = window.btoa(JSON.stringify(queryobj));
     return "/cockpit/channel/" + cockpit.transport.csrf_token + '?' + query;
 }
 
@@ -58,7 +57,7 @@ export const ProgressBar = ({ title, data }) => {
     if (data.waiting) {
         return (
             <div>
-                <div className="pull-right spinner spinner-sm"/>
+                <div className="pull-right spinner spinner-sm" />
                 <div className="progress-title">
                     {_("Waiting for other programs to finish using the package manager...")}
                 </div>
@@ -71,8 +70,7 @@ export const ProgressBar = ({ title, data }) => {
                     {title}
                 </div>
                 <div className="progress">
-                    <div className="progress-bar" style={{ "width": data.percentage + "%" }}>
-                    </div>
+                    <div className="progress-bar" style={{ "width": data.percentage + "%" }} />
                 </div>
             </div>
         );
@@ -89,19 +87,19 @@ export const CancelButton = ({ data }) => {
     );
 }
 
-export const show_error = (detail, code) => {
-    if (code == "cancelled")
+export const show_error = ex => {
+    if (ex.code == "cancelled")
         return;
 
-    if (code == "not-found")
-        detail = _("No installation package found for this application.");
+    if (ex.code == "not-found")
+        ex.detail = _("No installation package found for this application.");
 
     show_modal_dialog(
         {
             title: _("Error"),
             body: (
                 <div className="modal-body">
-                    <p>{detail}</p>
+                    <p>{ex.detail || ex}</p>
                 </div>
             )
         },

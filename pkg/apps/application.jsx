@@ -20,7 +20,7 @@
 import cockpit from "cockpit";
 import React from "react";
 
-import PackageKit from "./packagekit.js";
+import PackageKit from "./packagekit.es6";
 import { left_click, icon_url, show_error, launch, ProgressBar, CancelButton } from "./utils.jsx";
 
 import "./application.css";
@@ -46,9 +46,9 @@ class Application extends React.Component {
 
         function action(func, arg, progress_title) {
             self.setState({ progress_title: progress_title });
-            func(arg, data => self.setState({ progress: data })).
-                always(() => self.setState({ progress: null })).
-                fail(show_error);
+            func(arg, data => self.setState({ progress: data }))
+                    .finally(() => self.setState({ progress: null }))
+                    .catch(show_error);
         }
 
         function install() {
@@ -63,10 +63,10 @@ class Application extends React.Component {
             return urls.map(url => {
                 if (url.type == 'homepage') {
                     return (<div className="app-links">
-                                <a href={url.link} target="_blank" rel="noopener" data-linkedhost={url.link}>
-                                    View Project Website <i className="fa fa-external-link" aria-hidden="true"></i>
-                                </a>
-                            </div>);
+                        <a href={url.link} target="_blank" rel="noopener" data-linkedhost={url.link}>
+                                    View Project Website <i className="fa fa-external-link" aria-hidden="true" />
+                        </a>
+                    </div>);
                 }
             });
         }
@@ -97,15 +97,15 @@ class Application extends React.Component {
                 if (metainfo_db.ready)
                     return <div>{_("Unknown Application")}</div>;
                 else
-                    return <div className="spinner"/>;
+                    return <div className="spinner" />;
             }
 
             var progress_or_launch, button;
             if (state.progress) {
-                progress_or_launch = <ProgressBar title={self.state.progress_title} data={self.state.progress}/>;
-                button = <CancelButton data={self.state.progress}/>;
+                progress_or_launch = <ProgressBar title={self.state.progress_title} data={self.state.progress} />;
+                button = <CancelButton data={self.state.progress} />;
             } else if (comp.installed) {
-                progress_or_launch = <a onClick={left_click(() => launch(comp))}>{_("Go to Application")}</a>;
+                progress_or_launch = <a role="link" tabIndex="0" onClick={left_click(() => launch(comp))}>{_("Go to Application")}</a>;
                 button = <button className="btn btn-danger" onClick={left_click(remove)}>{_("Remove")}</button>;
             } else {
                 progress_or_launch = null;
@@ -117,7 +117,7 @@ class Application extends React.Component {
                     <table className="table app">
                         <tbody>
                             <tr>
-                                <td><img src={icon_url(comp.icon)}/></td>
+                                <td><img src={icon_url(comp.icon)} role="presentation" /></td>
                                 <td>{comp.summary}</td>
                                 <td>{progress_or_launch}</td>
                                 <td>{button}</td>
@@ -127,7 +127,7 @@ class Application extends React.Component {
                     {render_homepage_link(comp.urls)}
                     <div className="app-description">{render_description(comp.description)}</div>
                     <center>
-                        { comp.screenshots.map(s => <img className="app-screenshot" src={s.full}/>) }
+                        { comp.screenshots.map(s => <img className="app-screenshot" role="presentation" src={s.full} />) }
                     </center>
                 </div>
             );
@@ -140,8 +140,8 @@ class Application extends React.Component {
         return (
             <div>
                 <ol className="breadcrumb">
-                    <li><a onClick={left_click(navigate_up)}>{_("Applications")}</a></li>
-                    <li className="active">{comp? comp.name : this.props.id}</li>
+                    <li><a role="link" tabIndex="0" onClick={left_click(navigate_up)}>{_("Applications")}</a></li>
+                    <li className="active">{comp ? comp.name : this.props.id}</li>
                 </ol>
                 {render_comp()}
             </div>

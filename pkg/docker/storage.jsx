@@ -36,7 +36,6 @@
 
         var self = {
             error: null,
-            driver: "",
             pool_devices: [ ],
             extra_devices: [ ],
             total: 0,
@@ -52,27 +51,27 @@
                 process = python.spawn([ cockpit_atomic_storage ], ["monitor"],
                                        { err: "ignore",
                                          superuser: true })
-                                .stream(function (data) {
-                                    // XXX - find the newlines here
-                                    var info = JSON.parse(data);
-                                    self.loopback = info.loopback;
-                                    self.vgroup = info.vgroup;
-                                    self.pool_devices = info.pool_devices.sort(cmp_drive);
-                                    self.extra_devices = info.extra_devices.sort(cmp_drive);
-                                    self.total = info.total;
-                                    self.used = info.used;
-                                    self.error = null;
-                                    if (!info.can_manage)
-                                        self.error = "unsupported";
-                                    $(self).triggerHandler("changed");
-                                })
-                                .fail(function (error) {
-                                    if (error != "closed") {
-                                        console.warn(error);
-                                        self.error = error.problem || "broken";
-                                        $(self).triggerHandler("changed");
-                                    }
-                                });
+                        .stream(function (data) {
+                            // XXX - find the newlines here
+                            var info = JSON.parse(data);
+                            self.driver = info.driver;
+                            self.vgroup = info.vgroup;
+                            self.pool_devices = info.pool_devices.sort(cmp_drive);
+                            self.extra_devices = info.extra_devices.sort(cmp_drive);
+                            self.total = info.total;
+                            self.used = info.used;
+                            self.error = null;
+                            if (!info.can_manage || !info.vgroup)
+                                self.error = "unsupported";
+                            $(self).triggerHandler("changed");
+                        })
+                        .fail(function (error) {
+                            if (error != "closed") {
+                                console.warn(error);
+                                self.error = error.problem || "broken";
+                                $(self).triggerHandler("changed");
+                            }
+                        });
             } else if (cockpit.hidden && process) {
                 process.close("closed");
                 process = null;
@@ -155,9 +154,9 @@
 
             function drive_class_desc(cl) {
                 switch (cl) {
-                    case "sdd": return _("Solid-State Disk");
-                    case "hdd": return _("Hard Disk");
-                    default:    return _("Drive");
+                case "sdd": return _("Solid-State Disk");
+                case "hdd": return _("Hard Disk");
+                default: return _("Drive");
                 }
             }
 
@@ -172,9 +171,9 @@
                 drive_rows.push(
                     <tr onClick={self.toggleDrive.bind(self, drive)}>
                         <td><input type="checkbox"
-                                   checked={self.driveChecked(drive)}/>
+                                   checked={self.driveChecked(drive)} />
                         </td>
-                        <td><img src="images/drive-harddisk-symbolic.svg"/></td>
+                        <td><img role="presentation" src="images/drive-harddisk-symbolic.svg" /></td>
                         <td>
                             <div>{drive.name}</div>
                             <div>{cockpit.format_bytes(drive.size)} {drive_class_desc(drive.class)}</div>
@@ -240,8 +239,8 @@
                     return (
                         <tr>
                             <td>{cockpit.format_bytes(drive.size)}</td>
-                            <td><img src="images/drive-harddisk-symbolic.svg"/></td>
-                            <td>{drive.name}{drive.shared? _(" (shared with the OS)"):""}</td>
+                            <td><img role="presentation" src="images/drive-harddisk-symbolic.svg" /></td>
+                            <td>{drive.name}{drive.shared ? _(" (shared with the OS)") : ""}</td>
                         </tr>);
                 });
             }
@@ -253,7 +252,7 @@
         }
     });
 
-    /* A overview of the Docker Storage pool size and how is used.
+    /* An overview of the Docker Storage pool size and how much is used.
      *
      * model: The model as returned by get_storage_model.
      *
@@ -301,10 +300,9 @@
                             </div>
                         </div>
                         <div className="progress">
-                            <div className="progress-bar" style={{width: used_perc}}>
-                            </div>
+                            <div className="progress-bar" style={{width: used_perc}} />
                         </div>
-                        {self.state.error? "" : <a translatable="yes" href="#/storage">{_("Configure storage...")}</a>}
+                        {self.state.error ? "" : <a translatable="yes" href="#/storage">{_("Configure storage...")}</a>}
                     </div>);
             } else {
                 return (
@@ -319,13 +317,12 @@
                             <div>
                                 <span className="free-text">{free_fmt[0]}</span>
                                 <div className="free-unit">
-                                    {free_fmt[1]}<br/>{_("Free")}
+                                    {free_fmt[1]}<br />{_("Free")}
                                 </div>
                             </div>
                         </div>
                         <div className="progress">
-                            <div className="progress-bar c2" style={{width: used_perc}}>
-                            </div>
+                            <div className="progress-bar c2" style={{width: used_perc}} />
                         </div>
                     </div>);
             }
@@ -338,40 +335,17 @@
                 return (
                     <tr>
                         <td>{cockpit.format_bytes(drive.size)}</td>
-                        <td><img src="images/drive-harddisk-symbolic.svg"/></td>
+                        <td><img role="presentation" src="images/drive-harddisk-symbolic.svg" /></td>
                         <td>{drive.name}</td>
                     </tr>);
             });
         }
 
-        var reset_warning = null;
-        var storage_action = "add";
+        // This will never be true right now, but it might once
+        // Cockpit can change the driver, and we have all the code from a
+        // time when the driver might have changed, so why not keep it.
+        //
         var docker_will_be_stopped = false;
-        var action_caption = _("Reformat and add disks");
-
-        if (!model.vgroup) {
-            reset_warning = (
-                <div className="alert alert-danger">
-                    <span className="fa fa-exclamation-triangle"></span>
-                    <span className="alert-message">
-                        {_("The storage pool will be reset to optimize its layout.  All containers will be erased.")}
-                    </span>
-                </div>);
-            storage_action = "create-vgroup";
-            docker_will_be_stopped = true;
-            action_caption = _("Erase containers, reformat disks, and add them");
-        } else if (model.loopback) {
-            reset_warning = (
-                <div className="alert alert-danger">
-                    <span className="fa fa-exclamation-triangle"></span>
-                    <span className="alert-message">
-                        {_("The storage pool will be reset to optimize its layout.  All containers will be erased.")}
-                    </span>
-                </div>);
-            storage_action = "reset-and-add";
-            docker_will_be_stopped = true;
-            action_caption = _("Erase containers, reformat disks, and add them");
-        }
 
         dialog_view.show_modal_dialog({ 'title': _("Add Additional Storage"),
                                         'body': (
@@ -380,44 +354,51 @@
                                                 <table className="drive-list">
                                                     { render_drive_rows() }
                                                 </table>
-                                                { reset_warning }
                                             </div>),
-                                      },
-                                      { 'actions': [ { 'caption': action_caption,
+        },
+                                      { 'actions': [ { 'caption': _("Reformat and add disks"),
                                                        'clicked': add_drives,
                                                        'style': "danger" } ]
                                       });
 
         function add_drives() {
-            var dfd = $.Deferred();
+            var dfd = cockpit.defer();
             var devs = drives.map(function (d) { return d.path; });
             if (docker_will_be_stopped)
                 client.close();
-            var process = python.spawn(cockpit_atomic_storage, [storage_action].concat(devs),
+
+            // We specify the driver explicitly here.  This is to make
+            // sure that docker-storage-setup uses the driver that docker
+            // is currently using, and doesn't unexpectantly change it to
+            // something else.
+            //
+            var args = { "devs": devs, "driver": model.driver };
+
+            var process = python.spawn(cockpit_atomic_storage, [ "add", JSON.stringify(args) ],
                                        { 'err': 'out',
                                          'superuser': true })
-                                .done(function () {
-                                    if (docker_will_be_stopped) {
-                                        client.connect().done(function () {
-                                            dfd.resolve();
-                                        });
-                                    } else {
-                                        dfd.resolve();
-                                    }
-                                })
-                                .fail(function (error, data) {
-                                    if (docker_will_be_stopped)
-                                        client.connect();
-                                    if (error.problem == "cancelled") {
-                                        dfd.resolve();
-                                        return;
-                                    }
-                                    dfd.reject(
-                                        <div>
-                                            <span>{_("Could not add all disks")}</span>
-                                            <pre>{data}</pre>
-                                        </div>);
-                                });
+                    .done(function () {
+                        if (docker_will_be_stopped) {
+                            client.connect().done(function () {
+                                dfd.resolve();
+                            });
+                        } else {
+                            dfd.resolve();
+                        }
+                    })
+                    .fail(function (error, data) {
+                        if (docker_will_be_stopped)
+                            client.connect();
+                        if (error.problem == "cancelled") {
+                            dfd.resolve();
+                            return;
+                        }
+                        dfd.reject(
+                            <div>
+                                <span>{_("Could not add all disks")}</span>
+                                <pre>{data}</pre>
+                            </div>);
+                    });
             var promise = dfd.promise();
             promise.cancel = function () {
                 process.close("cancelled");
@@ -432,32 +413,32 @@
                                             <div className="modal-body">
                                                 <p>{_("Resetting the storage pool will erase all containers and release disks in the pool.")}</p>
                                             </div>),
-                                      },
+        },
                                       { 'actions': [ { 'caption': _("Erase containers and reset storage pool"),
                                                        'clicked': reset,
                                                        'style': "danger" } ]
                                       });
         function reset() {
-            var dfd = $.Deferred();
+            var dfd = cockpit.defer();
             client.close();
             var process = python.spawn(cockpit_atomic_storage, ["reset-and-reduce"],
                                        { 'err': 'out',
                                          'superuser': true })
-                                .done(function () {
-                                    client.connect().done(dfd.resolve);
-                                })
-                                .fail(function (error, data) {
-                                    client.connect();
-                                    if (error.problem == "cancelled") {
-                                        dfd.resolve();
-                                        return;
-                                    }
-                                    dfd.reject(
-                                        <div>
-                                            <span>{_("Could not reset the storage pool")}</span>
-                                            <pre>{data}</pre>
-                                        </div>);
-                                });
+                    .done(function () {
+                        client.connect().done(dfd.resolve);
+                    })
+                    .fail(function (error, data) {
+                        client.connect();
+                        if (error.problem == "cancelled") {
+                            dfd.resolve();
+                            return;
+                        }
+                        dfd.reject(
+                            <div>
+                                <span>{_("Could not reset the storage pool")}</span>
+                                <pre>{data}</pre>
+                            </div>);
+                    });
             var promise = dfd.promise();
             promise.cancel = function () {
                 process.close("cancelled");
@@ -479,14 +460,14 @@
 
         var model = get_storage_model();
 
-        React.render(<DriveBox model={model} callback={add_callback}/>,
+        React.render(<DriveBox model={model} callback={add_callback} />,
                      $("#storage-drives")[0]);
-        React.render(<PoolBox model={model}/>,
+        React.render(<PoolBox model={model} />,
                      $("#storage-pool")[0]);
-        React.render(<OverviewBox model={model}/>,
+        React.render(<OverviewBox model={model} />,
                      $("#storage-overview")[0]);
 
-        function update_curtain() {
+        function update() {
             if (model.error) {
                 if (model.error == "access-denied")
                     $('#storage-unsupported-message').text(
@@ -499,11 +480,12 @@
             } else {
                 $("#storage-unsupported").hide();
                 $("#storage-details").show();
+                $("#storage-reset").toggle(model.driver == "devicemapper");
             }
         }
 
-        $(model).on("changed", update_curtain);
-        update_curtain();
+        $(model).on("changed", update);
+        update();
 
         function hide() {
             $('#storage').hide();

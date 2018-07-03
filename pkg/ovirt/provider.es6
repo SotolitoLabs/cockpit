@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -23,18 +22,23 @@ import LIBVIRT_PROVIDER, { buildFailHandler } from '../machines/libvirt.es6';
 import { logDebug, logError, fileDownload } from '../machines/helpers.es6';
 import { readConfiguration } from './configFuncs.es6';
 import { CONSOLE_TYPE_ID_MAP } from './config.es6';
-import { ovirtApiGet, ovirtApiPost } from './ovirtApiAccess.es6';
+import { ovirtApiGet, ovirtApiPost, ovirtApiPut } from './ovirtApiAccess.es6';
 import { pollOvirt, forceNextOvirtPoll } from './ovirt.es6';
 import { oVirtIconToInternal } from './ovirtConverters.es6';
 
-import { updateIcon, downloadIcon, } from './actions.es6';
+import { updateIcon, downloadIcon } from './actions.es6';
+import { getHypervisorMaxVCPU } from '../machines/actions.es6';
+
 import { getAllIcons, isVmManagedByOvirt } from './selectors.es6';
-import { ovirtReducer }  from './reducers.es6';
+import { ovirtReducer } from './reducers.es6';
 
 import VmActions from './components/VmActions.jsx';
-import VmOverviewColumn from './components/VmOverviewColumn.jsx';
+import vmOverviewExtra from './components/VmOverviewColumn.jsx';
 import ConsoleClientResources from './components/ConsoleClientResources.jsx';
 import OVirtTab from './components/OVirtTab.jsx';
+import VCPUModal from './components/vcpuModal.jsx';
+
+import { waitForReducerSubtreeInit } from './store.es6';
 
 const _ = cockpit.gettext;
 
@@ -51,7 +55,7 @@ OVIRT_PROVIDER.reducer = ovirtReducer;
 
 // --- React extension
 OVIRT_PROVIDER.VmActions = VmActions;
-OVIRT_PROVIDER.VmOverviewColumn = VmOverviewColumn;
+OVIRT_PROVIDER.vmOverviewExtra = vmOverviewExtra;
 OVIRT_PROVIDER.ConsoleClientResources = ConsoleClientResources;
 OVIRT_PROVIDER.vmTabRenderers = [
     {
@@ -61,13 +65,24 @@ OVIRT_PROVIDER.vmTabRenderers = [
     },
 ];
 
+OVIRT_PROVIDER.openVCPUModal = (params, providerState) => isVmManagedByOvirt(providerState, params.vm.id) ? VCPUModal(params) : LIBVIRT_PROVIDER.openVCPUModal(params);
+
 // --- enable/disable actions in UI
 OVIRT_PROVIDER.canDelete = (vmState, vmId, providerState) =>
     isVmManagedByOvirt(providerState, vmId) ? false : LIBVIRT_PROVIDER.canDelete(vmState, vmId);
 
+/* Use of serial Console is disabled.
+  TODO: use ssh to connect to serial console of oVirt-managed VM.
+  https://www.ovirt.org/develop/release-management/features/virt/serial-console/
+  https://access.redhat.com/documentation/en-us/red_hat_virtualization/4.1/html/virtual_machine_management_guide/sect-starting_the_virtual_machine
+*/
+OVIRT_PROVIDER.serialConsoleCommand = ({ vm }) => false;
+
 // --- verbs
 OVIRT_PROVIDER.init = function ({ dispatch }) {
     logDebug(`Virtual Machines Provider used: ${this.name}`);
+
+    waitForReducerSubtreeInit(() => dispatch(getHypervisorMaxVCPU()));
     return readConfiguration({ dispatch }); // and do oVirt login
 };
 
@@ -163,8 +178,8 @@ OVIRT_PROVIDER.START_VM = function (payload) {
     const vmName = payload.name;
     const hostName = payload.hostName; // optional
 
-    const actionXml = hostName ?
-        `<action><async>false</async><vm><placement_policy><hosts><host><name>${hostName}</name></host></hosts></placement_policy></vm></action>`
+    const actionXml = hostName
+        ? `<action><async>false</async><vm><placement_policy><hosts><host><name>${hostName}</name></host></hosts></placement_policy></vm></action>`
         : '<action><async>false</async></action>';
 
     return (dispatch) => {
@@ -196,7 +211,7 @@ OVIRT_PROVIDER.CREATE_VM_FROM_TEMPLATE = function (payload) {
 
     const name = `<name>${vm.name}</name>`;
     const template = `<template><name>${templateName}</name></template>`;
-    const cluster =  `<cluster><name>${clusterName}</name></cluster>`;
+    const cluster = `<cluster><name>${clusterName}</name></cluster>`;
     const action = `<vm>${name}${cluster}${template}</vm>`;
 
     return (dispatch) => {
@@ -218,13 +233,13 @@ OVIRT_PROVIDER.CREATE_VM_FROM_TEMPLATE = function (payload) {
 OVIRT_PROVIDER.MIGRATE_VM = function ({ vmId, vmName, hostId }) {
     logDebug(`MIGRATE_VM(payload: {vmId: "${vmId}", hostId: "${hostId}"}`);
     if (!isOvirtApiCheckPassed()) {
-        logDebug('oVirt API version does not match but the MIGRATE action is not supported by Libvirt provider, skipping' );
+        logDebug('oVirt API version does not match but the MIGRATE action is not supported by Libvirt provider, skipping');
         return () => {};
     }
 
-    const action = hostId ?
-        `<action><async>false</async><host id="${hostId}"/></action>` :
-        '<action/>';
+    const action = hostId
+        ? `<action><async>false</async><host id="${hostId}"/></action>`
+        : '<action/>';
 
     return (dispatch) => {
         forceNextOvirtPoll();
@@ -256,10 +271,10 @@ OVIRT_PROVIDER.SUSPEND_VM = function ({ id, name }) {
             name,
             connectionName: undefined, // TODO: oVirt-only, not implemented for Libvirt
             message: _("SUSPEND action failed")
-        })).then( data => {
-            logDebug('SUSPEND_VM finished', data);
-            window.setTimeout(forceNextOvirtPoll, 5000); // hack for better user experience
-        }
+        })).then(data => {
+        logDebug('SUSPEND_VM finished', data);
+        window.setTimeout(forceNextOvirtPoll, 5000); // hack for better user experience
+    }
     );
 };
 
@@ -280,8 +295,8 @@ OVIRT_PROVIDER.DOWNLOAD_ICONS = function ({ iconIds, forceReload }) {
 
     return (dispatch, getState) => {
         const existingIcons = forceReload ? {} : getAllIcons(getState());
-        const iconIdsToDownload = Object.getOwnPropertyNames(iconIds).filter( iconId => !existingIcons[iconId] );
-        iconIdsToDownload.forEach( iconId => dispatch(downloadIcon({ iconId })) );
+        const iconIdsToDownload = Object.getOwnPropertyNames(iconIds).filter(iconId => !existingIcons[iconId]);
+        iconIdsToDownload.forEach(iconId => dispatch(downloadIcon({ iconId })));
     };
 };
 
@@ -325,7 +340,7 @@ OVIRT_PROVIDER.CONSOLE_VM = function (payload) { // download a .vv file generate
     const consoleId = CONSOLE_TYPE_ID_MAP[type];
     if (!consoleId) {
         logError(`CONSOLE_VM: unable to map console type to id. Payload: ${JSON.stringify(payload)}`);
-        return ;
+        return;
     }
 
     return (dispatch, getState) => {
@@ -352,7 +367,7 @@ OVIRT_PROVIDER.CONSOLE_VM = function (payload) { // download a .vv file generate
 OVIRT_PROVIDER.HOST_TO_MAINTENANCE = function ({ hostId }) {
     logDebug(`HOST_TO_MAINTENANCE(hostId=${hostId})`);
     if (!isOvirtApiCheckPassed()) {
-        logDebug('oVirt API version does not match but the HOST_TO_MAINTENANCE action is not supported by Libvirt provider, skipping' );
+        logDebug('oVirt API version does not match but the HOST_TO_MAINTENANCE action is not supported by Libvirt provider, skipping');
         return () => {};
     }
 
@@ -374,6 +389,30 @@ OVIRT_PROVIDER.HOST_TO_MAINTENANCE = function ({ hostId }) {
 
         return dfd.promise;
     };
+};
+
+OVIRT_PROVIDER.SET_VCPU_SETTINGS = function (payload) {
+    logDebug(`SET_VCPU_SETTINGS(payload=${JSON.stringify(payload)})`);
+    if (!isOvirtApiCheckPassed()) {
+        logDebug('oVirt API version does not match and SET_VCPU_SETTINGS action is not supported by Libvirt provider as is must be. Skipping.');
+        return () => {};
+    }
+
+    let { id, name, connectionName, sockets, cores, threads } = payload;
+
+    return (dispatch) => ovirtApiPut(
+        `vms/${id}`,
+        `<vm><cpu><topology><sockets>${sockets}</sockets><cores>${cores}</cores><threads>${threads}</threads></topology></cpu></vm>`,
+        buildFailHandler({
+            dispatch,
+            name,
+            connectionName: connectionName, // TODO: oVirt-only, not implemented for Libvirt
+            message: _("SET VCPU SETTINGS action failed")
+        })).then(data => {
+        logDebug('SET_VCPU_SETTINGS finished', data);
+        window.setTimeout(forceNextOvirtPoll, 5000); // hack for better user experience
+    }
+    );
 };
 
 export function setOvirtApiCheckResult (passed) {

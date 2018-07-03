@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -149,3 +148,11 @@ export function setHostname(hostname) {
     };
 }
 
+export function setHostIPs(ips) {
+    return {
+        type: 'OVIRT_SET_HOST_IPS',
+        payload: {
+            ips,
+        }
+    };
+}

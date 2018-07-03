@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -48,7 +48,6 @@ test_html = """
 </html>
 """
 
-@skipImage("Not available with Cockpit 138", "rhel-7-4")
 class TestPackages(MachineCase):
     def testBasic(self):
         m = self.machine
@@ -75,8 +74,8 @@ class TestPackages(MachineCase):
         b.wait_text("h1", "Test")
 
         m.execute("rm -rf /usr/share/cockpit/test")
-        b.switch_to_top()
-        b.switch_to_frame("cockpit1:localhost/playground/pkgs")
+        b.go("/playground/pkgs")
+        b.enter_page("/playground/pkgs")
         b.click("#reload")
 
         b.switch_to_top()

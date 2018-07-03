@@ -20,20 +20,15 @@
 
 set -ex
 
-# HACK: docker fails without /etc/resolv.conf
-# https://bugzilla.redhat.com/show_bug.cgi?id=1448331
-mkdir -p /etc/systemd/system/docker.service.d
-printf "[Service]\nExecStartPre=/bin/sh -c 'echo -n >> /etc/resolv.conf'\n" > /etc/systemd/system/docker.service.d/resolv.conf
-systemctl daemon-reload
-
 # The docker pool should grow automatically as needed, but we grow it
 # explicitly here anyway.  This is hopefully more reliable.
+# Newer Fedora versions configure docker to use the root LV
 # HACK: docker falls over regularly, print its log if it does
 systemctl start docker || journalctl -u docker
 lvresize atomicos/root        -l+60%FREE -r
 if lvs atomicos/docker-pool 2>/dev/null; then
     lvresize atomicos/docker-pool -l+100%FREE
-else
+elif lvs atomicos/docker-root-lv; then
     lvresize atomicos/docker-root-lv -l+100%FREE
 fi
 

@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -21,23 +21,27 @@
 DAYS = 7
 
 REFRESH = {
+    "candlepin": { "refresh-days": 120 },
     "centos-7": { },
     "continuous-atomic": { },
     "debian-testing": { },
     "debian-stable": { },
-    "fedora-26": { },
     "fedora-27": { },
+    "fedora-28": { },
     "fedora-atomic": { },
     "fedora-testing": { },
     "fedora-i386": { },
+    "ipa": { "refresh-days": 120 },
     "ubuntu-1604": { },
     "ubuntu-stable": { },
     "openshift": { "refresh-days": 30 },
-    "ipa": { "refresh-days": 120 },
+    "openshift-prerelease": { "refresh-days": 30 },
+    "ovirt": { "refresh-days": 120 },
     'rhel-7': { },
-    'rhel-7-4': { },
     'rhel-7-5': { },
+    'rhel-x': { },
     'rhel-atomic': { },
+    "selenium": { "refresh-days": 30 },
     'windows-8': { "refresh-days": 30 },
 }
 

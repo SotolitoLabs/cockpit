@@ -10,7 +10,7 @@
     <title>Cockpit Guide</title>
     <releaseinfo>Documentation for Cockpit &version; --
     latest version available at:
-      <ulink url="http://cockpit-project.org/guide/latest">http://cockpit-project.org/guide/latest/</ulink></releaseinfo>
+      <ulink url="https://cockpit-project.org/guide/latest">https://cockpit-project.org/guide/latest/</ulink></releaseinfo>
   </bookinfo>
 
   <part id="guide">
@@ -37,6 +37,7 @@
     <xi:include href="feature-journal.xml"/>
     <xi:include href="feature-docker.xml"/>
     <xi:include href="feature-networkmanager.xml"/>
+    <xi:include href="feature-firewall.xml"/>
     <xi:include href="feature-storaged.xml"/>
     <xi:include href="feature-users.xml"/>
     <xi:include href="feature-realmd.xml"/>

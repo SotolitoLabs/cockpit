@@ -33,16 +33,19 @@ require('./tooltip.css');
  *
  * Whenever the mouse hovers over the children of a Tooltip,
  * the text (or arbitrary element) in the "tip" property is shown.
+ *
+ * If "className" prop is given, its contents is added to the classes of the
+ * outermost element of the tooltip.
  */
 
 var Tooltip = React.createClass({
     getInitialState: function () {
         return { open: false, pos: "top" };
     },
-    onMouseover: function () {
+    onMouseEnter: function () {
         this.setState({ open: true });
     },
-    onMouseout: function () {
+    onMouseLeave: function () {
         this.setState({ open: false });
     },
     render: function () {
@@ -94,14 +97,16 @@ var Tooltip = React.createClass({
 
             // Position it
             if (tip.offsetLeft === -10000) {
-                var left = child.offsetLeft + 0.5*child.offsetWidth - 0.5*tip.offsetWidth;
+                var left = child.offsetLeft + 0.5 * child.offsetWidth - 0.5 * tip.offsetWidth;
                 var top = child.offsetTop - tip.offsetHeight;
 
                 var arrow = tip.getElementsByClassName("tooltip-arrow")[0];
                 var arrow_left = tip.offsetWidth / 2;
 
                 // Figure out where it is on the page
-                var abs_left = left, abs_top = top, max_width = child.offsetWidth;
+                var abs_left = left;
+                var abs_top = top;
+                var max_width = child.offsetWidth;
                 var el = tip.offsetParent;
                 while (el) {
                     abs_left += el.offsetLeft;
@@ -138,14 +143,14 @@ var Tooltip = React.createClass({
             classes += " in";
 
         return (
-            <div className="tooltip-ct-outer">
+            <div className={ "tooltip-ct-outer " + self.props.className || '' }>
                 <div className="tooltip-ct-inner"
-                     onMouseover={this.onMouseover}
-                     onMouseout={this.onMouseout}>
+                     onMouseEnter={this.onMouseEnter}
+                     onMouseLeave={this.onMouseLeave}>
                     {self.props.children}
                 </div>
                 <div ref={fixDOMElements} className={classes} style={{ top: 0, left: -10000 }}>
-                    <div className="tooltip-arrow"></div>
+                    <div className="tooltip-arrow" />
                     <div className="tooltip-inner">{self.props.tip}</div>
                 </div>
             </div>

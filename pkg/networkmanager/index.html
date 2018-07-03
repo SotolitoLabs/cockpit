@@ -40,7 +40,19 @@
   </div>
 
   <div id="networking" class="container-fluid page-ct" hidden>
-    <div class="row">
+    <div id="networking-nm-crashed" class="alert alert-danger" hidden>
+      <button class="btn btn-default pull-right" type="submit" translatable="yes">Start Service</button>
+        <span class="pficon pficon-error-circle-o"></span>
+        <strong translatable="yes">NetworkManager is not running.</strong> <a href="#" class="alert-link">Troubleshoot…</a>
+    </div>
+
+    <div id="networking-nm-disabled" class="alert alert-info" hidden>
+      <button class="btn btn-default pull-right" type="submit" translatable="yes">Enable Service</button>
+      <span class="pficon pficon-info"></span>
+      <strong translatable="yes">Network devices and graphs require NetworkManager.</strong>
+    </div>
+
+    <div id="networking-graphs" class="row">
       <div id="networking-graph-toolbar" class="zoom-controls standard-zoom-controls">
         <div class="dropdown">
           <button class="btn btn-default dropdown-toggle" data-toggle="dropdown">
@@ -48,13 +60,13 @@
             <div class="caret"></div>
           </button>
           <ul class="dropdown-menu" role="menu">
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-action="goto-now" translatable="yes">Go to now</a></li>
+            <li role="presentation"><a role="menuitem" data-action="goto-now" translatable="yes">Go to now</a></li>
             <li role="presentation" class="divider"></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="300" translatable="yes">5 minutes</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="3600" translatable="yes">1 hour</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="21600" translatable="yes">6 hours</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="86400" translatable="yes">1 day</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="604800" translatable="yes">1 week</a></li>
+            <li role="presentation"><a role="menuitem" data-range="300" translatable="yes">5 minutes</a></li>
+            <li role="presentation"><a role="menuitem" data-range="3600" translatable="yes">1 hour</a></li>
+            <li role="presentation"><a role="menuitem" data-range="21600" translatable="yes">6 hours</a></li>
+            <li role="presentation"><a role="menuitem" data-range="86400" translatable="yes">1 day</a></li>
+            <li role="presentation"><a role="menuitem" data-range="604800" translatable="yes">1 week</a></li>
           </ul>
         </div>
         <button class="btn btn-default" data-action="zoom-out">
@@ -79,6 +91,25 @@
       </div>
     </div>
     <br/>
+    <div class="panel panel-default" id="networking-firewall" hidden>
+      <div class="panel-heading">
+        <a id="networking-firewall-link" translatable="yes">Firewall</a>
+        <div class="pull-right">
+          <div class="btn-group btn-onoff-ct" id="networking-firewall-switch" data-toggle="buttons">
+              <label class="btn active">
+                <input type="radio" name="firewall" />
+                <span translatable="yes">On</span>
+              </label>
+              <label class="btn">
+                <input type="radio" name="firewall" />
+                <span translatable="yes">Off</span>
+              </label>
+          </div>
+        </div>
+      </div>
+      <div id="networking-firewall-summary" class="panel-body">
+      </div>
+    </div>
     <div class="panel panel-default"
          id="networking-interfaces">
       <div class="panel-heading">
@@ -121,9 +152,10 @@
         </tbody>
       </table>
     </div>
-    <div class="panel panel-default cockpit-log-panel">
-      <div class="panel-heading" translatable="yes">Networking Logs</div>
-      <div class="panel-body" id="networking-log"></div>
+    <div class="panel panel-default cockpit-log-panel" role="table"
+     aria-labelledby="networking-log-header">
+      <div class="panel-heading" translatable="yes" id="networking-log-header">Networking Logs</div>
+      <div class="panel-body" id="networking-log" role="rowgroup"></div>
     </div>
   </div>
 
@@ -535,13 +567,13 @@
             <div class="caret"></div>
           </button>
           <ul class="dropdown-menu" role="menu">
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-action="goto-now" translatable="yes">Go to now</a></li>
+            <li role="presentation"><a role="menuitem" data-action="goto-now" translatable="yes">Go to now</a></li>
             <li role="presentation" class="divider"></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="300" translatable="yes">5 minutes</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="3600" translatable="yes">1 hour</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="21600" translatable="yes">6 hours</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="86400" translatable="yes">1 day</a></li>
-            <li role="presentation"><a role="menuitem" tabindex="-1" data-range="604800" translatable="yes">1 week</a></li>
+            <li role="presentation"><a role="menuitem" data-range="300" translatable="yes">5 minutes</a></li>
+            <li role="presentation"><a role="menuitem" data-range="3600" translatable="yes">1 hour</a></li>
+            <li role="presentation"><a role="menuitem" data-range="21600" translatable="yes">6 hours</a></li>
+            <li role="presentation"><a role="menuitem" data-range="86400" translatable="yes">1 day</a></li>
+            <li role="presentation"><a role="menuitem" data-range="604800" translatable="yes">1 week</a></li>
           </ul>
         </div>
         <button class="btn btn-default" data-action="zoom-out">

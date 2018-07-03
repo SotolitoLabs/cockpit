@@ -30,6 +30,7 @@
     var change_profile = require("./change-profile.jsx");
 
     var _ = cockpit.gettext;
+    var permission = cockpit.permission({ admin: true });
 
     function setup() {
 
@@ -38,7 +39,8 @@
         var element = $(require("raw!./link.html"));
 
         var button = element.find(".action-trigger");
-        var popover = element.find("[data-toggle=popover]");
+        var tooltip = element.find("#tuned-status-tooltip");
+        tooltip.tooltip({ placement: "top" });
 
         /* Tuned doesn't implement the DBus.Properties interface, so
          * we occasionally poll for what we need.
@@ -75,15 +77,11 @@
         }
 
         function update_button() {
-            var tuned = cockpit.dbus('com.redhat.tuned', { superuser: true });
+            /* Reading the current profile works as user */
+            var tuned = cockpit.dbus('com.redhat.tuned');
 
             function set_status(text) {
-                if (text != popover.attr('data-content')) {
-                    popover.attr('data-content', text);
-                    // Refresh the popover if it is open
-                    if (popover.data('bs.popover').tip().hasClass('in'))
-                        popover.popover('show');
-                }
+                tooltip.attr("data-original-title", text);
             }
 
             poll(tuned)
@@ -96,14 +94,18 @@
                         status = _("Tuned is not running");
                     else if (active == "none")
                         status = _("Tuned is off");
+                    else if (!permission.allowed)
+                        status = cockpit.format(
+                            _("The user <b>$0</b> is not permitted to change profiles"),
+                            permission.user ? permission.user.name : '');
                     else if (active == recommended)
                         status = _("This system is using the recommended profile");
                     else
                         status = _("This system is using a custom profile");
 
                     button.text(state == "running"? active : _("none"));
-                    button.prop('disabled', state == "not-installed");
-                    button.toggleClass('disabled', state == "not-installed");
+                    button.prop('disabled', state == "not-installed" || !permission.allowed);
+                    button.toggleClass('disabled', state == "not-installed" || !permission.allowed);
                     set_status(status);
                 })
                 .fail(function (ex) {
@@ -270,6 +272,10 @@
             tuned_service.start()
                 .done(function () {
                     update_button();
+                    /* There are a few cases where tuned can be started by any user,
+                     * but as the dialog needs superuser anyway, there's little
+                     * reason to put 'try'.
+                     */
                     tuned = cockpit.dbus('com.redhat.tuned', { superuser: true });
                     with_tuned();
                 })
@@ -278,19 +284,15 @@
 
         button.on('click', open_dialog);
 
-        popover.popover().on('click', update_button);
+        tuned_service.addEventListener("changed", update_button);
         update_button();
 
         return element[0];
     }
 
-    /* Hook this in when loaded */
-    $(function() {
-        var placeholder = $("#system-info-performance");
-        if (placeholder.length) {
-            placeholder.find(".button-location").append(setup());
-            placeholder.removeAttr('hidden');
-        }
+    $(permission).on('changed', function () {
+        $('#system-info-performance').removeAttr('hidden');
+        $('#system-info-performance').find('.button-location').append(setup());
     });
 
 }());

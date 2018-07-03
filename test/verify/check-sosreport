@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -24,6 +24,7 @@ from testlib import *
 import subprocess
 
 @skipImage("No sosreport", "continuous-atomic", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable")
+@skipImage("https://bugzilla.redhat.com/show_bug.cgi?id=1559414", "rhel-x")
 class TestSOS(MachineCase):
     def testBasic(self):
         b = self.browser
@@ -57,6 +58,19 @@ class TestSOS(MachineCase):
         self.assertGreater(int(size), 1000000)
 
         self.allow_journal_messages('.*{ associate }.*comm="sosreport".*')
+
+    @skipImage("Not supported", "continuous-atomic", "fedora-atomic", "rhel-atomic")
+    def testAppStream(self):
+        b = self.browser
+        m = self.machine
+
+        self.login_and_go("/apps")
+        b.wait_not_present(".app-list-empty .spinner")
+        if m.image.startswith("fedora-") or m.image in [ "centos-7" ]:
+            b.wait_present(".app-list tr:contains('Diagnostic Reports')")
+            b.wait_present(".app-list tr:contains('Diagnostic Reports') button:contains('Remove')")
+        else:
+            b.wait_not_present(".app-list tr:contains('Diagnostic Reports')")
 
 if __name__ == '__main__':
     test_main()

@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -19,6 +19,7 @@
 # along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import time
 
 import parent
 from testlib import *
@@ -36,6 +37,7 @@ done
 """
 
 @skipImage("Image uses OSTree", "continuous-atomic", "fedora-atomic", "rhel-atomic")
+@skipImage("https://bugzilla.redhat.com/show_bug.cgi?id=1559414", "rhel-x")
 class TestUpdates(PackageCase):
     def setUp(self):
         PackageCase.setUp(self)
@@ -43,20 +45,86 @@ class TestUpdates(PackageCase):
         # Disable Subscription Manager for these tests; subscriptions are tested in a separate class
         self.machine.execute("[ ! -f /usr/libexec/rhsmd ] || mv /usr/libexec/rhsmd /usr/libexec/rhsmd.disabled")
 
+        # only the yum backend properly recognizes "enhancement" severity; apt
+        # does not have that metadata and PackageKit-dnf does not parse it
+        if self.backend == "yum":
+            self.enhancement_severity = "enhancement"
+        else:
+            self.enhancement_severity = "bug"
+
+    def check_nth_update(self, index, pkgname, version, severity="bug", num_issues=None, desc_matches=[], cves=[], bugs=[]):
+        """Check the contents of the package update table row at index
+
+        None properties will not be tested.
+        """
+        b = self.browser
+        row = "#app .listing-ct tbody:nth-of-type(%i) " % index
+        severity_to_icon = { "bug": "fa-bug", "enhancement": "pficon-enhancement", "security": "pficon-security" }
+
+        if isinstance(pkgname, list):
+            for idx, pkg in enumerate(pkgname, 1):
+                self.assertEqual(b.text(row + "th > div:nth-of-type(%i) span" % idx), pkg)
+        else:
+            self.assertEqual(b.text(row +"th span"), pkgname)
+            self.assertEqual(b.text(row + "th .tooltip-inner"), "dummy " + pkgname)
+        self.assertEqual(b.text(row + "td:nth-of-type(2)"), version)
+        # verify type
+        self.assertTrue(b.is_present(row + "td:nth-of-type(3) span." + severity_to_icon[severity]))
+        self.assertEqual(b.text(row + "td:nth-of-type(3)").strip(),
+                         num_issues is not None and str(num_issues) or "")
+
+        # should not be expanded by default
+        self.assertFalse(b.is_present(row + ".listing-ct-body"))
+        # expand
+        b.click(row + "td.listing-ct-toggle")
+        b.wait_present(row + ".listing-ct-body")
+        b.wait_in_text(row + ".listing-ct-body", "Packages:")
+        desc = b.text(row + ".listing-ct-body")
+
+        # details should contain all description bits, CVEs and bug numbers
+        for m in desc_matches +  cves + bugs:
+            self.assertIn(m, desc)
+
+        return row
+
+    def wait_checking_updates(self):
+        '''Wait until spinner is gone from #system_information_updates_icon for 3 s'''
+
+        self.browser.wait_present("#system_information_updates_icon")
+        good_count = 0
+        for retry in range(60):
+            classes = self.browser.attr("#system_information_updates_icon", "class")
+            if classes is None  or "spinner" in classes:
+                good_count = 0
+            else:
+                good_count += 1
+                if good_count >= 3:
+                    return
+            time.sleep(1)
+        else:
+            self.fail("Timed out waiting for updates spinner to go away")
+
     def testBasic(self):
         # no security updates, no changelogs
         b = self.browser
         m = self.machine
 
         m.start_cockpit()
-        b.login_and_go("/updates")
+        b.login_and_go("/system")
+        if m.image != "rhel-7-5":
+            # status on /system front page: no repos at all, thus no updates
+            self.wait_checking_updates()
+            b.wait_text("#system_information_updates_text", "System Up To Date")
+            self.assertEqual(b.attr("#system_information_updates_icon", "class"), "")
 
-        # no repositories at all, thus no updates
-        b.wait_present(".content-header-extra td button")
+        # no updates on the Software Updates page
+        b.go("/updates")
+        b.enter_page("/updates")
+        b.wait_present(".content-header-extra button")
         b.wait_in_text("#state", "No updates pending")
-        b.wait_present(".content-header-extra td.text-right span")
+        b.wait_present(".content-header-extra--updated")
         # PK starts from a blank state, thus should force refresh and set the "time since" to 0
-        self.assertEqual(b.text(".content-header-extra td.text-right span"), "Last checked: a few seconds ago")
+        b.wait_text(".content-header-extra--updated", "Last checked: a few seconds ago")
         # empty state visible in main area
         b.wait_present(".container-fluid div.blank-slate-pf")
 
@@ -70,11 +138,10 @@ class TestUpdates(PackageCase):
         self.enableRepo()
 
         # check again
-        b.wait_in_text(".content-header-extra td button", "Check for Updates")
-        b.click(".content-header-extra td button")
+        b.wait_in_text(".content-header-extra button", "Check for Updates")
+        b.click(".content-header-extra button")
 
-        b.wait_present(".content-header-extra td.text-right span")
-        self.assertEqual(b.text(".content-header-extra td.text-right span"), "Last checked: a few seconds ago")
+        b.wait_text(".content-header-extra--updated", "Last checked: a few seconds ago")
 
         b.wait_present("#available h2")
         b.wait_in_text("#available h2", "Available Updates")
@@ -82,18 +149,23 @@ class TestUpdates(PackageCase):
 
         b.wait_present("table.listing-ct")
         b.wait_in_text("table.listing-ct", "vanilla")
+        self.check_nth_update(1, "chocolate", "2.0-2")
+        self.check_nth_update(2, "vanilla", "1.0-2")
 
-        # chocolate update to 2.0-2
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) th span"), "chocolate")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) th .tooltip-inner"), "dummy chocolate")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) td:nth-of-type(1)"), "2.0-2")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) td:nth-of-type(2)"), "")  # no bugs
-
-        # vanilla update to 1.0-2
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) th span"), "vanilla")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) th .tooltip-inner"), "dummy vanilla")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) td:nth-of-type(1)"), "1.0-2")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) td:nth-of-type(2)"), "")  # no bugs
+        if m.image != "rhel-7-5":
+            # updates are shown on system page
+            b.go("/system")
+            b.enter_page("/system")
+            self.wait_checking_updates()
+            # PackageKit's dnf backend misparses severities (https://bugs.freedesktop.org/show_bug.cgi?id=101070)
+            if self.backend == "dnf":
+                b.wait_text("#system_information_updates_text", "Updates Available")
+            else:
+                b.wait_text("#system_information_updates_text", "Bug Fix Updates Available")
+            self.assertIn("fa-bug", b.attr("#system_information_updates_icon", "class"))
+            # should be a link, click on it to go to /updates
+            b.click("#system_information_updates_text a")
+            b.enter_page("/updates")
 
         # old versions are still installed
         m.execute("test -f /stamp-vanilla-1.0-1 && test -f /stamp-chocolate-2.0-1")
@@ -109,12 +181,12 @@ class TestUpdates(PackageCase):
         b.wait_present("#app div.progress-bar")
 
         # no refresh button or "last checked", but Cancel button
-        b.wait_present(".content-header-extra td.text-right button")
-        self.assertFalse(b.is_present(".content-header-extra td.text-right span"))
-        b.wait_in_text(".content-header-extra td button", "Cancel")
+        b.wait_text(".content-header-extra--updated", "")
+        b.wait_present(".content-header-extra button")
+        b.wait_in_text(".content-header-extra button", "Cancel")
 
         # Cancel button should eventually get disabled
-        b.wait_present(".content-header-extra td button:disabled")
+        b.wait_present(".content-header-extra button:disabled")
 
         # update log only exists in the expander, collapsed by default
         self.assertFalse(b.is_present("#update-log"))
@@ -141,14 +213,21 @@ class TestUpdates(PackageCase):
         # should go back to updates overview, nothing pending any more
         b.wait_present("#state")
         b.wait_in_text("#state", "No updates pending")
-        b.wait_present(".content-header-extra td.text-right span")
-        b.wait_in_text(".content-header-extra td.text-right span", "Last checked:")
+        b.wait_in_text(".content-header-extra--updated", "Last checked:")
 
         # empty state visible in main area
         b.wait_present(".container-fluid div.blank-slate-pf")
 
         # new versions are now installed
         m.execute("test -f /stamp-vanilla-1.0-2 && test -f /stamp-chocolate-2.0-2")
+
+        if m.image != "rhel-7-5":
+            # system page has current state as well
+            b.go("/system")
+            b.enter_page("/system")
+            self.wait_checking_updates()
+            b.wait_text("#system_information_updates_text", "System Up To Date")
+            self.assertEqual(b.attr("#system_information_updates_icon", "class"), "")
 
     @skipImage("Ubuntu 16.04 PackageKit does not support changelogs", "ubuntu-1604")
     def testInfoSecurity(self):
@@ -157,20 +236,24 @@ class TestUpdates(PackageCase):
 
         # just changelog
         self.createPackage("norefs-bin", "1", "1", install=True)
-        self.createPackage("norefs-bin", "2", "1", severity="enhancement", changes="Now 10% more unicorns")
+        self.createPackage("norefs-bin", "2", "1", severity="enhancement", changes="Now 10% *more* [unicorns](http://unicorn.example.com)")
         # binary from same source
         self.createPackage("norefs-doc", "1", "1", install=True)
-        self.createPackage("norefs-doc", "2", "1", severity="enhancement", changes="Now 10% more unicorns")
+        self.createPackage("norefs-doc", "2", "1", severity="enhancement", changes="Now 10% *more* [unicorns](http://unicorn.example.com)")
         # bug fixes
         self.createPackage("buggy", "2", "1", install=True)
-        self.createPackage("buggy", "2", "2", changes="Fixit", bugs=[123, 456])
+        self.createPackage("buggy", "2", "2", changes="* Fixit", bugs=[123, 456])
         # security fix with proper CVE list and severity
         self.createPackage("secdeclare", "3", "4.a1", install=True)
         self.createPackage("secdeclare", "3", "4.b1", severity="security",
-                           changes="Will crash your data center", cves=['CVE-2014-123456'])
+                           changes="Will crash your data center", cves=["CVE-2014-123456"])
         # security fix with parsing from changes
         self.createPackage("secparse", "4", "1", install=True)
         self.createPackage("secparse", "4", "2", changes="Fix CVE-2014-54321 and CVE-2017-9999.")
+        # security fix with RHEL severity and errata
+        self.createPackage("sevcritical", "5", "1", install=True)
+        self.createPackage("sevcritical", "5", "2", cves=["CVE-2014-54321"], securitySeverity="critical",
+                           errata=["RHSA-2000:0001", "RHSA-2000:0002"], changes="More broken stuff")
 
         self.enableRepo()
         m.execute("pkcon refresh")
@@ -179,42 +262,74 @@ class TestUpdates(PackageCase):
         b.login_and_go("/updates")
         b.wait_present("#available h2")
         b.wait_in_text("#available h2", "Available Updates")
-        self.assertEqual(b.text("#state"), "5 updates, including 2 security fixes")
+        self.assertEqual(b.text("#state"), "6 updates, including 3 security fixes")
 
         b.wait_present("table.listing-ct")
-        b.wait_in_text("table.listing-ct", "secparse")
+        b.wait_in_text("table.listing-ct", "sevcritical")
 
         # security updates should get sorted on top and then alphabetically, so start with "secdeclare"
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) th span"), "secdeclare")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) td:nth-of-type(1)"), "3-4.b1")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) td:nth-of-type(2)"), "")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(1) td:nth-of-type(3) span.security-label-text"),
-                         "Security Update: ")
-        desc = b.text("#app .listing-ct tbody:nth-of-type(1) td:nth-of-type(3)")
-        self.assertIn("Will crash your data center", desc)
-        self.assertIn("CVE-2014-123456", desc)
+        sel = self.check_nth_update(1, "secdeclare", "3-4.b1", "security", 1,
+                                    desc_matches=["Will crash your data center"], cves=["CVE-2014-123456"])
+        # should not have erratum label in details
+        self.assertNotIn("Errat", b.text(sel))
 
         # secparse should also be considered a security update as the changelog mentions CVEs
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) th span"), "secparse")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) td:nth-of-type(1)"), "4-2")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) td:nth-of-type(2)"), "")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(2) td:nth-of-type(3) span.security-label-text"),
-                         "Security Update: ")
-        desc = b.text("#app .listing-ct tbody:nth-of-type(2) td:nth-of-type(3)")
-        self.assertIn("Fix CVE-2014-54321 and CVE-2017-9999.", desc)
+        self.check_nth_update(2, "secparse", "4-2", "security", 2,
+                              desc_matches=["Fix CVE-2014-54321 and CVE-2017-9999."],
+                              cves=["CVE-2014-54321", "CVE-2017-9999"])
+        sel = self.check_nth_update(3, "sevcritical", "5-2", "security", 1,
+                                    desc_matches=["More broken stuff"])
+
+        if self.backend == 'yum':
+            # sevcritical has a severity and errata
+            details = b.text(sel + " .listing-ct-body")
+            self.assertIn("Severity:", details)
+            self.assertIn("critical", details)
+            self.assertIn("Errata:", details)
+            self.assertIn("RHSA-2000:0001", details)
+            self.assertIn("RHSA-2000:0002", details)
+            # icon has critical class
+            self.assertIn("severity-critical", b.attr(sel + " td:nth-of-type(3) span.pficon", "class"))
+            # details has link to severity definition
+            self.assertIn("access.redhat.com", b.attr(sel + " .listing-ct-body dd.severity a:first-of-type", "href"))
 
         # buggy: bug refs, no security
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(3) th span"), "buggy")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(1)"), "2-2")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(2)"), "123, 456")
-        self.assertIn("Fixit", b.text("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(3)"))
+        sel = self.check_nth_update(4, "buggy", "2-2", "bug", 2, bugs=["123", "456"], desc_matches=["Fixit"])
+        # should filter out enumeration in overview
+        ch = b.eval_js('document.querySelector("%s").innerHTML' % (sel + " td.changelog"))
+        self.assertNotIn("<li>", ch)
+        self.assertNotIn("*", ch)
 
         # norefs: just changelog, show both binary packages
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(4) th > div:nth-of-type(1) span"), "norefs-bin")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(4) th > div:nth-of-type(2) span"), "norefs-doc")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(1)"), "2-1")
-        self.assertEqual(b.text("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(2)"), "")  # no bugs
-        self.assertIn("Now 10% more unicorns", b.text("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(3)"))
+        sel = self.check_nth_update(5, ["norefs-bin", "norefs-doc"], "2-1", self.enhancement_severity,
+                                    desc_matches=["Now 10% more unicorns"])
+        # verify Markdown formatting in table cell
+        self.assertEqual(b.text(sel + " td.changelog em"), "more")  # *more*
+        self.assertEqual(b.attr(sel + " td.changelog a", "href"), "http://unicorn.example.com")
+        # verify Markdown formatting in details
+        self.assertEqual(b.text(sel + " .listing-ct-body em"), "more")  # *more*
+        self.assertEqual(b.attr(sel + " .listing-ct-body a:first-of-type", "href"), "http://unicorn.example.com")
+
+        if m.image != "rhel-7-5":
+            # updates are shown on system page
+            b.go("/system")
+            b.enter_page("/system")
+            self.wait_checking_updates()
+            if self.backend == 'dnf':
+                # PackageKit's dnf backend mis-parses severity (https://bugs.freedesktop.org/show_bug.cgi?id=101070)
+                b.wait_text("#system_information_updates_text", "Updates Available")
+                self.assertIn("bug", b.attr("#system_information_updates_icon", "class"))
+            elif self.backend == 'apt':
+                # PackageKit's deb backend always reports "normal"
+                b.wait_text("#system_information_updates_text", "Bug Fix Updates Available")
+                self.assertIn("bug", b.attr("#system_information_updates_icon", "class"))
+            else:
+                b.wait_text("#system_information_updates_text", "Security Updates Available")
+                self.assertIn("security", b.attr("#system_information_updates_icon", "class"))
+
+            # should be a link, click on it to go to back to /updates
+            b.click("#system_information_updates_text a")
+            b.enter_page("/updates")
 
         # install only security updates
         self.assertEqual(b.text("#app .container-fluid button.btn-default"), "Install Security Updates")
@@ -232,14 +347,14 @@ class TestUpdates(PackageCase):
             b.wait_present(path)
             b.wait_present(selector.format(len(updates)))
             for index, pkg in enumerate(updates, start=1):
-                self.assertEqual(b.text(selector.format(index)), pkg)
+                b.wait_in_text(selector.format(index), pkg)
             # make sure we don't have any extra ones
             self.assertFalse(b.is_present(selector.format(len(updates) + 1)))
 
-        # history on restart page should show the two security updates
+        # history on restart page should show the three security updates
         b.wait_present(".expander-title span")
         b.click(".expander-title span")
-        assertHistory("ul", ["secdeclare", "secparse"])
+        assertHistory("ul", ["secdeclare", "secparse", "sevcritical"])
 
         # ignore restarting
         b.wait_present("#app .container-fluid button.btn-default")
@@ -257,10 +372,13 @@ class TestUpdates(PackageCase):
 
         # history should show the security updates
         b.wait_present(".container-fluid #history h2")
-        assertHistory("#history ul", ["secdeclare", "secparse"])
+        assertHistory("#history ul", ["secdeclare", "secparse", "sevcritical"])
+
+        # stop PackageKit (e. g. idle timeout) to make sure the page survives that
+        m.execute("systemctl kill --signal=KILL packagekit.service")
 
         # new security versions are now installed
-        m.execute("test -f /stamp-secdeclare-3-4.b1 && test -f /stamp-secparse-4-2")
+        m.execute("test -f /stamp-secdeclare-3-4.b1 && test -f /stamp-secparse-4-2 && test -f /stamp-sevcritical-5-2")
         # but the three others are untouched
         m.execute("test -f /stamp-buggy-2-1 && test -f /stamp-norefs-bin-1-1 && test -f /stamp-norefs-doc-1-1")
 
@@ -309,17 +427,59 @@ class TestUpdates(PackageCase):
         self.allow_restart_journal_messages()
 
     @skipImage("Ubuntu 16.04 PackageKit does not support changelogs", "ubuntu-1604")
+    def testSecurityOnly(self):
+        b = self.browser
+        m = self.machine
+
+        # security fix with proper CVE list and severity
+        self.createPackage("secdeclare", "3", "4.a1", install=True)
+        self.createPackage("secdeclare", "3", "4.b1", severity="security",
+                           changes="Will crash your data center", cves=['CVE-2014-123456'])
+
+        self.enableRepo()
+        m.execute("pkcon refresh")
+
+        m.start_cockpit()
+        b.login_and_go("/updates")
+        b.wait_present("#available h2")
+        b.wait_in_text("#available h2", "Available Updates")
+        self.assertEqual(b.text("#state"), "1 security fix")
+
+        # should only have one button (only security updates)
+        self.assertEqual(b.text("#app .container-fluid button"), "Install Security Updates")
+
+        # security fix without CVE URLs
+        # PackageKit's dnf backend does not recognize this (https://bugs.freedesktop.org/show_bug.cgi?id=101070)
+        # and PackageKit's deb backend does not know about severity at all, so only test this on RPM
+        if self.backend == "yum":
+            self.createPackage("secnocve", "1", "1", install=True)
+            self.createPackage("secnocve", "1", "2", severity="security", changes="Fix leak")
+            self.enableRepo()
+            # check for updates
+            b.wait_in_text(".content-header-extra button", "Check for Updates")
+            b.click(".content-header-extra button")
+            b.wait_present("#available h2")
+            b.wait_in_text("#available h2", "Available Updates")
+            b.wait_in_text("#state", "2")
+
+            b.wait_present("table.listing-ct")
+            b.wait_in_text("table.listing-ct", "secnocve")
+
+            # secnocve should be displayed properly
+            self.check_nth_update(2, "secnocve", "1-2", "security", desc_matches=["Fix leak"])
+
+    @skipImage("Ubuntu 16.04 PackageKit does not support changelogs", "ubuntu-1604")
     def testInfoTruncation(self):
         b = self.browser
         m = self.machine
 
         # update with not too many binary packages
-        for i in range(8):
+        for i in range(4):
             self.createPackage("coarse{:02}".format(i), "1", "1", install=True)
             self.createPackage("coarse{:02}".format(i), "1", "2", changes="make it greener")
 
         # update with lots of binary packages
-        for i in range(25):
+        for i in range(10):
             self.createPackage("fine{:02}".format(i), "1", "1", install=True)
             self.createPackage("fine{:02}".format(i), "1", "2", changes="make it better")
 
@@ -330,66 +490,38 @@ class TestUpdates(PackageCase):
         self.createPackage("verbose", "1", "1", install=True)
         self.createPackage("verbose", "1", "2", changes=long_changelog)
 
-        # update with lots of packages and long changelog
-        for i in range(20):
-            self.createPackage("wide-n-tall{:02}".format(i), "3", "1", install=True)
-            self.createPackage("wide-n-tall{:02}".format(i), "3", "2", changes=long_changelog)
-
         self.enableRepo()
 
         m.start_cockpit()
         b.login_and_go("/updates")
 
         b.wait_present("table.listing-ct")
-        b.wait_in_text("table.listing-ct", "Things change #05")
+        b.wait_in_text("table.listing-ct", "Things change")
 
         # "coarse" package list should be complete
         t = b.text("#app .listing-ct tbody:nth-of-type(1) th")
         self.assertIn("coarse00", t)
-        self.assertIn("coarse07", t)
-        self.assertNotIn("more", t)
+        self.assertIn("coarse03", t)
+        self.assertNotIn(u"…", t)
 
         # "fine" package list should be truncated
         t = b.text("#app .listing-ct tbody:nth-of-type(2) th")
         self.assertIn("fine00", t)
-        self.assertIn("fine10", t)
-        self.assertNotIn("fine20", t)
-        b.wait_present("#app .listing-ct tbody:nth-of-type(2) th a")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(2) th a", "10 more")
+        self.assertIn("fine03", t)
+        self.assertNotIn("fine09", t)
+        self.assertIn(u"…", t)
+        # but complete in the details
+        self.check_nth_update(2, ["fine00", "fine01", "fine02", "fine03"], "1-2",
+                              desc_matches=["fine07", "fine09"])
 
         # verbose changelog should be truncated
-        t = b.text("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(3)")
-        self.assertIn("Things change #00", t)
-        self.assertIn("Things change #04", t)
-        self.assertNotIn("Things change #07", t)
-        self.assertNotIn("Things change #20", t)
-        b.wait_present("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(3) a")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(3) a", "More information")
-
-        # wide-n-tall package list and changelog should both be truncated
-        t = b.text("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(3)")
-        self.assertIn("Things change #04", t)
-        self.assertNotIn("Things change #07", t)
-        b.wait_present("#app .listing-ct tbody:nth-of-type(4) th a")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(4) th a", "5 more")
-        b.wait_present("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(3) a")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(3) a", "More information")
-
-        # expand fine package list by clicking on the "more" link
-        b.click("#app .listing-ct tbody:nth-of-type(2) th a")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(2) th", "fine24")
-        b.wait_not_present("#app .listing-ct tbody:nth-of-type(2) th a")
-
-        # expand verbose changelog by clicking on he truncated text
-        b.click("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(3) div")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(3)", "Things change #29")
-        b.wait_not_present("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(3) a")
-
-        # clicking on package list should also expand changelog
-        b.click("#app .listing-ct tbody:nth-of-type(4) th a")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(4) th", "wide-n-tall19")
-        b.wait_in_text("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(3)", "Things change #29")
-        b.wait_not_present("#app .listing-ct tbody:nth-of-type(4) td:nth-of-type(3) a")
+        desc = b.text("#app .listing-ct tbody:nth-of-type(3) td:nth-of-type(4)")
+        self.assertIn("Things change #00", desc)
+        self.assertNotIn("#01", desc)
+        # but complete in the details
+        self.check_nth_update(3, "verbose", "1-2",
+                              desc_matches=["Things change #00", "Things change #29"])
+        # seems we can't verify that the description has a scrollbar
 
     def testUpdateError(self):
         b = self.browser
@@ -402,7 +534,7 @@ class TestUpdates(PackageCase):
         m.execute("pkcon refresh")
 
         # break the upgrade by removing the generated packages from the repo
-        m.execute("rm -f /tmp/repo/vapor*.deb /tmp/repo/vapor*.rpm")
+        m.execute("rm -f {0}/vapor*.deb {0}/vapor*.rpm".format(self.repo_dir))
 
         m.start_cockpit()
         b.login_and_go("/updates")
@@ -470,8 +602,8 @@ class TestUpdates(PackageCase):
         self.createPackage("cockpit-ws", "999", "1")
         self.createPackage("cockpit", "999", "1")  # as that depends on same version of ws
         self.enableRepo()
-        b.wait_in_text(".content-header-extra td button", "Check for Updates")
-        b.click(".content-header-extra td button")
+        b.wait_in_text(".content-header-extra button", "Check for Updates")
+        b.click(".content-header-extra button")
 
         b.wait_present(".container-fluid #available h2")
         b.wait_in_text(".container-fluid #available h2", "Available Updates")
@@ -481,7 +613,7 @@ class TestUpdates(PackageCase):
         b.wait_in_text("table.listing-ct", "cockpit-ws")
 
         b.wait_present("#app div.alert-warning")
-        b.wait_in_text("#app div.alert-warning", "Cockpit itself will be updated")
+        b.wait_in_text("#app div.alert-warning", "This web console will be updated.")
 
     def testPackageKitCrash(self):
         b = self.browser
@@ -505,8 +637,7 @@ class TestUpdates(PackageCase):
         m.execute("systemctl kill --signal=SEGV packagekit.service")
 
         b.wait_in_text("#state", "Applying updates failed")
-        b.wait_present("#app .container-fluid pre")
-        self.assertEqual(b.text("#app .container-fluid pre"), "PackageKit crashed")
+        b.wait_in_text("#app .container-fluid", "PackageKit crashed")
 
         self.allow_journal_messages(".*org.freedesktop.PackageKit.*Error.NoReply.*")
 
@@ -527,9 +658,18 @@ class TestUpdates(PackageCase):
         b.wait_present("#app pre")
         b.wait_in_text("#app pre", "PackageKit is not installed")
 
+        if m.image != "rhel-7-5":
+            # update status on front page should be invisible
+            b.go("/system")
+            b.enter_page("/system")
+            b.wait_present("#system_information_updates_text")
+            b.wait_not_visible("#system_information_updates_text")
+            self.assertEqual(b.attr("#system_information_updates_icon", "class"), "")
+
 
 @skipImage("Image uses OSTree", "continuous-atomic", "fedora-atomic", "rhel-atomic")
-@skipImage("No subscriptions", "centos-7", "debian-stable", "debian-testing", "fedora-26", "fedora-27", "fedora-i386", "fedora-testing", "ubuntu-1604", "ubuntu-stable")
+@skipImage("No subscriptions", "centos-7", "debian-stable", "debian-testing", "fedora-27", "fedora-28", "fedora-i386", "fedora-testing", "ubuntu-1604", "ubuntu-stable")
+@skipImage("https://bugzilla.redhat.com/show_bug.cgi?id=1559414", "rhel-x")
 class TestUpdatesSubscriptions(PackageCase):
     provision = {
         "0": { "address": "10.111.113.2/20", "dns": "10.111.113.2" },
@@ -571,7 +711,16 @@ class TestUpdatesSubscriptions(PackageCase):
 
         # fresh machine, no updates available; by default our rhel-* images are not registered
         m.start_cockpit()
-        b.login_and_go("/updates")
+        b.login_and_go("/system")
+        if m.image != "rhel-7-5":
+            # show unregistered status on system front page
+            b.wait_present("#system_information_updates_text")
+            b.wait_in_text("#system_information_updates_text", "Not Registered")
+            self.assertIn("triangle", b.attr("#system_information_updates_icon", "class"))
+
+        # and also on software updates page
+        b.go("/updates")
+        b.enter_page("/updates")
 
         # empty state visible in main area
         b.wait_present(".container-fluid div.blank-slate-pf button")
@@ -588,11 +737,19 @@ class TestUpdatesSubscriptions(PackageCase):
         self.register()
         b.go("/updates")
         b.enter_page("/updates")
-        b.wait_present(".content-header-extra td button")
+        b.wait_present(".content-header-extra button")
         b.wait_present("#state")
         b.wait_in_text("#state", "No updates pending")
         b.wait_present(".container-fluid div.blank-slate-pf")
         b.wait_in_text(".container-fluid div.blank-slate-pf", "up to date")
+
+        if m.image != "rhel-7-5":
+            # same on system page
+            b.go("/system")
+            b.enter_page("/system")
+            b.wait_present("#system_information_updates_text")
+            b.wait_text("#system_information_updates_text", "System Up To Date")
+            self.assertEqual(b.attr("#system_information_updates_icon", "class"), "")
 
     def testAvailableUpdates(self):
         m = self.machine
@@ -603,11 +760,21 @@ class TestUpdatesSubscriptions(PackageCase):
         self.createPackage("vanilla", "1.0", "2")
         self.enableRepo()
 
-        # by default our rhel-* images are not registered; should show available update and unregistered warning, but no
-        # other action buttons
         m.start_cockpit()
-        b.login_and_go("/updates")
 
+        b.login_and_go("/system")
+        if m.image != "rhel-7-5":
+            # by default our rhel-* images are not registered; show warning on system page
+            b.wait_present("#system_information_updates_text")
+            b.wait_in_text("#system_information_updates_text", "Not Registered")
+            self.assertIn("triangle", b.attr("#system_information_updates_icon", "class"))
+            # should be a link leading to subscriptions page
+            b.click("#system_information_updates_text a")
+            b.enter_page("/subscriptions")
+
+        # /updates should show available update and unregistered warning, but no other action buttons
+        b.go("/updates")
+        b.enter_page("/updates")
         b.wait_present(".alert-warning")
         b.wait_in_text(".alert-warning", "subscribe")
         b.wait_present("table.listing-ct")
@@ -616,7 +783,7 @@ class TestUpdatesSubscriptions(PackageCase):
         b.wait_present("#state")
         self.assertEqual(b.text("#state"), "1 update")
         b.wait_present(".content-header-extra")
-        self.assertEqual(b.text(".content-header-extra td.text-right span"), "Last checked: a few seconds ago")
+        b.wait_text(".content-header-extra--updated", "Last checked: a few seconds ago")
         # should be unique; no other action buttons
         b.wait_present("button")
         b.wait_in_text("button", "Registration")
@@ -637,28 +804,27 @@ class TestUpdatesSubscriptions(PackageCase):
         self.assertFalse(b.is_present("#history"))
 
         # has action buttons
-        b.wait_present(".content-header-extra td button")
+        b.wait_present(".content-header-extra button")
         b.wait_present("#app .container-fluid button")
         self.assertEqual(b.text("#app .container-fluid button"), "Install All Updates")
 
+        if m.image != "rhel-7-5":
+            # show available updates on system page too
+            b.go("/system")
+            b.enter_page("/system")
+            b.wait_present("#system_information_updates_text")
+            b.wait_text("#system_information_updates_text", "Bug Fix Updates Available")
+            self.assertIn("fa-bug", b.attr("#system_information_updates_icon", "class"))
+
 
 @skipImage("Image uses OSTree", "continuous-atomic", "fedora-atomic", "rhel-atomic")
+@skipImage("https://bugzilla.redhat.com/show_bug.cgi?id=1559414", "rhel-x")
 class TestAutoUpdates(PackageCase):
     def setUp(self):
         PackageCase.setUp(self)
 
         # Disable Subscription Manager for these tests; subscriptions are tested in a separate class
         self.machine.execute("[ ! -f /usr/libexec/rhsmd ] || mv /usr/libexec/rhsmd /usr/libexec/rhsmd.disabled")
-
-        # expected backend; hardcode this on image names to check the auto-detection
-        if self.machine.image.startswith("debian") or self.machine.image.startswith("ubuntu"):
-            self.backend = "apt"
-        elif self.machine.image.startswith("fedora"):
-            self.backend = "dnf"
-        elif self.machine.image in ["centos-7", "rhel-7", "rhel-7-4", "rhel-7-5"]:
-            self.backend = "yum"
-        else:
-            raise NotImplementedError("unknown image " + self.machine.image)
 
         # not implemented for yum and apt yet, only dnf
         self.supported_backend = self.backend in ["dnf"]
@@ -679,8 +845,7 @@ class TestAutoUpdates(PackageCase):
             return
 
         def wait_pending():
-            # the controls get disabled while applying the config changes is in progress; wait for both transitions, to
-            # get Phantom checkpoints while the setConfig() promise is running
+            # the controls get disabled while applying the config changes is in progress; wait for both transitions
             b.wait_present("#automatic .disabled")
             b.wait_not_present("#automatic .disabled")
 

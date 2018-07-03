@@ -34,21 +34,23 @@ export class BlockDetails extends React.Component {
                 <div className="panel-heading">{_("Block")}</div>
                 <div className="panel-body">
                     <table className="info-table-ct">
-                        <tr>
-                            <td>{_("storage", "Capacity")}</td>
-                            <td>{ utils.fmt_size_long(block.Size) }</td>
-                        </tr>
-                        <tr>
-                            <td>{_("storage", "Device File")}</td>
-                            <td>{ utils.block_name(block) }</td>
-                        </tr>
+                        <tbody>
+                            <tr>
+                                <td>{_("storage", "Capacity")}</td>
+                                <td>{ utils.fmt_size_long(block.Size) }</td>
+                            </tr>
+                            <tr>
+                                <td>{_("storage", "Device File")}</td>
+                                <td>{ utils.block_name(block) }</td>
+                            </tr>
+                        </tbody>
                     </table>
                 </div>
             </div>
         );
 
-        var content = <Content.Block client={this.props.client} block={block}/>;
+        var content = <Content.Block client={this.props.client} block={block} />;
 
-        return <StdDetailsLayout jobs={this.props.jobs} header={header} content={content}/>;
+        return <StdDetailsLayout client={this.props.client} header={header} content={content} />;
     }
 }

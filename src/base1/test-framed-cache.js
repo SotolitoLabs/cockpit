@@ -19,7 +19,7 @@
         window.addEventListener("message", function(event) {
             if (event.data == "child-done") {
                 child_done = true;
-                maybe_done();
+                window.setTimeout(maybe_done, 0);
             }
         });
 
@@ -40,6 +40,7 @@
             } else if (count === 2) {
                 test.equal(value.myobject, "value2", "parent consumer got child value");
             }
+            maybe_done();
         }
 
         cache = cockpit.cache("cross-frame-cache", provider, consumer, 'parent');

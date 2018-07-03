@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -24,19 +23,41 @@ import HostVmsList from '../../machines/hostvmslist.jsx';
 import ClusterVms from './ClusterVms.jsx';
 import ClusterTemplates from './ClusterTemplates.jsx';
 import VdsmView from './VdsmView.jsx';
+import { Tooltip } from "cockpit-components-tooltip.jsx";
 
 import { goToSubpage } from '../actions.es6';
 import hostToMaintenance from './HostToMaintenance.jsx';
 import HostStatus from './HostStatus.jsx';
 import { getHost } from "../selectors.es6";
+import CONFIG from '../config.es6';
 
 const _ = cockpit.gettext;
 
+const onReload = () => {
+    console.info('oVirt connection: page reload requested by user');
+    window.location.reload();
+};
+
 const LoginInProgress = ({ ovirtConfig }) => {
-    if (ovirtConfig && ovirtConfig.loginInProgress) {
+    if (!ovirtConfig) {
+        return null;
+    }
+
+    if (ovirtConfig.loginInProgress) {
         return (
             <p className='ovirt-login-in-progress'>
-                {_("oVirt login in progress")} <span className="spinner spinner-xs spinner-inline"></span>
+                {_("oVirt login in progress") + '\xa0'}
+                <span className="spinner spinner-xs spinner-inline" />
+            </p>
+        );
+    }
+
+    if (!CONFIG.token) {
+        // i.e. after Cancel in Installation Dialog
+        return (
+            <p className='ovirt-login-in-progress'>
+                {_("No oVirt connection") + '\xa0'}
+                <a href="#" onClick={onReload}>{_("Reload")}</a>
             </p>
         );
     }
@@ -68,35 +89,72 @@ const TopMenu = ({ ovirtConfig, router, dispatch }) => {
         return '';
     };
 
+    const selected_aria = (target) => {
+        return (selected(target) !== '') ? 'page' : '';
+    };
+
     return (
-        <div className='content-extra-header'>
+        <nav className='content-extra-header'>
             <a className={'top-menu-link' + selected('hostvms')} href='#'
                id='ovirt-topnav-hostvms'
+               aria-current={selected_aria('hostvms')}
                onClick={() => onNavigate('hostvms')}>{_("Host")}</a>
             <a className={'top-menu-link' + selected('clustervms')} href='#'
                id='ovirt-topnav-clustervms'
+               aria-current={selected_aria('clustervms')}
                onClick={() => onNavigate('clustervms')}>{_("Cluster")}</a>
             <a className={'top-menu-link' + selected('clustertemplates')} href='#'
                id='ovirt-topnav-clustertemplates'
+               aria-current={selected_aria('clustertemplates')}
                onClick={() => onNavigate('clustertemplates')}>{_("Templates")}</a>
             <a className={'top-menu-link' + selected('vdsm')} href='#'
                id='ovirt-topnav-vdsm'
+               aria-current={selected_aria('vdsm')}
                onClick={() => onNavigate('vdsm')}>{_("VDSM")}</a>
 
-            <LoginInProgress ovirtConfig={ovirtConfig}/>
+            <LoginInProgress ovirtConfig={ovirtConfig} />
+        </nav>
+    );
+};
+
+const HostVmsListDecorated = ({ vms, config, systemInfo, ui, dispatch, host }) => {
+    // TODO: add Create VM Action here once implemented for oVirt
+    const actions = [ createOvirtVmAction() ];
+    if (host) {
+        actions.push(hostToMaintenance({ dispatch, host }));
+    }
+
+    return (
+        <div className='container-fluid'>
+            <HostStatus host={host} />
+            <HostVmsList vms={vms}
+                         config={config}
+                         systemInfo={systemInfo}
+                         ui={ui}
+                         dispatch={dispatch}
+                         actions={actions} />
         </div>
     );
 };
 
-const HostVmsListDecorated = ({ vms, config, dispatch, host }) => {
-    const actions = host && [hostToMaintenance({ dispatch, host })];
+/**
+ * The action is not yet implemented for oVirt.
+ * See createVmDialog.jsx : createVmAction() for more info
+ */
+const createOvirtVmAction = () => {
+    const noop = () => {
+        console.debug("Create VM action is not implemented for oVirt");
+    };
+    const tip = _("This host is managed by a virtualization manager, so creation of new VMs from the host is not possible.");
+
     return (
-        <div className='container-fluid'>
-            <HostStatus host={host}/>
-            <HostVmsList vms={vms}
-                         config={config}
-                         dispatch={dispatch}
-                         actions={actions} />
+        <div className='card-pf-link-with-icon pull-right'>
+            <a className='card-pf-link-with-icon pull-right unused-link' id='create-new-vm' onClick={noop}>
+                <span className="pficon pficon-add-circle-o" />
+                <Tooltip tip={tip} pos="top">
+                    {_("Create New VM")}
+                </Tooltip>
+            </a>
         </div>
     );
 };
@@ -104,7 +162,7 @@ const HostVmsListDecorated = ({ vms, config, dispatch, host }) => {
 const App = ({ store }) => {
     const state = store.getState();
     const dispatch = store.dispatch;
-    const { vms, config } = state;
+    const { vms, config, systemInfo, ui } = state;
 
     let ovirtConfig, hosts, router;
     if (config.providerState) {
@@ -118,18 +176,18 @@ const App = ({ store }) => {
 
     let component = null;
     switch (route) {
-        case 'clustervms':
-            component = (<ClusterVms config={config} dispatch={dispatch}/>);
-            break;
-        case 'clustertemplates':
-            component = (<ClusterTemplates config={config} dispatch={dispatch}/>);
-            break;
-        case 'vdsm':
-            component = (<VdsmView/>);
-            break;
-        default:
-            component = (
-                <HostVmsListDecorated vms={vms} config={config} dispatch={dispatch} host={host} />);
+    case 'clustervms':
+        component = (<ClusterVms config={config} dispatch={dispatch} />);
+        break;
+    case 'clustertemplates':
+        component = (<ClusterTemplates config={config} dispatch={dispatch} />);
+        break;
+    case 'vdsm':
+        component = (<VdsmView />);
+        break;
+    default:
+        component = (
+            <HostVmsListDecorated vms={vms} config={config} systemInfo={systemInfo} ui={ui} dispatch={dispatch} host={host} />);
     }
 
     return (
@@ -141,6 +199,6 @@ const App = ({ store }) => {
 };
 App.propTypes = {
     store: React.PropTypes.object.isRequired
-}
+};
 
 export default App;

@@ -1,8 +1,15 @@
-@import (less) "/page.css";
-@import "/listing.less";
-@import (less) "/table.css";
+@import (less) "../lib/page.css";
+@import "../lib/listing.less";
+@import (less) "../lib/table.css";
 
 @import (less) "../../node_modules/c3/c3.css";
+
+// For patternfly-react and @patternfly/react-console
+@import "~xterm/dist/xterm.css";
+@import "~bootstrap/less/variables";
+@import "~patternfly/dist/less/variables";
+@import "~patternfly-react/dist/less/patternfly-react.less";
+@import "~@patternfly/react-console/dist/less/console.less";
 
 .icon-2x-vms {
     font-size: 2em;
@@ -13,11 +20,6 @@
 
 .machines-width-max {
     width: 100%;
-}
-
-.btn + .dropdown-menu.dropdown-menu-right  {
-    right: -4px;
-    left: auto;
 }
 
 .usage-donut-caption {
@@ -61,6 +63,7 @@
 
 .machines-console-frame {
     height: 1px; /* keep at minimum, down-sizing does not work */
+    margin-top: 1em;
 }
 
 .machines-console-frame-vnc {
@@ -87,13 +90,6 @@
 
 .blue {
     color: #4babdc;
-}
-
-.machines-desktop-delimiter {
-    margin-top: 20px;
-    margin-bottom: 0px;
-    border: 0;
-    border-top: 1px solid #cccccc;
 }
 
 .machines-desktop-main {
@@ -150,10 +146,6 @@
     display: inline-flex;
 }
 
-.dropdown-buttons-container {
-    display: inline-flex !important;
-}
-
 .machines-network-source-descr {
     color: #888888;
     text-align: right;
@@ -197,4 +189,64 @@
     max-height: 500px;
     overflow: auto;
     padding-bottom: 15px;
+}
+
+.panel-heading .btn {
+    margin-left: 3px;
+}
+
+.console-menu {
+    padding-bottom: 1em;
+}
+
+.console-actions-buttons {
+    margin-left: 5px;
+}
+
+.console-actions {
+    float: right;
+    position: relative;
+    top: -2em;
+}
+
+.console-type-select {
+    width: 19em !important;
+}
+
+.machines-status-alert {
+    padding-right: 5px;
+}
+
+.vcpu-detail-modal-table {
+    width: 100%;
+}
+
+.vcpu-detail-modal-table td {
+    width: 50%;
+}
+
+.vcpu-detail-modal-table tr td:first-child {
+    padding-top: 0.25em;
+    display: inherit;
+}
+
+table.vcpu-detail-modal-right td {
+    width: 25%;
+}
+
+table.vcpu-detail-modal-right input {
+    height: 25px;
+}
+
+table.vcpu-detail-modal-right .btn-group.bootstrap-select.dropdown {
+    width: 110px;
+}
+
+.vcpu-detail-modal-table tr td.machines-vcpu-caution:first-child {
+    width: 100%;
+    display: table-cell;
+}
+
+#machines-vcpu-modal-dialog div.modal-body {
+    overflow: visible;
 }

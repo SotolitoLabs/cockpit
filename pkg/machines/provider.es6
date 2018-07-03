@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -82,17 +81,16 @@ function getVirtProvider (store) {
  * Lazily initializes the virt provider and dispatches given method on it.
  */
 export function virt(method, action) {
-    return (dispatch, getState) => getVirtProvider({dispatch, getState}).fail(err => {
-        console.error('could not detect any virt provider');
-    }).then(provider => {
-        if (method in provider) {
-            logDebug(`Calling ${provider.name}.${method}`, action);
-            return dispatch(provider[method](action));
-        } else {
-            var msg = `method: '${method}' is not supported by provider: '${provider.name}'`;
-            console.warn(msg);
-            return cockpit.reject(msg);
-        }
-    });
+    return (dispatch, getState) => getVirtProvider({dispatch, getState})
+            .fail(() => console.error('could not detect any virt provider'))
+            .then(provider => {
+                if (method in provider) {
+                    logDebug(`Calling ${provider.name}.${method}`, action);
+                    return dispatch(provider[method](action));
+                } else {
+                    var msg = `method: '${method}' is not supported by provider: '${provider.name}'`;
+                    console.warn(msg);
+                    return cockpit.reject(msg);
+                }
+            });
 }
-

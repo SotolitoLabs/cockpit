@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -19,16 +18,14 @@
  */
 import React from "react";
 
-React;
-
 // TODO: replace this by Cockpit's modal dialog
 const ConfirmButtons = ({ confirmText, dismissText, onYes, onNo }) => {
     return (
         <span>
-        <button className='btn btn-danger btn-xs' type='button' onClick={onYes}>{confirmText}</button>
+            <button className='btn btn-danger btn-xs' type='button' onClick={onYes}>{confirmText}</button>
             &nbsp;
             <button className='btn btn-primary btn-xs' type='button' onClick={onNo}>{dismissText}</button>
-      </span>
+        </span>
     );
 };
 

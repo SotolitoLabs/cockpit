@@ -54,9 +54,9 @@ class checklogin_basic(Test):
         deny_non_root("/etc/pam.d/sshd")
 
         b.open("/system")
-        b.wait_visible("#login")
 
         def login(user, password):
+            b.wait_visible("#login")
             b.wait_not_present("#login-button:disabled")
             b.set_val('#login-user-input', user)
             b.set_val('#login-password-input', password)
@@ -95,9 +95,9 @@ class checklogin_basic(Test):
         b.wait_text("#account-user-name", "admin")
 
         c.allow_journal_messages("Returning error-response ... with reason .*",
-                                 "pam_unix\(cockpit:auth\): authentication failure; .*",
-                                 "pam_unix\(cockpit:auth\): check pass; user unknown",
-                                 "pam_succeed_if\(cockpit:auth\): requirement .* not met by user .*")
+                                 r"pam_unix\(cockpit:auth\): authentication failure; .*",
+                                 r"pam_unix\(cockpit:auth\): check pass; user unknown",
+                                 r"pam_succeed_if\(cockpit:auth\): requirement .* not met by user .*")
 
         c.tearDown()
 

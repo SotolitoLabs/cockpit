@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -20,28 +19,11 @@
 import cockpit from 'cockpit';
 import React from "react";
 
-import { vmId } from '../../machines/helpers.es6';
 import { formatDateTime } from '../helpers.es6';
-
-React;
-const _ = cockpit.gettext;
 
 import './VmOverviewColumn.css';
 
-const VmProperty = ({ title, value, id }) => {
-    return (
-        <tr>
-            <td>
-                <label className='control-label'>
-                    {title}
-                </label>
-            </td>
-            <td id={id}>
-                {value}
-            </td>
-        </tr>
-    );
-};
+const _ = cockpit.gettext;
 
 const VmIcon = ({ icons, iconId }) => {
     if (!iconId || !icons || !icons[iconId] || !icons[iconId].data) {
@@ -56,30 +38,25 @@ const VmIcon = ({ icons, iconId }) => {
     );
 };
 
-const VmOverviewColumn = ({ vm, providerState }) => { // For reference, extend if needed
+/**
+ * Additional (oVirt-specific) columns for the Overview subatb
+ */
+const vmOverviewExtra = (vm, providerState) => {
     const clusterVm = providerState.vms[vm.id];
     if (!clusterVm) { // not an oVirt-managed VM
-        return null;
+        return [];
     }
 
-    const idPrefix =`${vmId(vm.name)}-ovirt`;
-
-    return (
-        <td className='ovirt-provider-listing-top-column'>
-            <div className='ovirt-provider-columns-container'>
-                <div className='ovirt-provider-columns-one'>
-                    <table className='form-table-ct'>
-                        <VmProperty title={_("Description:")} value={clusterVm.description} id={`${idPrefix}-description`} />
-                        <VmProperty title={_("Address:")} value={clusterVm.fqdn} id={`${idPrefix}-fqdn`} />
-                        <VmProperty title={_("Running Since:")} value={formatDateTime(clusterVm.startTime)} id={`${idPrefix}-starttime`} />
-                    </table>
-                </div>
-                <div className='ovirt-provider-columns-two'>
-                    <VmIcon icons={providerState.icons} iconId={clusterVm.icons.largeId} />
-                </div>
-            </div>
-        </td>
-    );
+    return [
+        [
+            { title: _("Description:"), value: clusterVm.description, idPostfix: 'ovirt-description' },
+            { title: _("Address:"), value: clusterVm.fqdn, idPostfix: 'ovirt-fqdn' },
+            { title: _("Running Since:"), value: formatDateTime(clusterVm.startTime), idPostfix: 'ovirt-starttime' },
+        ],
+        [
+            { title: null, value: (<VmIcon icons={providerState.icons} iconId={clusterVm.icons.largeId} />), idPostfix: 'ovirt-icon' },
+        ],
+    ];
 };
 
-export default VmOverviewColumn;
+export default vmOverviewExtra;

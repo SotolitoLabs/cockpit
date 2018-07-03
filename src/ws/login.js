@@ -1,10 +1,18 @@
 /* global XMLHttpRequest */
 
-var phantom_checkpoint = phantom_checkpoint || function () { };
-
 (function(console) {
+    var localStorage;
+
+    /* Some browsers fail localStorage access due to corruption, preventing Cockpit login */
+    try {
+        localStorage = window.localStorage;
+        window.localStorage.removeItem('url-root');
+    } catch (ex) {
+        localStorage = window.sessionStorage;
+        console.warn(String(ex));
+    }
+
     var url_root;
-    window.localStorage.removeItem('url-root');
     var environment = window.environment || { };
     var oauth = environment.OAuth || null;
     if (oauth) {
@@ -100,7 +108,7 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
 
     function brand(_id, def) {
         var style, elt = id(_id);
-        if (elt)
+        if (elt && window.getComputedStyle)
             style = window.getComputedStyle(elt, ":before");
 
         if (!style)
@@ -136,7 +144,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
         }
         return ("MozWebSocket" in window || req("WebSocket", window)) &&
                req("XMLHttpRequest", window) &&
-               req("localStorage", window) &&
                req("sessionStorage", window) &&
                req("JSON", window) &&
                req("defineProperty", Object) &&
@@ -167,7 +174,7 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
         parser.href = base;
         if (parser.pathname != "/") {
             url_root = parser.pathname.replace(/^\/+|\/+$/g, '');
-            window.localStorage.setItem('url-root', url_root);
+            localStorage.setItem('url-root', url_root);
             if (url_root && path.indexOf('/' + url_root) === 0)
                 path = path.replace('/' + url_root, '') || '/';
         }
@@ -213,7 +220,7 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
 
         // Setup title
         var title = environment.page.title;
-        if (!title)
+        if (!title || application.indexOf("cockpit+=") === 0)
             title = environment.hostname;
         document.title = title;
 
@@ -225,6 +232,9 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
             brand("brand", "Cockpit");
         }
 
+        if (!requisites())
+            return;
+
         id("option-group").addEventListener("click", toggle_options);
         id("server-clear").addEventListener("click", function () {
             var el = id("server-field");
@@ -232,17 +242,14 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
             el.focus();
         });
 
-        if (!requisites())
-            return;
-
         /* Setup the user's last choice about the authorized button */
-        var authorized = window.localStorage.getItem('authorized-default') || "";
+        var authorized = localStorage.getItem('authorized-default') || "";
         if (authorized.indexOf("password") !== -1)
             id("authorized-input").checked = true;
 
         var os_release = environment["os-release"];
         if (os_release)
-            window.localStorage.setItem('os-release', JSON.stringify(os_release));
+            localStorage.setItem('os-release', JSON.stringify(os_release));
 
         var logout_intent = window.sessionStorage.getItem("logout-intent") == "explicit";
         if (logout_intent)
@@ -391,11 +398,18 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
         }
     }
 
+    function need_host() {
+        return environment.page.require_host &&
+            org_application.indexOf("cockpit+=") === -1;
+    }
+
     function call_login() {
         login_failure(null);
         var machine, user = trim(id("login-user-input").value);
         if (user === "") {
             login_failure(_("User name cannot be empty"));
+        } else if (need_host() && id("server-field").value === "") {
+            login_failure(_("Please specify the host to connect to"));
         } else {
             machine = id("server-field").value;
             if (machine) {
@@ -413,7 +427,7 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
             /* When checked we tell the server to keep authentication */
             var authorized = id("authorized-input").checked ? "password" : "";
             var password = id("login-password-input").value;
-            window.localStorage.setItem('authorized-default', authorized);
+            localStorage.setItem('authorized-default', authorized);
 
             var headers = {
                 "Authorization": "Basic " + window.btoa(utf8(user + ":" + password)),
@@ -427,15 +441,22 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
     function show_form(in_conversation) {
         var connectable = environment.page.connect;
         var expanded = id("option-group").getAttribute("data-state");
+
         id("login-wait-validating").style.display = "none";
         id("login").style.visibility = 'visible';
         id("login").style.display = "block";
         id("user-group").style.display = in_conversation ? "none" : "block";
         id("password-group").style.display = in_conversation ? "none" : "block";
-        id("option-group").style.display = !connectable || in_conversation ? "none" : "block";
         id("conversation-group").style.display = in_conversation ? "block" : "none";
-        id("login-button-text").textContent = "Log In";
+        id("login-button-text").textContent = _("Log In");
         id("login-password-input").value = '';
+
+        if (need_host()) {
+            id("option-group").style.display = "none";
+            expanded = true;
+        } else {
+            id("option-group").style.display = !connectable || in_conversation ? "none" : "block";
+        }
 
         if (!connectable || in_conversation) {
             id("server-group").style.display = "none";
@@ -453,7 +474,7 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
     function show_login() {
         /* Show the login screen */
         id("server-name").textContent = document.title;
-        login_note("Log in with your server user account.");
+        login_note(_("Log in with your server user account."));
         id("login-user-input").addEventListener("keydown", function(e) {
             login_failure(null);
             if (e.which == 13)
@@ -471,7 +492,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
 
         show_form();
         id("login-user-input").focus();
-        phantom_checkpoint();
     }
 
     function show_converse(prompt_data) {
@@ -489,8 +509,8 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
 
         var ei = id("conversation-input");
         ei.value = "";
-        if (prompt_data.default)
-            ei.value = prompt_data.default;
+        if (prompt_data["default"])
+            ei.value = prompt_data["default"];
         ei.setAttribute('type', type);
         ei.focus();
 
@@ -513,7 +533,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
         id("conversation-input").addEventListener("keydown", key_down);
         id("login-button").addEventListener("click", call_converse);
         show_form(true);
-        phantom_checkpoint();
     }
 
     function utf8(str) {
@@ -610,7 +629,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
                 fatal(format(_("$0 error"), xhr.status));
             }
             id("login-button").removeAttribute('disabled');
-            phantom_checkpoint();
         };
         xhr.send();
     }
@@ -662,7 +680,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
             } else {
                 login_reload (embeded_url);
             }
-            phantom_checkpoint();
         };
         xhr.send();
     }
@@ -689,30 +706,26 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
         /* Clear anything prefixed with our application
          * and login-data, but not other non-application values.
          */
-        window.localStorage.removeItem('login-data');
-        clear_storage (window.localStorage, application, false);
+        localStorage.removeItem('login-data');
+        clear_storage(localStorage, application, false);
 
         var str;
         if (response && response["login-data"]) {
             str = JSON.stringify(response["login-data"]);
-            try {
-                /* login-data is tied to the auth cookie, since
-                 * cookies are available after the page
-                 * session ends login-data should be too.
-                 */
-                window.localStorage.setItem(application + 'login-data', str);
-                /* Backwards compatbility for packages that aren't application prefixed */
-                window.localStorage.setItem('login-data', str);
-            } catch(ex) {
-                console.warn("Error storing login-data:", ex);
-            }
+            /* login-data is tied to the auth cookie, since
+             * cookies are available after the page
+             * session ends login-data should be too.
+             */
+            localStorage.setItem(application + 'login-data', str);
+            /* Backwards compatbility for packages that aren't application prefixed */
+            localStorage.setItem('login-data', str);
         }
 
         /* URL Root is set by cockpit ws and shouldn't be prefixed
          * by application
          */
         if (url_root)
-            window.localStorage.setItem('url-root', url_root);
+            localStorage.setItem('url-root', url_root);
     }
 
     function run(response) {

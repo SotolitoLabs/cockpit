@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -22,7 +21,6 @@ import React from "react";
 
 import CONFIG from '../config.es6';
 
-React;
 const _ = cockpit.gettext;
 
 const ConsoleClientResources = ({ vm, providerState }) => {
@@ -32,7 +30,7 @@ const ConsoleClientResources = ({ vm, providerState }) => {
     }
 
     const msg = cockpit.format(_("Please refer to oVirt's $0 for more information about Remote Viewer setup."),
-        `<a href="${CONFIG.CONSOLE_CLIENT_RESOURCES_URL}" target="_blank">Console Client Resources</a>`);
+                               `<a href="${CONFIG.CONSOLE_CLIENT_RESOURCES_URL}" target="_blank">Console Client Resources</a>`);
 
     return (
         <div dangerouslySetInnerHTML={{__html: msg}} />

@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -23,7 +23,7 @@ from testlib import *
 from netlib import *
 
 class TestNetworking(NetworkCase):
-    @skipImage("No 'tun' support", "centos-7", "rhel-atomic", "ubuntu-1604", "ubuntu-stable")
+    @skipImage("No 'tun' support", "rhel-atomic", "ubuntu-1604")
     def testOther(self):
         b = self.browser
         m = self.machine

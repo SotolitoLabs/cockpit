@@ -8,7 +8,7 @@
         These can be accessed from menu via <emphasis>Virtual Machines</emphasis></para>
 
     <para>Primary datasource is <ulink url="https://www.qemu.org/">QEMU</ulink> / <ulink url="https://libvirt.org/">Libvirt</ulink>,
-        access to Libvirtd is wrapped by the <ulink url="http://libvirt.org/virshcmdref.html">virsh</ulink> tool.</para>
+        access to Libvirtd is wrapped by the <ulink url="https://libvirt.org/virshcmdref.html">virsh</ulink> tool.</para>
 
     <section id="feature-virtualmachines-nestedvirtualization">
     <title>Nested Virtualization</title>
@@ -29,12 +29,12 @@
             of providers (i.e. <link linkend="feature-ovirtvirtualmachines">oVirt Virtual Machines</link>).
         </para>
         <para>
-            Both <emphasis>cockpit-ovirt</emphasis> and <emphasis>cockpit-machines</emphasis> RPM packages can be
+            Both <emphasis>cockpit-machines-ovirt</emphasis> and <emphasis>cockpit-machines</emphasis> RPM packages can be
             installed together but only one of them can be loaded at a time depending on the <emphasis>priority</emphasis>
             attribute set in <emphasis>manifest.json</emphasis> files.
         </para>
         <para>
-            By default, <emphasis>cockpit-ovirt</emphasis> takes precedence over <emphasis>cockpit-machines</emphasis>.
+            By default, <emphasis>cockpit-machines-ovirt</emphasis> takes precedence over <emphasis>cockpit-machines</emphasis>.
         </para>
 
     </section>

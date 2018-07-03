@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -32,8 +31,6 @@ import './InstallationDialog.css';
 
 const _ = cockpit.gettext;
 
-React;
-
 const INSTALL_SH_ERRORS = {
     '1': _("oVirt Provider installation script failed due to missing arguments."),
     '3': _("oVirt Provider installation script failed: Can't write to /etc/cockpit/machines-ovirt.config, try as root."),
@@ -45,7 +42,7 @@ const InstallationDialogBody = ({ values, onChange }) => {
             <table className='form-table-ct'>
                 <tr>
                     <td className='top'>
-                        <label className='control-label' for='ovirt-provider-install-dialog-engine-fqdn'>
+                        <label className='control-label' htmlFor='ovirt-provider-install-dialog-engine-fqdn'>
                             {_("FQDN")}
                         </label>
                     </td>
@@ -55,15 +52,15 @@ const InstallationDialogBody = ({ values, onChange }) => {
                                type='text'
                                placeholder='engine.mydomain.com'
                                onChange={(event) => {
-                                       values.oVirtUrl = event.target.value;
-                                       onChange();
-                                   }}
+                                   values.oVirtUrl = event.target.value;
+                                   onChange();
+                               }}
                         />
                     </td>
                 </tr>
                 <tr>
                     <td className='top'>
-                        <label className='control-label' for='ovirt-provider-install-dialog-engine-port'>
+                        <label className='control-label' htmlFor='ovirt-provider-install-dialog-engine-port'>
                             {_("Port")}
                         </label>
                     </td>
@@ -89,9 +86,9 @@ const InstallationDialogBody = ({ values, onChange }) => {
             </table>
         </div>
     );
-}
+};
 
-function installationDialog() {
+function installationDialog({ onCancel }) {
     // TODO: check for root user (permission to write to configuration file)
 
     const values = {
@@ -101,16 +98,18 @@ function installationDialog() {
 
     const dlg = show_modal_dialog(
         { title: _("Connect to oVirt Engine"),
-          body: <InstallationDialogBody values={values} onChange={() => dlg.render()}/>
+          body: <InstallationDialogBody values={values} onChange={() => dlg.render()} />
         },
-        { actions: [
-            { caption: _("Register oVirt"),
-                style: 'primary',
-                clicked: () => {
-                    return configureOvirtUrl(values.oVirtUrl, values.oVirtPort);
-                }
-            }
-        ]
+        {
+            actions: [
+                {
+                    caption: _("Register oVirt"),
+                    style: 'primary',
+                    clicked: () => {
+                        return configureOvirtUrl(values.oVirtUrl, values.oVirtPort);
+                    }
+                }],
+            "cancel_clicked": () => onCancel && onCancel()
         });
 }
 
@@ -129,7 +128,7 @@ function configureOvirtUrl(oVirtFqdn, oVirtPort) {
     const failHandler = (ex, data) => {
         if (ex && ex.status === 302) { // Found, redirects would follow
             doRegisterOvirt(oVirtFqdn, oVirtPort, dfd);
-            return ;
+            return;
         }
 
         console.info('Unable to access oVirt engine: ', JSON.stringify(ex), JSON.stringify(data));
@@ -142,28 +141,30 @@ function configureOvirtUrl(oVirtFqdn, oVirtPort) {
         '/ovirt-engine' // contextRoot - just the main page, the API would require authorization
     ).then(() => {
         doRegisterOvirt(oVirtFqdn, oVirtPort, dfd);
-    }).fail(failHandler);
+    })
+            .fail(failHandler);
 
     return dfd.promise;
 }
 
 function doRegisterOvirt(oVirtFqdn, oVirtPort, dfd) {
     console.info('configureOvirtUrl() - oVirt engine connection can be established', oVirtFqdn, oVirtPort);
+    // CONNECTION URI is not passed as an argument here, so oVirt default will be farther used - see configFuncs.es6:readConfiguration()
     cockpit.spawn(['bash', INSTALL_SH, oVirtFqdn, oVirtPort], {"superuser": "try"})
-        .done(function () {
-            console.info('oVirt installation script was successful');
-            window.location.reload(); // to force configuration reload
-            dfd.resolve();
-        })
-        .fail(function (ex, data) {
-            logError('oVirt installation script failed. Exception: ', JSON.stringify(ex), ', output: ', JSON.stringify(data));
+            .done(function () {
+                console.info('oVirt installation script was successful');
+                window.location.reload(); // to force configuration reload
+                dfd.resolve();
+            })
+            .fail(function (ex, data) {
+                logError('oVirt installation script failed. Exception: ', JSON.stringify(ex), ', output: ', JSON.stringify(data));
 
-            let errMsg = _("oVirt installation script failed with following output: ") + (ex.message || data);
-            if (ex.exit_status && ex.exit_status >= 1) {
-                errMsg = INSTALL_SH_ERRORS[ex.exit_status] || errMsg;
-            }
-            dfd.reject(errMsg);
-        });
+                let errMsg = _("oVirt installation script failed with following output: ") + (ex.message || data);
+                if (ex.exit_status && ex.exit_status >= 1) {
+                    errMsg = INSTALL_SH_ERRORS[ex.exit_status] || errMsg;
+                }
+                dfd.reject(errMsg);
+            });
 }
 
 export default installationDialog;

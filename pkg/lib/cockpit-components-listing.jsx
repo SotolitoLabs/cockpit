@@ -45,6 +45,7 @@ require('./listing.less');
  * selectChanged optional: callback will be used when the "selected" state changes
  * selected optional: true if the item is selected, can't be true if row has navigation or expansion
  * initiallyExpanded optional: the entry will be initially rendered as expanded, but then behaves normally
+ * expandChanged optional: callback will be used if the row is either expanded or collapsed passing single `isExpanded` boolean argument
  */
 var ListingRow = React.createClass({
     propTypes: {
@@ -57,6 +58,7 @@ var ListingRow = React.createClass({
         selectChanged: React.PropTypes.func,
         selected: React.PropTypes.bool,
         initiallyExpanded: React.PropTypes.bool,
+        expandChanged: React.PropTypes.func,
         initiallyActiveTab: React.PropTypes.bool,
     },
     getDefaultProps: function () {
@@ -68,9 +70,9 @@ var ListingRow = React.createClass({
     getInitialState: function() {
         return {
             expanded: this.props.initiallyExpanded, // show expanded view if true, otherwise one line compact
-            activeTab: this.props.initiallyActiveTab ? this.props.initiallyActiveTab : 0,    // currently active tab in expanded mode, defaults to first tab
-            loadedTabs: {},  // which tabs were already loaded - this is important for 'loadOnDemand' setting
-                             // contains tab indices
+            activeTab: this.props.initiallyActiveTab ? this.props.initiallyActiveTab : 0, // currently active tab in expanded mode, defaults to first tab
+            loadedTabs: {}, // which tabs were already loaded - this is important for 'loadOnDemand' setting
+            // contains tab indices
             selected: this.props.selected, // whether the current row is selected
         };
     },
@@ -86,7 +88,7 @@ var ListingRow = React.createClass({
             return;
 
         var willBeExpanded = !this.state.expanded && this.props.tabRenderers.length > 0;
-        this.setState( { expanded: willBeExpanded });
+        this.setState({ expanded: willBeExpanded });
 
         var loadedTabs = {};
         // unload all tabs if not expanded
@@ -107,7 +109,9 @@ var ListingRow = React.createClass({
             loadedTabs[this.state.activeTab] = true;
         }
 
-        this.setState( { loadedTabs: loadedTabs });
+        this.setState({ loadedTabs: loadedTabs });
+
+        this.props.expandChanged && this.props.expandChanged(willBeExpanded);
 
         e.stopPropagation();
         e.preventDefault();
@@ -118,7 +122,7 @@ var ListingRow = React.createClass({
             return;
 
         var selected = !this.state.selected;
-        this.setState( { selected: selected });
+        this.setState({ selected: selected });
 
         if (this.props.selectChanged)
             this.props.selectChanged(selected);
@@ -167,11 +171,11 @@ var ListingRow = React.createClass({
         var allowExpand = (this.props.tabRenderers.length > 0);
         var expandToggle;
         if (allowExpand) {
-            expandToggle = <td className="listing-ct-toggle" onClick={ allowNavigate?this.handleExpandClick:undefined }>
-                               <i className="fa fa-fw"></i>
-                           </td>;
+            expandToggle = <td className="listing-ct-toggle" onClick={ allowNavigate ? this.handleExpandClick : undefined }>
+                <i className="fa fa-fw" />
+            </td>;
         } else {
-            expandToggle = <td className="listing-ct-toggle"></td>;
+            expandToggle = <td className="listing-ct-toggle" />;
         }
 
         var listingItemClasses = ["listing-ct-item"];
@@ -206,7 +210,7 @@ var ListingRow = React.createClass({
             var links = this.props.tabRenderers.map(function(itm, idx) {
                 return (
                     <li key={idx} className={ (idx === self.state.activeTab) ? "active" : ""} >
-                        <a href="#" onClick={ self.handleTabClick.bind(self, idx) }>{itm.name}</a>
+                        <a href="#" tabIndex="0" onClick={ self.handleTabClick.bind(self, idx) }>{itm.name}</a>
                     </li>
                 );
             });
@@ -240,7 +244,7 @@ var ListingRow = React.createClass({
                 <tbody className="open">
                     {listingItem}
                     <tr className="listing-ct-panel">
-                        <td colSpan={ headerEntries.length + (expandToggle?1:0) }>
+                        <td colSpan={ headerEntries.length + (expandToggle ? 1 : 0) }>
                             <div className="listing-ct-head">
                                 <div className="listing-ct-actions">
                                     {listingDetail}
@@ -259,7 +263,7 @@ var ListingRow = React.createClass({
             return (
                 <tbody>
                     {listingItem}
-                    <tr className="listing-ct-panel"/>
+                    <tr className="listing-ct-panel" />
                 </tbody>
             );
         }
@@ -273,6 +277,8 @@ var ListingRow = React.createClass({
  * - fullWidth optional: set width to 100% of parent, defaults to true
  * - emptyCaption header caption to show if list is empty, defaults to "No entries"
  * - columnTitles: array of column titles, as strings
+ * - columnTitleClick: optional callback for clicking on column title (for sorting)
+ *                     receives the column index as argument
  * - actions: additional listing-wide actions (displayed next to the list's title)
  */
 var Listing = React.createClass({
@@ -281,6 +287,7 @@ var Listing = React.createClass({
         fullWidth: React.PropTypes.bool,
         emptyCaption: React.PropTypes.string.isRequired,
         columnTitles: React.PropTypes.arrayOf(React.PropTypes.string),
+        columnTitleClick: React.PropTypes.func,
         actions: React.PropTypes.arrayOf(React.PropTypes.node)
     },
     getDefaultProps: function () {
@@ -291,6 +298,7 @@ var Listing = React.createClass({
         };
     },
     render: function() {
+        var self = this;
         var bodyClasses = ["listing", "listing-ct"];
         if (this.props.fullWidth)
             bodyClasses.push("listing-ct-wide");
@@ -318,12 +326,17 @@ var Listing = React.createClass({
 
             headerRow = (
                 <tr>
-                    <th className="listing-ct-toggle"></th>
-                    { this.props.columnTitles.map(function (title) { return <th>{title}</th>; }) }
+                    <th className="listing-ct-toggle" />
+                    { this.props.columnTitles.map(function (title, index) {
+                        var clickHandler = null;
+                        if (self.props.columnTitleClick)
+                            clickHandler = function() { self.props.columnTitleClick(index) };
+                        return <th onClick={clickHandler}>{title}</th>;
+                    }) }
                 </tr>
             );
         } else {
-           headerRow = <tr/>
+            headerRow = <tr />
         }
         var caption;
         if (this.props.title || (this.props.actions && this.props.actions.length > 0))

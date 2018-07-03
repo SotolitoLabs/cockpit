@@ -49,7 +49,7 @@ var PatternDialogBody = React.createClass({
         if (this.props.url == 'custom') {
             customURL = (
                 <input id="subscription-register-url-custom" className="form-control" type="text"
-                 value={this.props.serverUrl} onChange={this.props.onChange.bind(this, 'serverUrl')} />
+                    value={this.props.serverUrl} onChange={this.props.onChange.bind(this, 'serverUrl')} />
             );
         }
         var proxy;
@@ -60,37 +60,37 @@ var PatternDialogBody = React.createClass({
                     <tbody>
                         <tr>
                             <td>
-                                <label className="control-label" for="subscription-proxy-server">
+                                <label className="control-label" htmlFor="subscription-proxy-server">
                                     {_("Server")}
                                 </label>
                             </td>
                             <td><input className="form-control" id="subscription-proxy-server" type="text"
                                        placeholder="hostname:port" value={this.props.proxyServer}
-                                       onChange={this.props.onChange.bind(this, 'proxyServer')}/>
+                                       onChange={this.props.onChange.bind(this, 'proxyServer')} />
                             </td>
                         </tr>
 
                         <tr>
                             <td>
-                                <label className="control-label" for="subscription-proxy-user">
+                                <label className="control-label" htmlFor="subscription-proxy-user">
                                     {_("User")}
                                 </label>
                             </td>
                             <td><input className="form-control" id="subscription-proxy-user" type="text"
                                        value={this.props.proxyUser}
-                                       onChange={this.props.onChange.bind(this, 'proxyUser')}/>
+                                       onChange={this.props.onChange.bind(this, 'proxyUser')} />
                             </td>
                         </tr>
 
                         <tr>
                             <td>
-                                <label className="control-label" for="subscription-proxy-password">
+                                <label className="control-label" htmlFor="subscription-proxy-password">
                                     {_("Password")}
                                 </label>
                             </td>
                             <td><input className="form-control" id="subscription-proxy-password" type="password"
                                        value={this.props.proxyPassword}
-                                       onChange={this.props.onChange.bind(this, 'proxyPassword')}/>
+                                       onChange={this.props.onChange.bind(this, 'proxyPassword')} />
                             </td>
                         </tr>
                     </tbody>
@@ -106,7 +106,7 @@ var PatternDialogBody = React.createClass({
                 <table className="form-table-ct">
                     <tr>
                         <td className="top">
-                            <label className="control-label" for="subscription-register-url">
+                            <label className="control-label" htmlFor="subscription-register-url">
                                 {_("URL")}
                             </label>
                         </td>
@@ -128,7 +128,7 @@ var PatternDialogBody = React.createClass({
                         <td>
                             <label>
                                 <input id="subscription-proxy-use" type="checkbox" checked={this.props.proxy}
-                                       onChange={ this.props.onChange.bind(this, 'proxy') }/>
+                                       onChange={ this.props.onChange.bind(this, 'proxy') } />
                                 {_("Use proxy server")}
                             </label>
                             {proxy}
@@ -136,50 +136,50 @@ var PatternDialogBody = React.createClass({
                     </tr>
                     <tr>
                         <td className="top ">
-                            <label className="control-label" for="subscription-register-username">
+                            <label className="control-label" htmlFor="subscription-register-username">
                                 {_("Login")}
                             </label>
                         </td>
                         <td>
                             <input id="subscription-register-username" className="form-control" type="text"
                                    value={this.props.user}
-                                   onChange={this.props.onChange.bind(this, 'user')}/>
+                                   onChange={this.props.onChange.bind(this, 'user')} />
                         </td>
                     </tr>
                     <tr>
                         <td className="top">
-                            <label className="control-label" for="subscription-register-password">
+                            <label className="control-label" htmlFor="subscription-register-password">
                                 {_("Password")}
                             </label>
                         </td>
                         <td>
                             <input id="subscription-register-password" className="form-control" type="password"
                                    value={this.props.password}
-                                   onChange={this.props.onChange.bind(this, 'password')}/>
+                                   onChange={this.props.onChange.bind(this, 'password')} />
                         </td>
                     </tr>
                     <tr>
                         <td className="top">
-                            <label className="control-label" for="subscription-register-key">
+                            <label className="control-label" htmlFor="subscription-register-key">
                                 {_("Activation Key")}
                             </label>
                         </td>
                         <td>
                             <input id="subscription-register-key" className="form-control" type="text"
                                    placeholder="key_one,key_two" value={this.props.activationKeys}
-                                   onChange={this.props.onChange.bind(this, 'activationKeys')}/>
+                                   onChange={this.props.onChange.bind(this, 'activationKeys')} />
                         </td>
                     </tr>
                     <tr>
                         <td className="top">
-                            <label className="control-label" for="subscription-register-org">
+                            <label className="control-label" htmlFor="subscription-register-org">
                                 {_("Organization")}
                             </label>
                         </td>
                         <td>
                             <input id="subscription-register-org" className="form-control" type="text"
                                    value={this.props.org}
-                                   onChange={this.props.onChange.bind(this, 'org')}/>
+                                   onChange={this.props.onChange.bind(this, 'org')} />
                         </td>
                     </tr>
                 </table>

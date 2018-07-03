@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -53,6 +53,29 @@ class TestAccounts(MachineCase):
         b.wait_visible("#accounts")
         b.wait_not_in_text('#accounts-list', "Anton Arbitrary")
 
+        # Check root user
+        b.go("#/root")
+        b.wait_present("#account")
+        b.wait_visible("#account")
+        b.wait_text("#account-user-name", "root")
+        # some operations are not allowed for root user
+        b.wait_present("#account-delete.disabled")
+        b.wait_present("#account-logout")
+        b.wait_attr("#account-logout", "disabled", "disabled")
+        b.wait_present("#account-real-name-wrapper.disabled")
+        b.wait_present("#account-locked:not(:checked)")
+        # root account should not be locked by default on our images
+        self.assertIn(m.execute("passwd -S root").split()[1], ["P", "PS"])
+        # (un)locking root account introduced in version 161
+        if m.image != 'rhel-7-5':
+            # now lock account
+            b.set_checked("#account-locked", True)
+            b.wait(lambda: m.execute("passwd -S root").split()[1] in ["L", "LK"])
+
+        # go back to accounts overview, check breadcrumb
+        b.click("#account .breadcrumb a")
+        b.wait_present("#accounts-create")
+
         # Create a user from the UI
         b.click('#accounts-create')
         b.wait_popup('accounts-create-dialog')
@@ -75,22 +98,27 @@ class TestAccounts(MachineCase):
         b.set_val('#accounts-create-real-name', "Jussi Junior")
         b.set_val('#accounts-create-pw1', good_password)
         b.set_val('#accounts-create-pw2', good_password)
-        b.set_val('#accounts-create-locked', "yes")
+        b.set_checked('#accounts-create-locked', True)
         b.click('#accounts-create-create')
         b.wait_popdown('accounts-create-dialog')
         b.wait_in_text('#accounts-list', "Jussi Junior")
 
         admin_role_sel = 'input[data-name="%s"]' % m.get_admin_group()
+        b.wait(lambda: "jussi" in m.execute("grep jussi /etc/passwd"))
+        b.wait(lambda: "jussi" not in m.execute("grep %s /etc/group" % m.get_admin_group()))
 
         # Unlock it and make it an admin
         b.go("#/jussi")
         b.wait_visible("#account")
         b.wait_text("#account-user-name", "jussi")
-        b.set_val('#accounts-create-locked', "no")
+        b.set_checked('#account-locked', False)
         b.wait_present(admin_role_sel + ":not(:checked)")
         b.set_checked(admin_role_sel, True)
         b.wait_present(admin_role_sel + ":checked")
         b.wait(lambda: "jussi" in m.execute("grep %s /etc/group" % m.get_admin_group()))
+        # An alert which shows up once we've changed things
+        if m.image != 'rhel-7-5':
+            b.wait_present("#account-roles .alert-info")
         b.set_checked(admin_role_sel, False)
         b.wait_present(admin_role_sel + ":not(:checked)")
         b.wait(lambda: "jussi" not in m.execute("grep %s /etc/group" % m.get_admin_group()))
@@ -139,7 +167,6 @@ class TestAccounts(MachineCase):
                 return value.strip()
         return None
 
-    @skipImage("Not available with Cockpit 138", "rhel-7-4")
     def testExpire(self):
         m = self.machine
         b = self.browser

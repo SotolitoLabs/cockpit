@@ -34,19 +34,6 @@ WS_DIR = $(srcdir)/containers/ws
 
 CLEANFILES += $(WS_DIR)/rpms
 
-# needed for installed integration tests
-ATOMIC_SETUP = \
-	$(WS_DIR)/atomic-install   \
-	$(WS_DIR)/atomic-run       \
-	$(WS_DIR)/atomic-uninstall \
-	$(NULL)
-
-EXTRA_DIST += $(ATOMIC_SETUP)
-
-install-integration-tests::
-	$(MKDIR_P) $(DESTDIR)/$(pkgdatadir)/containers/ws/
-	$(INSTALL_PROGRAM) $(ATOMIC_SETUP) $(DESTDIR)/$(pkgdatadir)/containers/ws/
-
 ws-container:
 	rm -rf $(WS_DIR)/rpms && mkdir -p $(WS_DIR)/rpms
 	cd $(WS_DIR)/rpms && $(abs_srcdir)/tools/make-rpms
@@ -61,7 +48,7 @@ UNIT_TESTS_DIR = $(srcdir)/containers/unit-tests
 unit-tests-container:
 	sudo docker build -t cockpit/unit-tests $(UNIT_TESTS_DIR)
 	sudo docker tag  cockpit/unit-tests:latest docker.io/cockpit/unit-tests:latest
-	sudo docker build --build-arg arch=i386 -t cockpit/unit-tests:i386 containers/unit-tests/
+	sudo docker build --build-arg arch=i386 -t cockpit/unit-tests:i386 $(UNIT_TESTS_DIR)
 	sudo docker tag  cockpit/unit-tests:i386 docker.io/cockpit/unit-tests:i386
 
 unit-tests-container-run:

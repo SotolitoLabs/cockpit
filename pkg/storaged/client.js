@@ -22,12 +22,15 @@
 
     var $ = require('jquery');
     var cockpit = require('cockpit');
+    var PK = require('packagekit.es6');
 
     var utils = require('./utils');
 
     var python = require("python.jsx");
     var inotify_py = require("raw!inotify.py");
     var nfs_mounts_py = require("raw!./nfs-mounts.py");
+    var vdo_monitor_py = require("raw!./vdo-monitor.py");
+    var cockpit_clevis_tool_py = require("raw!./cockpit-clevis-tool.py");
 
     /* STORAGED CLIENT
      */
@@ -50,6 +53,8 @@
             data: { },
             close: close
         };
+
+        cockpit.event_target(self);
 
         function handle_meta(msg) {
             self.data = { };
@@ -76,7 +81,7 @@
                 }
             }
             if (changed)
-                $(self).triggerHandler('changed');
+                self.dispatchEvent('changed');
         }
 
         var channel = cockpit.channel({ payload: "metrics1",
@@ -240,7 +245,7 @@
 
         client.slashdevs_block = { };
         function enter_slashdev(block, enc) {
-            client.slashdevs_block[utils.decode_filename(enc).replace(/^\/dev\//, "")] = block;
+            client.slashdevs_block[utils.decode_filename(enc)] = block;
         }
         for (path in client.blocks) {
             block = client.blocks[path];
@@ -332,6 +337,8 @@
 
         client.path_jobs = { };
         function enter_job(job) {
+            if (!job.Objects || !job.Objects.length)
+                return;
             job.Objects.forEach(function (path) {
                 client.path_jobs[path] = job;
                 var parent = utils.get_parent(client, path);
@@ -367,11 +374,11 @@
                 });
         }
 
-        function enable_features() {
+        function enable_udisks_features() {
             if (!client.manager.valid)
-                return cockpit.resolve(false);
+                return cockpit.resolve();
             if (!client.manager.EnableModules)
-                return cockpit.resolve({ });
+                return cockpit.resolve();
             return client.manager.EnableModules(true).then(
                 function() {
                     var defer = cockpit.defer();
@@ -379,16 +386,122 @@
                     client.manager_iscsi = proxy("Manager.ISCSI.Initiator", "Manager");
                     wait_all([ client.manager_lvm2, client.manager_iscsi],
                             function () {
-                                var iscsi = (hacks.with_storaged_iscsi_sessions != "no" &&
-                                        client.manager_iscsi.valid &&
-                                        client.manager_iscsi.SessionsSupported !== false);
-                                defer.resolve({ lvm2: client.manager_lvm2.valid, iscsi: iscsi });
+                                client.features.lvm2 = client.manager_lvm2.valid;
+                                client.features.iscsi = (hacks.with_storaged_iscsi_sessions != "no" &&
+                                                         client.manager_iscsi.valid &&
+                                                         client.manager_iscsi.SessionsSupported !== false);
+                                defer.resolve();
                             });
                     return defer.promise;
                 }, function(error) {
                     console.warn("Can't enable storaged modules", error.toString());
-                    return cockpit.resolve({ });
+                    return cockpit.resolve();
                 });
+        }
+
+        function enable_vdo_features() {
+            return cockpit.spawn([ "which", "vdo" ], { err: "ignore" }).then(
+                function () {
+                    client.features.vdo = true;
+                    client.vdo_overlay.start();
+                    return cockpit.resolve();
+                },
+                function () {
+                    return cockpit.resolve();
+                });
+        }
+
+        function enable_clevis_features() {
+            if (window.localStorage["clevis-feature"] != "on")
+                return cockpit.resolve();
+
+            return cockpit.spawn([ "which", "clevis" ], { err: "ignore" }).then(
+                function () {
+                    client.features.clevis = true;
+                    client.clevis_overlay.start();
+                    return cockpit.resolve();
+                },
+                function () {
+                    return cockpit.resolve();
+                });
+        }
+
+        function enable_nfs_features() {
+            return cockpit.spawn([ "which", "mount.nfs" ], { err: "ignore" }).then(
+                function () {
+                    client.features.nfs = true;
+                    client.nfs.start();
+                    return cockpit.resolve();
+                },
+                function () {
+                    return cockpit.resolve();
+                });
+        }
+
+        function enable_pk_features() {
+            return PK.detect().then(function (available) { client.features.packagekit = available; });
+        }
+
+        function enable_features() {
+            client.features = { };
+            return (enable_udisks_features()
+                    .then(enable_vdo_features)
+                    .then(enable_clevis_features)
+                    .then(enable_nfs_features)
+                    .then(enable_pk_features));
+        }
+
+        function query_fsys_info() {
+            var info = {
+                xfs: {
+                    can_format: true,
+                    can_shrink: false,
+                    can_grow: true,
+                    grow_needs_unmount: false
+                },
+
+                ext4: {
+                    can_format: true,
+                    can_shrink: true,
+                    shrink_needs_unmount: true,
+                    can_grow: true,
+                    grow_needs_unmount: false
+                },
+            };
+
+            if (client.manager.SupportedFilesystems && client.manager.CanResize) {
+                return cockpit.all(client.manager.SupportedFilesystems.map(function (fs) {
+                    return client.manager.CanFormat(fs).then(
+                        function (canformat_result) {
+                            info[fs] = {
+                                can_format: canformat_result[0],
+                                can_shrink: false,
+                                can_grow: false
+                            };
+                            return client.manager.CanResize(fs).then(
+                                function (canresize_result) {
+                                    // We assume that all filesystems support
+                                    // offline shrinking/growing if they
+                                    // support shrinking or growing at all.
+                                    // The actual resizing utility will
+                                    // temporarily mount the fs if necessary,
+                                    if (canresize_result[0]) {
+                                        info[fs].can_shrink = !!(canresize_result[1] & 2);
+                                        info[fs].shrink_needs_unmount = !(canresize_result[1] & 8);
+                                        info[fs].can_grow = !!(canresize_result[1] & 4);
+                                        info[fs].grow_needs_unmount = !(canresize_result[1] & 16);
+                                    }
+                                },
+                                function () {
+                                    // ignore unsupported filesystems
+                                });
+                        });
+                })).then(function () {
+                    return info;
+                });
+            } else {
+                return cockpit.resolve(info);
+            }
         }
 
         wait_all([ client.manager,
@@ -396,9 +509,11 @@
                    client.blocks, client.blocks_ptable, client.blocks_lvm2, client.blocks_fsys
                  ], function () {
             pull_time().then(function() {
-                enable_features().then(function(features) {
-                    client.features = features;
-                    callback();
+                enable_features().then(function() {
+                    query_fsys_info().then(function(fsys_info) {
+                        client.fsys_info = fsys_info;
+                        callback();
+                    });
                 });
 
                 $(client.storaged_client).on('notify', function () {
@@ -422,6 +537,8 @@
             entries: [ ],
             fsys_sizes: { },
 
+            start: start,
+
             get_fsys_size: get_fsys_size,
             entry_users: entry_users,
 
@@ -432,32 +549,36 @@
             mount_entry: mount_entry,
             unmount_entry: unmount_entry,
             stop_and_unmount_entry: stop_and_unmount_entry,
-            stop_and_remove_entry: stop_and_remove_entry
+            stop_and_remove_entry: stop_and_remove_entry,
+
+            find_entry: find_entry
         };
 
         function spawn_nfs_mounts(args) {
             return python.spawn([ inotify_py, nfs_mounts_py ], args, { superuser: "try", err: "message" });
         }
 
-        var buf = "";
-        spawn_nfs_mounts([ "monitor" ])
-            .stream(function (output) {
-                var lines;
+        function start() {
+            var buf = "";
+            spawn_nfs_mounts([ "monitor" ])
+                .stream(function (output) {
+                    var lines;
 
-                buf += output;
-                lines = buf.split("\n");
-                buf = lines[lines.length-1];
-                if (lines.length >= 2) {
-                    self.entries = JSON.parse(lines[lines.length-2]);
-                    self.fsys_sizes = { };
-                    $(self).triggerHandler('changed');
-                }
-            }).
-            fail(function (error) {
-                if (error != "closed") {
-                    console.warn(error);
-                }
-            });
+                    buf += output;
+                    lines = buf.split("\n");
+                    buf = lines[lines.length-1];
+                    if (lines.length >= 2) {
+                        self.entries = JSON.parse(lines[lines.length-2]);
+                        self.fsys_sizes = { };
+                        client.dispatchEvent('changed');
+                    }
+                }).
+                fail(function (error) {
+                    if (error != "closed") {
+                        console.warn(error);
+                    }
+                });
+        }
 
         function get_fsys_size(entry) {
             var path = entry.fields[1];
@@ -472,11 +593,11 @@
                 .done(function (output) {
                     var data = JSON.parse(output);
                     self.fsys_sizes[path] = [ (data[2]-data[1])*data[0], data[2]*data[0] ];
-                    $(self).triggerHandler('changed');
+                    client.dispatchEvent('changed');
                 })
                 .fail(function () {
                     self.fsys_sizes[path] = [ 0, 0 ];
-                    $(self).triggerHandler('changed');
+                    client.dispatchEvent('changed');
                 });
 
             return null;
@@ -516,10 +637,269 @@
             return spawn_nfs_mounts([ "users", JSON.stringify(entry) ]).then(JSON.parse);
         }
 
+        function find_entry(remote, local) {
+            for (var i = 0; i < self.entries.length; i++) {
+                if (self.entries[i].fields[0] == remote && self.entries[i].fields[1] == local)
+                    return self.entries[i];
+            }
+        }
+
         return self;
     }
 
     client.nfs = nfs_mounts();
+
+    /* VDO */
+
+    function vdo_overlay() {
+        var self = {
+            start: start,
+
+            volumes: [ ],
+
+            by_name: { },
+            by_dev: { },
+            by_backing_dev: { },
+
+            find_by_block: find_by_block,
+            find_by_backing_block: find_by_backing_block,
+
+            create: create
+        };
+
+        function cmd(args) {
+            return cockpit.spawn([ "vdo" ].concat(args),
+                                 { superuser: true,
+                                   err: "message"
+                                 });
+        }
+
+        function update(data) {
+            self.by_name = { };
+            self.by_dev = { };
+            self.by_backing_dev = { };
+
+            self.volumes = data.map(function (vol, index) {
+                var name = vol.name;
+
+                function volcmd(args) {
+                    return cmd(args.concat([ "--name", name ]));
+                }
+
+                var v = { name: name,
+                          broken: vol.broken,
+                          dev: "/dev/mapper/" + name,
+                          backing_dev: vol.device,
+                          logical_size: vol.logical_size,
+                          physical_size: vol.physical_size,
+                          index_mem: vol.index_mem,
+                          compression: vol.compression,
+                          deduplication: vol.deduplication,
+                          activated: vol.activated,
+
+                          set_compression: function(val) {
+                              return volcmd([ val? "enableCompression" : "disableCompression" ]);
+                          },
+
+                          set_deduplication: function(val) {
+                              return volcmd([ val? "enableDeduplication" : "disableDeduplication" ]);
+                          },
+
+                          set_activate: function(val) {
+                              return volcmd([ val? "activate" : "deactivate" ]);
+                          },
+
+                          start: function() {
+                              return volcmd([ "start" ]);
+                          },
+
+                          stop: function() {
+                              return volcmd([ "stop" ]);
+                          },
+
+                          remove: function() {
+                              return volcmd([ "remove" ]);
+                          },
+
+                          force_remove: function() {
+                              return volcmd([ "remove", "--force" ]);
+                          },
+
+                          grow_physical: function() {
+                              return volcmd([ "growPhysical" ]);
+                          },
+
+                          grow_logical: function(lsize) {
+                              return volcmd([ "growLogical", "--vdoLogicalSize", lsize + "B" ]);
+                          }
+                        };
+
+                self.by_name[v.name] = v;
+                self.by_dev[v.dev] = v;
+                self.by_backing_dev[v.backing_dev] = v;
+
+                return v;
+            });
+
+            // We trigger a change on the client right away and not
+            // just on the vdo_overlay since this data is used all
+            // over the place...
+
+            client.dispatchEvent("changed");
+        }
+
+        function start() {
+            var buf = "";
+            cockpit.spawn([ "python", "--", "-" ], { superuser: "try", err: "message" })
+                .input(inotify_py + vdo_monitor_py)
+                .stream(function (output) {
+                    var lines;
+
+                    buf += output;
+                    lines = buf.split("\n");
+                    buf = lines[lines.length-1];
+                    if (lines.length >= 2) {
+                        self.entries = JSON.parse(lines[lines.length-2]);
+                        self.fsys_sizes = { };
+                        $(self).triggerHandler('changed');
+                        update(JSON.parse(lines[lines.length-2]));
+                    }
+                }).
+                fail(function (error) {
+                    if (error != "closed") {
+                        console.warn(error);
+                    }
+                });
+        }
+
+        function some(array, func) {
+            var i;
+            for (i = 0; i < array.length; i++) {
+                var val = func(array[i]);
+                if (val)
+                    return val;
+            }
+            return null;
+        }
+
+        function find_by_block(block) {
+            function check(encoded) { return self.by_dev[utils.decode_filename(encoded)]; }
+            return check(block.Device) || some(block.Symlinks, check);
+        }
+
+        function find_by_backing_block(block) {
+            function check(encoded) { return self.by_backing_dev[utils.decode_filename(encoded)]; }
+            return check(block.Device) || some(block.Symlinks, check);
+        }
+
+        function create(options) {
+            var args = [ "create", "--name", options.name,
+                         "--device", utils.decode_filename(options.block.PreferredDevice) ];
+            if (options.logical_size !== undefined)
+                args.push("--vdoLogicalSize", options.logical_size + "B");
+            if (options.index_mem !== undefined)
+                args.push("--indexMem", options.index_mem / (1024*1024*1024));
+            if (options.compression !== undefined)
+                args.push("--compression", options.compression? "enabled" : "disabled");
+            if (options.deduplication !== undefined)
+                args.push("--deduplication", options.deduplication? "enabled" : "disabled");
+            if (options.emulate_512 !== undefined)
+                args.push("--emulate512", options.emulate_512? "enabled" : "disabled");
+            return cmd(args);
+        }
+
+        return self;
+    }
+
+    client.vdo_overlay = vdo_overlay();
+
+    /* HACK - clevis */
+
+    function clevis_overlay() {
+        var self = {
+            start: start,
+
+            info: { },
+
+            find_by_block: find_by_block,
+
+            remove: remove,
+            get_tang_adv: get_tang_adv,
+            add: add,
+            check_key: check_key,
+            replace: replace,
+            unlock: unlock
+        };
+
+        function spawn_tool(args) {
+            return cockpit.spawn([ "python3", "--", "-" ].concat(args), { superuser: "try", err: "message" })
+                .input(cockpit_clevis_tool_py);
+        }
+
+        function start() {
+            var buf = "";
+            spawn_tool([ "monitor" ])
+                .stream(function (output) {
+                    var lines;
+
+                    buf += output;
+                    lines = buf.split("\n");
+                    buf = lines[lines.length-1];
+                    if (lines.length >= 2) {
+                        self.info = JSON.parse(lines[lines.length-2]);
+                        client.dispatchEvent("changed");
+                    }
+                }).
+                fail(function (error) {
+                    if (error != "closed") {
+                        console.warn(error);
+                    }
+                });
+        }
+
+        function some(array, func) {
+            var i;
+            for (i = 0; i < array.length; i++) {
+                var val = func(array[i]);
+                if (val)
+                    return val;
+            }
+            return null;
+        }
+
+        function find_by_block(block) {
+            function check(encoded) { return self.info[utils.decode_filename(encoded)]; }
+            return check(block.Device) || some(block.Symlinks, check);
+        }
+
+        function remove(block, key) {
+            return spawn_tool([ "remove", utils.decode_filename(block.Device), key.slot ]);
+        }
+
+        function get_tang_adv(url) {
+            return spawn_tool([ "get-tang-adv", url ]).then(JSON.parse);
+        }
+
+        function add(block, pin, config, passphrase) {
+            return spawn_tool([ "add", utils.decode_filename(block.Device), pin, JSON.stringify(config), passphrase ]);
+        }
+
+        function check_key(block, slot) {
+            return spawn_tool([ "check-key", utils.decode_filename(block.Device), slot ]);
+        }
+
+        function replace(block, slot, pin, config) {
+            return spawn_tool([ "replace", utils.decode_filename(block.Device), slot, pin, JSON.stringify(config) ]);
+        }
+
+        function unlock(block) {
+            return spawn_tool([ "unlock", utils.decode_filename(block.Device) ]);
+        }
+
+        return self;
+    }
+
+    client.clevis_overlay = clevis_overlay();
 
     function init_manager() {
         /* Storaged 2.6 and later uses the UDisks2 API names, but try the

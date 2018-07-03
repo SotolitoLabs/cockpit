@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -25,7 +24,6 @@ import './VdsmView.css';
 import { VDSM_CONF_FILE } from '../config.es6';
 import { logDebug, logError } from '../../machines/helpers.es6';
 
-React;
 const _ = cockpit.gettext;
 
 class VdsmConf extends React.Component { // TODO: needs design
@@ -60,32 +58,34 @@ class VdsmConf extends React.Component { // TODO: needs design
 
     doReload () {
         cockpit.file(VDSM_CONF_FILE).read()
-            .done( (content) => {
-                this.setState({ fileContent: content, changed: false, loaded: true });
-            }).fail( (error) => { // TODO: more visible for the user
-            logError(`Error reading ${VDSM_CONF_FILE}: ${JSON.stringify(error)}`);
-        })
+                .done((content) => {
+                    this.setState({ fileContent: content, changed: false, loaded: true });
+                })
+                .fail(error => { // TODO: more visible for the user
+                    logError(`Error reading ${VDSM_CONF_FILE}: ${JSON.stringify(error)}`);
+                })
     }
 
     doSave () {
         cockpit.file(VDSM_CONF_FILE, { superuser: 'try' }).replace(this.state.fileContent)
-            .done( () => {
-                logDebug('Content of vdsm.conf replaced.')
-                this.setState({ changed: false });
-            }).fail( (error) => {
-                logError(`Error writing ${VDSM_CONF_FILE}: ${JSON.stringify(error)}`);
-        })
+                .done(() => {
+                    logDebug('Content of vdsm.conf replaced.')
+                    this.setState({ changed: false });
+                })
+                .fail(error => {
+                    logError(`Error writing ${VDSM_CONF_FILE}: ${JSON.stringify(error)}`);
+                })
     }
 
-    onSave () {this.setState({saveConfirmation: true});} // render confirmation buttons
-    onSaveConfirmed () {this.doSave(); this.setState({saveConfirmation: false});}
-    onSaveCanceled () {this.setState({saveConfirmation: false});}
+    onSave () { this.setState({saveConfirmation: true}); } // render confirmation buttons
+    onSaveConfirmed () { this.doSave(); this.setState({saveConfirmation: false}); }
+    onSaveCanceled () { this.setState({saveConfirmation: false}); }
 
-    onReload () {this.setState({reloadConfirmation: true});} // render confirmation buttons
-    onReloadConfirmed () {this.doReload(); this.setState({reloadConfirmation: false});}
-    onReloadCanceled () {this.setState({reloadConfirmation: false});}
+    onReload () { this.setState({reloadConfirmation: true}); } // render confirmation buttons
+    onReloadConfirmed () { this.doReload(); this.setState({reloadConfirmation: false}); }
+    onReloadCanceled () { this.setState({reloadConfirmation: false}); }
 
-    onEditorChange (event) {this.setState({fileContent: event.target.value, changed: true});}
+    onEditorChange (event) { this.setState({fileContent: event.target.value, changed: true}); }
 
     render () {
         let reloadButton = null;
@@ -117,7 +117,7 @@ class VdsmConf extends React.Component { // TODO: needs design
 
         let loaded = null;
         if (this.state.loaded) {
-            loaded = (<div id='vdsmview-data-loaded'/>);
+            loaded = (<div id='vdsmview-data-loaded' />);
         }
 
         return (
@@ -129,20 +129,19 @@ class VdsmConf extends React.Component { // TODO: needs design
                 </a>
 
                 <div className='ovirt-provider-vdsm-menu'>
-                    <div className="ovirt-provider-vdsm-inline-block"></div>
+                    <div className="ovirt-provider-vdsm-inline-block" />
                     <div className='btn-group ovirt-provider-vdsm-menu-buttons'>
                         {saveButton}
                         {reloadButton}
                     </div>
                 </div>
 
-                <br/>
-                <textarea className='ovirt-provider-vdsm-editor' value={this.state.fileContent} onChange={this.onEditorChange}/>
+                <br />
+                <textarea className='ovirt-provider-vdsm-editor' value={this.state.fileContent} onChange={this.onEditorChange} />
 
                 {loaded}
             </div>
         );
-
     }
 }
 

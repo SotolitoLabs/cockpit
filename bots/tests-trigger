@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 
 import argparse
 import sys
@@ -17,7 +17,7 @@ def trigger_pull(api, opts):
     # triggering is manual, so don't prevent triggering a user that isn't on the whitelist
     # but issue a warning in case of an oversight
     login = pull["head"]["user"]["login"]
-    if not opts.allow and not login in github.whitelist():
+    if not opts.allow and not login in api.whitelist():
         sys.stderr.write("Pull request author '{0}' isn't whitelisted. Override with --allow.\n".format(login))
         return 1
 
@@ -62,11 +62,12 @@ def main():
                         help='Force setting the status even if the program logic thinks it shouldn''t be done')
     parser.add_argument('-a', '--allow', action='store_true', dest='allow',
                         help="Allow triggering for users that aren't whitelisted")
+    parser.add_argument('--repo', help="The repository to trigger the robots in", default="cockpit-project/cockpit")
     parser.add_argument('pull', help='The pull request to trigger')
     parser.add_argument('context', nargs='?', help='The github task context to trigger')
     opts = parser.parse_args()
 
-    api = github.GitHub()
+    api = github.GitHub(repo=opts.repo)
     return trigger_pull(api, opts)
 
 if __name__ == '__main__':

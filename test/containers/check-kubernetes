@@ -20,17 +20,16 @@
 
 import os
 import sys
+import time
 
-base_dir = os.path.dirname(os.path.realpath(__file__))
-test_dir = os.path.abspath(os.path.join(base_dir, ".."))
+test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(test_dir)
 
-try:
-    import testlib
-except:
-    sys.path.append(test_dir)
+from verify import parent
+parent # pyflakes
 
-from common.testlib import *
-from common.testvm import VirtMachine
+from testlib import *
+from testvm import VirtMachine
 from verify import kubelib
 
 class KubernetesContainerMachine(VirtMachine):
@@ -41,8 +40,6 @@ class KubernetesContainerMachine(VirtMachine):
             host = ""
 
         self.execute("""#!/bin/sh
-            # HACK: docker fails to start a container without /etc/resolv.conf
-            test -f /etc/resolv.conf || touch /etc/resolv.conf
             systemctl start docker
             # HACK: Allow container to talk to the host
             iptables -I INPUT 4 -i docker0 -j ACCEPT
@@ -65,14 +62,17 @@ class KubernetesContainerCase(kubelib.KubernetesCase):
         self.machine.execute("kubectl delete svc/kubernetes")
         self.stop_kubernetes()
         self.start_kubernetes()
-        super(KubernetesContainerCase, self).wait_api_server(**kwargs)
+        super(KubernetesContainerCase, self).wait_api_server(address='10.111.113.1', **kwargs)
+        # HACK: give kubernetes some time to start up (was previously hidden by a wait_api_server() bug, see commit db5d4083e)
+        time.sleep(20)
 
     def forbid_anon(self, **kwargs):
-        self.machine.execute("sed -i 's/--basic_auth_file=/--anonymous-auth=false --basic_auth_file=/g' /etc/kubernetes/apiserver")
+        self.machine.execute("sed -i 's/--basic-auth-file=/--anonymous-auth=false --basic_auth_file=/g' /etc/kubernetes/apiserver")
         self.restart_api_server(**kwargs)
 
     def wait_api_server(self, port=8080, timeout=60, scheme='http', forbid_anon=True):
-        super(KubernetesContainerCase, self).wait_api_server(port=port, timeout=timeout, scheme=scheme)
+        super(KubernetesContainerCase, self).wait_api_server(
+                port=port, timeout=timeout, scheme=scheme, address='10.111.113.1')
 
         if forbid_anon and self.get_bad_auth_code(port=port) == "403":
             self.forbid_anon(timeout=timeout, port=port, scheme=scheme)
@@ -165,8 +165,8 @@ class TestKubernetesLogin(KubernetesContainerCase):
 
         self.check_login("ABAC")
         m.execute("sed -i 's/--anonymous-auth=false//g' /etc/kubernetes/apiserver")
-        m.execute("sed -i 's#--authorization_policy_file=/etc/kubernetes/authorization##g' /etc/kubernetes/apiserver")
-        m.execute("sed -i 's/--authorization_mode=ABAC/--authorization_mode=RBAC/g' /etc/kubernetes/apiserver")
+        m.execute("sed -i 's#--authorization-policy-file=/etc/kubernetes/authorization##g' /etc/kubernetes/apiserver")
+        m.execute("sed -i 's/--authorization-mode=ABAC/--authorization-mode=RBAC/g' /etc/kubernetes/apiserver")
         self.restart_api_server(port=6443, scheme='https')
 
         self.check_login("RBAC")
@@ -179,11 +179,12 @@ class TestKubernetesLogin(KubernetesContainerCase):
         # broke having an open API. So if api is closed
         # make use RBAC and make cluster bindings
         if self.get_bad_auth_code(port=6443) == "401":
-            m.execute("echo 'KUBE_API_ARGS=\"--authorization_mode=RBAC\"' >> /etc/kubernetes/apiserver")
+            m.execute("echo 'KUBE_API_ARGS=\"--authorization-mode=RBAC\"' >> /etc/kubernetes/apiserver")
             m.execute("kubectl create clusterrolebinding anon-cluster-admin-binding --clusterrole=cluster-admin --user=system:anonymous")
             self.restart_api_server(port=6443, scheme='https')
 
         b.reload()
+        b.expect_load_frame("cockpit1:localhost/kubernetes")
         b.wait_present("#content")
         b.wait_text('#content-user-name', 'Unauthenticated')
         b.wait_in_text("title", "Kubernetes Cockpit")

@@ -42,8 +42,7 @@ function update_accounts_privileged() {
             permission.user ? permission.user.name : '')
     );
     $(".accounts-privileged").find("input")
-        .attr('disabled', permission.allowed === false ||
-                          $('#account-user-name').text() === 'root');
+        .attr('disabled', permission.allowed === false);
 
     // enable fields for current account.
     $(".accounts-current-account").update_privileged(
@@ -57,6 +56,7 @@ function update_accounts_privileged() {
                                       _("Unable to delete root account"));
         $("#account-real-name-wrapper").update_privileged({allowed: false},
                                       _("Unable to rename root account"));
+        $("#account-real-name").prop('disabled', true);
     }
 }
 
@@ -594,7 +594,7 @@ function PageAccountsCreate() {
 
 PageAccount.prototype = {
     _init: function(user) {
-        this.id = "account";
+        this.id = "account-page";
         this.section_id = "accounts";
         this.roles = [];
         this.role_template = $("#role-entry-tmpl").html();
@@ -674,13 +674,17 @@ PageAccount.prototype = {
             var accounts = parse_passwd_content(content);
 
             for (var i = 0; i < accounts.length; i++) {
-               if (accounts[i]["name"] !== self.account_id)
-                  continue;
+                if (accounts[i]["name"] !== self.account_id)
+                    continue;
 
-               self.account = accounts[i];
-               self.setup_keys(self.account.name, self.account.home);
-               self.update();
+                self.account = accounts[i];
+                self.setup_keys(self.account.name, self.account.home);
+                self.update();
+                return;
             }
+
+           /* no such account find, clear it */
+           self.account = null;
         }
 
         this.handle_passwd = cockpit.file('/etc/passwd');
@@ -695,6 +699,8 @@ PageAccount.prototype = {
             parse_user(content);
             if (!saw_shadow)
                 self.get_expire();
+            if (self.account)
+                self.get_locked();
         });
         self.handle_shadow.watch(function() {
             saw_shadow = true;
@@ -708,7 +714,8 @@ PageAccount.prototype = {
         var role_groups = {
             "wheel":   _("Server Administrator"),
             "sudo":    _("Server Administrator"),
-            "docker":  _("Container Administrator")
+            "docker":  _("Container Administrator"),
+            "weldr":   _("Image Builder")
         };
 
         function parse_groups(content) {
@@ -927,7 +934,7 @@ PageAccount.prototype = {
             else
                 $('#account-last-login').text(this.lastLogin.toLocaleString());
 
-            if (typeof this.locked != 'undefined' && this.account["uid"] !== 0) {
+            if (typeof this.locked != 'undefined') {
                 $('#account-locked').prop('checked', this.locked);
                 $('#account-locked').prop('disabled', false);
             } else {
@@ -953,7 +960,7 @@ PageAccount.prototype = {
 
             if (this.account["uid"] !== 0) {
                 var html = Mustache.render(this.role_template,
-                                           { "roles": this.roles});
+                                           { "roles": this.roles, "changed": this.roles_changed });
                 $('#account-change-roles-roles').html(html);
                 $('#account-roles').parents('tr').show();
                 $("#account-change-roles-roles :input")
@@ -982,20 +989,31 @@ PageAccount.prototype = {
     },
 
     change_role: function(ev) {
+        var self = this;
         var name = $(ev.target).data("name");
         var id = $(ev.target).data("gid");
         if (!name || !id || !this.account["name"])
             return;
 
-        if ($(ev.target).prop('checked')) {
-            cockpit.spawn(["/usr/sbin/usermod", this.account["name"],
-                           "-G", id, "-a"], { "superuser": "require", err: "message" })
-               .fail(show_unexpected_error);
+        var proc;
+        var checked = $(ev.target).prop('checked');
+        if (checked) {
+            proc = cockpit.spawn(["/usr/sbin/usermod", this.account["name"], "-G", id, "-a"],
+                                 { "superuser": "require", err: "message" });
         } else {
-            cockpit.spawn(["/usr/bin/gpasswd", "-d", this.account["name"],
-                           name], { "superuser": "require", err: "message" })
-                   .fail(show_unexpected_error);
+            proc = cockpit.spawn(["/usr/bin/gpasswd", "-d", this.account["name"], name],
+                                 { "superuser": "require", err: "message" });
         }
+
+        proc.then(function(data) {
+            if(!data && checked)
+                data = "Added " + self.account["name"] + " to group " + name;
+            else if (!data && !checked)
+                data = "Removed " + self.account["name"] + " from group " + name;
+            console.log(data);
+            self.roles_changed = true;
+            self.update();
+        }, show_unexpected_error);
     },
 
     real_name_edited: function() {

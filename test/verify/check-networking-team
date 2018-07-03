@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -25,7 +25,7 @@ from netlib import *
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": { },
-        "machine2": { "image": "fedora-26", "address": "10.111.113.2/20", "dhcp": True }
+        "machine2": { "image": "fedora-28", "address": "10.111.113.2/20", "dhcp": True }
     }
 
     def testTeam(self):
@@ -34,8 +34,7 @@ class TestNetworking(NetworkCase):
 
         self.login_and_go("/network")
 
-        can_add_teams = m.image not in [ "continuous-atomic", "rhel-atomic",
-                                         "ubuntu-1604", "ubuntu-stable" ]
+        can_add_teams = m.image not in [ "continuous-atomic", "rhel-atomic", "ubuntu-1604" ]
 
         b.wait_attr("#networking-add-team", "data-test-stable", "yes")
         if not can_add_teams:
@@ -89,6 +88,33 @@ class TestNetworking(NetworkCase):
         # Due to above reload
         self.allow_journal_messages(".*Connection reset by peer.*",
                                     "connection unexpectedly closed by peer")
+
+    @skipImage("No teams",  "continuous-atomic", "rhel-atomic", "ubuntu-1604")
+    def testTeamActive(self):
+        b = self.browser
+
+        self.login_and_go("/network")
+
+        iface = self.add_iface()
+        self.wait_for_iface(iface)
+        ip = b.text("#networking-interfaces tr[data-interface='%s'] td:nth-child(2)" % iface)
+
+        # Put an active interface into a team.  The team should
+        # get the same IP as the active interface.
+
+        b.click("button:contains('Add Team')")
+        b.wait_popup("network-team-settings-dialog")
+        b.set_val("#network-team-settings-dialog tr:contains('Name') input", "tteam")
+        b.set_checked("input[data-iface='%s']" % iface, True)
+        b.click("#network-team-settings-dialog button:contains('Apply')")
+        b.wait_popdown("network-team-settings-dialog")
+        b.wait_present("#networking-interfaces tr[data-interface='tteam']")
+
+        # Check that it has the interface enslaved and the right IP address
+        b.click("#networking-interfaces tr[data-interface='tteam'] td:first-child")
+        b.wait_visible("#network-interface")
+        b.wait_present("#network-interface-slaves tr[data-interface='%s']" % iface)
+        b.wait_in_text("#network-interface .panel:contains('tteam')", ip)
 
 if __name__ == '__main__':
     test_main()

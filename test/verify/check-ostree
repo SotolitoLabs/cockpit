@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -105,7 +105,7 @@ def generate_new_commit(m, pkg_to_remove):
 
     commit_args = [REPO_LOCATION, branch.strip(), CHECKOUT_LOCATION, KEY_ID]
     command = "ostree commit -s cockpit-tree2 --repo {0} -b {1} --add-metadata-string version=cockpit-base.2 --tree=dir={2} --gpg-sign={3} --gpg-homedir=/root/"
-    m.execute(command.format(*commit_args))
+    m.execute(command.format(*commit_args), timeout=600)
     m.execute(["ostree", "summary", "--repo={}".format(REPO_LOCATION), "-u"])
 
 def rhsmcertd_hack(m):
@@ -114,7 +114,7 @@ def rhsmcertd_hack(m):
     m.execute("systemctl stop rhsmcertd || true")
 
 
-@skipImage("No OSTree available", "centos-7", "debian-stable", "debian-testing", "fedora-26", "fedora-27", "fedora-testing", "fedora-i386", "rhel-7", "rhel-7-4", "rhel-7-5", "ubuntu-1604", "ubuntu-stable")
+@skipImage("No OSTree available", "centos-7", "debian-stable", "debian-testing", "fedora-27", "fedora-28", "fedora-testing", "fedora-i386", "rhel-7", "rhel-7-5", "rhel-x", "ubuntu-1604", "ubuntu-stable")
 class OstreeRestartCase(MachineCase):
     provision = {
         "machine1": { "address": "10.111.113.2/20", "dns": "10.111.113.2" }
@@ -157,7 +157,7 @@ class OstreeRestartCase(MachineCase):
         rhsmcertd_hack(m)
 
         cockpit_shell = m.execute("rpm -qa | grep cockpit-ostree").strip()
-        cockpit_machines = m.execute("rpm -qa | grep cockpit-machines").strip()
+        cockpit_machines = m.execute("rpm -qa | grep cockpit-machines | grep -v cockpit-machines-ovirt").strip()
 
         self.login_and_go("/updates")
         b.enter_page("/updates")
@@ -326,15 +326,30 @@ class OstreeRestartCase(MachineCase):
         m.start_cockpit()
         b.reload()
         b.login_and_go("/updates")
-
-        # After reboot upgrade but no rollback target
         b.wait_present('table.listing-ct')
         b.wait_present('table.listing-ct tbody')
-        b.wait_present('table.listing-ct tbody:nth-child(3) i.fa-circle')
-        b.wait_in_text("table.listing-ct tbody:nth-child(3) div.listing-ct-actions button", "Update")
-        b.wait_present('table.listing-ct tbody:nth-child(4) i.fa-check-circle-o')
+
+        if m.image in ["fedora-atomic"]:
+            # newer rpm-ostree flips back and forth between the two latest releases with rollback
+            b.wait_present('table.listing-ct tbody:nth-child(3) i.fa-check-circle-o')
+            b.wait_text('table.listing-ct tbody:nth-child(3) div.listing-ct-head h3', name + " cockpit-base.1")
+            b.wait_in_text("table.listing-ct tbody:nth-child(3) div.listing-ct-head", "Running")
+
+            b.wait_present('table.listing-ct tbody:nth-child(4) i.fa-circle')
+            b.wait_text('table.listing-ct tbody:nth-child(4) div.listing-ct-head h3', name + " cockpit-base.2")
+            b.wait_present("table.listing-ct tbody:nth-child(4) div.listing-ct-head button")
+            b.wait_in_text("table.listing-ct tbody:nth-child(4) div.listing-ct-head button", "Roll Back")
+        else:
+            # older rpm-ostree doesn't "roll back" forwards to the current release, it appears as regular update
+            b.wait_present('table.listing-ct tbody:nth-child(3) i.fa-circle')
+            b.wait_text('table.listing-ct tbody:nth-child(3) div.listing-ct-head h3', name + " cockpit-base.2")
+            b.wait_in_text("table.listing-ct tbody:nth-child(3) div.listing-ct-actions button", "Update")
+
+            b.wait_present('table.listing-ct tbody:nth-child(4) i.fa-check-circle-o')
+            b.wait_text('table.listing-ct tbody:nth-child(4) div.listing-ct-head h3', name + " cockpit-base.1")
+            b.wait_not_present("button:contains('Roll Back')");
+
         b.wait_not_present('table.listing-ct tbody:nth-child(5)')
-        b.wait_not_present("button:contains('Roll Back')");
 
         self.allow_restart_journal_messages()
 
@@ -350,7 +365,7 @@ class OstreeRestartCase(MachineCase):
         # Add a new branch to the default repo
         m.execute(["ostree", "commit", "--repo={}".format(REPO_LOCATION),
                    "-b", "znew-branch", "--tree=ref={}".format(branch),
-                   "--add-metadata-string", "version=branch-version"])
+                   "--add-metadata-string", "version=branch-version"], timeout=600)
         m.execute(["ostree", "summary", "--repo={}".format(REPO_LOCATION), "-u"])
 
         rhsmcertd_hack(m)
@@ -391,6 +406,8 @@ class OstreeRestartCase(MachineCase):
         b.wait_in_text("table.listing-ct tbody:nth-child(3) div.packages", "contains the same packages as your currently booted")
 
         # Apply update
+        b.wait_present("table.listing-ct tbody:nth-child(3) div.listing-ct-actions button") # wait to be rendered
+        b.wait_not_present("table.listing-ct tbody:nth-child(3) div.listing-ct-actions button.disabled") # and enabled
         b.click("table.listing-ct tbody:nth-child(3) div.listing-ct-actions button")
         b.wait_present("table.listing-ct tbody:nth-child(3) div.ostree-progress")
         b.wait_not_present('table.listing-ct tbody:nth-child(3) div.listing-ct-error')
@@ -415,7 +432,7 @@ class OstreeRestartCase(MachineCase):
 
         self.allow_restart_journal_messages()
 
-@skipImage("No OSTree available", "centos-7", "debian-stable", "debian-testing", "fedora-26", "fedora-27", "fedora-testing", "fedora-i386", "rhel-7", "rhel-7-4", "rhel-7-5", "ubuntu-1604", "ubuntu-stable")
+@skipImage("No OSTree available", "centos-7", "debian-stable", "debian-testing", "fedora-27", "fedora-28", "fedora-testing", "fedora-i386", "rhel-7", "rhel-7-5", "rhel-x", "ubuntu-1604", "ubuntu-stable")
 class OstreeCase(MachineCase):
     provision = {
         "machine1": { "address": "10.111.113.2/20", "dns": "10.111.113.2" }
@@ -520,16 +537,16 @@ class OstreeCase(MachineCase):
         m.execute(["ostree", "init", "--repo", zrepo, "--mode", "archive-z2"])
         m.execute(["ostree", "commit", "--repo={}".format(zrepo),
                    "-b", "zremote-branch1", "--orphan", "--tree=dir=/tmp/rpm-data",
-                   "--add-metadata-string", "version=zremote-branch1.1"])
+                   "--add-metadata-string", "version=zremote-branch1.1"], timeout=600)
         m.execute(["ostree", "commit", "--repo={}".format(zrepo),
                    "-b", "zremote-branch2", "--orphan", "--tree=dir=/tmp/rpm-data",
-                   "--add-metadata-string", "version=zremote-branch2.1"])
+                   "--add-metadata-string", "version=zremote-branch2.1"], timeout=600)
         start_trivial_httpd(m, remote="zremote-test1", location=zrepo)
 
         # Add a new branch to the default repo
         m.execute(["ostree", "commit", "--repo={}".format(REPO_LOCATION),
                    "-b", branch, "--tree=ref={}".format(branch),
-                   "--add-metadata-string", "version=bad-version"])
+                   "--add-metadata-string", "version=bad-version"], timeout=600)
         m.execute(["ostree", "summary", "--repo={}".format(REPO_LOCATION), "-u"])
 
         # Edit
@@ -727,6 +744,7 @@ class OstreeCase(MachineCase):
         b.set_val("#login-user-input", "user")
         b.set_val("#login-password-input", "foobar")
         b.click('#login-button')
+        b.expect_load()
 
         b.enter_page("/updates")
 

@@ -1,12 +1,12 @@
 #!/bin/bash
-# Installation script of the cockpit-machines-ovirt-provider.
-# Required to be called after RPM installation and before Cockpit Machines cockpit-machines-ovirt-provider is accessed.
+# Installation script of the cockpit-machines-ovirt.
+# Required to be called after RPM installation and before Cockpit Machines cockpit-machines-ovirt is accessed.
 #
 # Main task: update configuration files for Engine URL
 # Reason: Engine URL can't be determined from VDSM host automatically, so it must be provided by the user.
 #
 # What it does:
-#      update cockpit-ovirt runtime configuration (to assemble oVirt REST API URL)
+#      update cockpit-machines-ovirt runtime configuration (to assemble oVirt REST API URL)
 #
 # How to run:
 #      either manually after rpm installations as root:
@@ -67,17 +67,7 @@ function generateProviderConfig() {
         > ${CONFIG_FILE} || exit ${EXIT_NO_ACCESS_MACHINES_OVIRT_CONFIG}
 
   if [ x${VIRSH_CONNECTION_URI} = x ] ; then
-    echo " \
-        \"Virsh\": { \
-            \"connections\": { \
-                \"system\": { \
-                    \"params\": [\"-c\", \"qemu:///system\"] \
-                }, \
-                \"session\": { \
-                    \"params\": [\"-c\", \"qemu:///session\"] \
-                } \
-            } \
-        }" >> ${CONFIG_FILE}
+    echo \"___info\": \"Default oVirt remote connection will be used\" >> ${CONFIG_FILE}
   else
     echo " \
         \"Virsh\": { \

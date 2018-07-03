@@ -24,6 +24,7 @@ Tools for writing Cockpit test cases.
 from time import sleep
 
 import argparse
+import base64
 import errno
 import subprocess
 import os
@@ -37,11 +38,12 @@ import re
 import json
 import tempfile
 import time
-import signal
 import unittest
+import gzip
 
 import tap
 import testvm
+import cdp
 
 TEST_DIR = os.path.normpath(os.path.dirname(os.path.realpath(os.path.join(__file__, ".."))))
 BOTS_DIR = os.path.normpath(os.path.join(TEST_DIR, "..", "bots"))
@@ -55,6 +57,8 @@ __all__ = (
     'Browser',
     'MachineCase',
     'skipImage',
+    'skipPackage',
+    'enableAxe',
     'Error',
 
     'sit',
@@ -91,19 +95,20 @@ class Browser:
             self.port = port
         self.default_user = "admin"
         self.label = label
-        self.phantom = Phantom("en_US.utf8")
+        path = os.path.dirname(__file__)
+        self.cdp = cdp.CDP("C.utf8", verbose=opts.trace, trace=opts.trace,
+                           inject_helpers=[os.path.join(path, "test-functions.js"), os.path.join(path, "sizzle.js")])
         self.password = "foobar"
 
     def title(self):
-        return self.phantom.eval('document.title')
+        return self.cdp.eval('document.title')
 
     def open(self, href, cookie=None):
         """
         Load a page into the browser.
 
         Arguments:
-          page: The path of the Cockpit page to load, such as "/dashboard".
-          url: The full URL to load.
+          href: The path of the Cockpit page to load, such as "/dashboard".
 
         Either PAGE or URL needs to be given.
 
@@ -113,58 +118,87 @@ class Browser:
         if href.startswith("/"):
             href = "http://%s:%s%s" % (self.address, self.port, href)
 
-        def tryopen(hard=False):
-            try:
-                self.phantom.kill()
-                if cookie is not None:
-                    self.phantom.cookies(cookie)
-                self.phantom.open(href)
-                return True
-            except:
-                if hard:
-                    raise
-                return False
+        if cookie:
+            self.cdp.invoke("Network.setCookie", **cookie)
+        self.switch_to_top()
+        self.cdp.invoke("Page.navigate", url=href)
+        self.expect_load()
 
-        tries = 0
-        while not tryopen(tries >= 20):
-            print("Restarting browser...")
-            sleep(0.1)
-            tries = tries + 1
-
-    def reload(self):
+    def reload(self, ignore_cache=False):
         self.switch_to_top()
         self.wait_js_cond("ph_select('iframe.container-frame').every(function (e) { return e.getAttribute('data-loaded'); })")
-        self.phantom.reload()
+        self.cdp.invoke("Page.reload", ignoreCache=ignore_cache)
+        self.expect_load()
 
     def expect_load(self):
-        self.phantom.expect_load()
+        if opts.trace:
+            print("-> expect_load")
+        self.cdp.command('expectLoad(%i)' % (self.cdp.timeout * 1000))
+        if opts.trace:
+            print("<- expect_load done")
+
+    def expect_load_frame(self, name):
+        if opts.trace:
+            print("-> expect_load_frame " + name)
+        self.cdp.command('expectLoadFrame(%s, %i)' % (jsquote(name), self.cdp.timeout * 1000))
+        if opts.trace:
+            print("<- expect_load_frame %s done" % name)
 
     def switch_to_frame(self, name):
-        self.phantom.switch_frame(name)
+        self.cdp.set_frame(name)
 
     def switch_to_top(self):
-        self.phantom.switch_top()
+        self.cdp.set_frame(None)
 
     def upload_file(self, selector, file):
-        self.phantom.upload_file(selector, file)
+        r = self.cdp.invoke("Runtime.evaluate", expression='document.querySelector(%s)' % jsquote(selector))
+        objectId = r["result"]["objectId"]
+        self.cdp.invoke("DOM.setFileInputFiles", files=[file], objectId=objectId)
 
-    def eval_js(self, code):
-        return self.phantom.eval(code)
+    def raise_cdp_exception(self, func, arg, details, trailer=None):
+        # unwrap a typical error string
+        if details.get("exception", {}).get("type") == "string":
+            msg = details["exception"]["value"]
+        else:
+            msg = str(details)
+        if trailer:
+            msg += "\n" + trailer
+        raise Error("%s(%s): %s" % (func, arg, msg))
+
+    def eval_js(self, code, no_trace=False):
+        result = self.cdp.invoke("Runtime.evaluate", expression=code, trace=code,
+                                 silent=False, awaitPromise=True, returnByValue=True, no_trace=no_trace)
+        if "exceptionDetails" in result:
+            self.raise_cdp_exception("eval_js", code, result["exceptionDetails"])
+        _type = result.get("result", {}).get("type")
+        if _type == 'object' and result["result"].get("subtype", "") == "error":
+            raise Error(result["result"]["description"])
+        if _type == "undefined":
+            return None
+        if _type and "value" in result["result"]:
+            return result["result"]["value"]
+
+        if opts.trace:
+            print("eval_js(%s): cannot interpret return value %s" % (code, result))
+        return None
 
     def call_js_func(self, func, *args):
-        return self.phantom.eval("%s(%s)" % (func, ','.join(map(jsquote, args))))
+        return self.eval_js("%s(%s)" % (func, ','.join(map(jsquote, args))))
 
     def cookie(self, name):
-        cookies = self.phantom.cookies()
-        for c in cookies:
-            if c['name'] == name:
-                return c['value']
+        cookies = self.cdp.invoke("Network.getCookies")
+        for c in cookies["cookies"]:
+            if c["name"] == name:
+                return c["value"]
         return None
 
     def go(self, hash, host="localhost"):
         # if not hash.startswith("/@"):
         #    hash = "/@" + host + hash
         self.call_js_func('ph_go', hash)
+
+    def mouse(self, selector, type_):
+        self.eval_js("ph_mouse_event(ph_find('%s'), '%s')" % (selector, type_))
 
     def click(self, selector, force=False):
         self.call_js_func('ph_click', selector, force)
@@ -191,7 +225,16 @@ class Browser:
         self.call_js_func('ph_focus', selector)
 
     def key_press(self, keys):
-        return self.phantom.keys('keypress', keys)
+        for k in keys:
+            if k.isalnum():
+                self.cdp.invoke("Input.dispatchKeyEvent", type="char", text=k, key=k)
+            else:
+                self.cdp.invoke("Input.dispatchKeyEvent", type="char", text=k)
+
+    def set_input_text(self, selector, val):
+        self.set_val(selector, "")
+        self.focus(selector)
+        self.key_press(val)
 
     def wait_timeout(self, timeout):
         browser = self
@@ -201,30 +244,29 @@ class Browser:
             def __enter__(self):
                 pass
             def __exit__(self, type, value, traceback):
-                browser.phantom.timeout = self.timeout
-        r = WaitParamsRestorer(self.phantom.timeout)
-        self.phantom.timeout = timeout
+                browser.cdp.timeout = self.timeout
+        r = WaitParamsRestorer(self.cdp.timeout)
+        self.cdp.timeout = timeout
         return r
 
     def wait(self, predicate):
-        def alarm_handler(signum, frame):
-            raise Error('timed out waiting for predicate to become true')
-
-        signal.signal(signal.SIGALRM, alarm_handler)
-        orig_handler = signal.alarm(self.phantom.timeout)
-        while True:
+        for _ in range(self.cdp.timeout * 5):
             val = predicate()
             if val:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, orig_handler)
                 return val
-            self.wait_checkpoint()
+            time.sleep(0.2)
+        raise Error('timed out waiting for predicate to become true')
 
     def wait_js_cond(self, cond):
-        return self.phantom.wait(cond)
+        result = self.cdp.invoke("Runtime.evaluate",
+                                 expression="ph_wait_cond(() => %s, %i)" % (cond, self.cdp.timeout * 1000),
+                                 silent=False, awaitPromise=True, trace="wait: " + cond)
+        if "exceptionDetails" in result:
+            trailer = "\n".join(self.cdp.get_js_log())
+            self.raise_cdp_exception("timeout\nwait_js_cond", cond, result["exceptionDetails"], trailer)
 
     def wait_js_func(self, func, *args):
-        return self.phantom.wait("%s(%s)" % (func, ','.join(map(jsquote, args))))
+        self.wait_js_cond("%s(%s)" % (func, ','.join(map(jsquote, args))))
 
     def is_present(self, selector):
         return self.call_js_func('ph_is_present', selector)
@@ -283,15 +325,6 @@ class Browser:
             id: The 'id' attribute of the popup.
         """
         self.wait_not_visible('#' + id)
-
-    def arm_timeout(self):
-        return self.phantom.arm_timeout(self.phantom.timeout * 1000)
-
-    def disarm_timeout(self):
-        return self.phantom.disarm_timeout()
-
-    def wait_checkpoint(self):
-        return self.phantom.wait_checkpoint()
 
     def dialog_complete(self, sel, button=".btn-primary", result="hide"):
         self.click(sel + " " + button)
@@ -388,8 +421,13 @@ class Browser:
         self.switch_to_top()
         self.wait_present("#navbar-dropdown")
         self.wait_visible("#navbar-dropdown")
-        self.click("#navbar-dropdown")
-        self.click('#go-logout')
+        if self.is_visible("button#machine-reconnect"):
+            # happens when shutting down cockpit or rebooting machine
+            self.click("button#machine-reconnect")
+        else:
+            # happens when cockpit is still running
+            self.click("#navbar-dropdown")
+            self.click('#go-logout')
         self.expect_load()
 
     def relogin(self, path=None, user=None, authorized=None):
@@ -412,29 +450,57 @@ class Browser:
                 host = None
             self.enter_page(path.split("#")[0], host=host)
 
+    def ignore_ssl_certificate_errors(self, ignore):
+        action = ignore and "continue" or "cancel"
+        if opts.trace:
+            print("-> Setting SSL certificate error policy to %s" % action)
+        self.cdp.command("new Promise((resolve, _) => { ssl_bad_certificate_action = '%s'; resolve() })" % action)
+
     def snapshot(self, title, label=None):
         """Take a snapshot of the current screen and save it as a PNG and HTML.
 
         Arguments:
             title: Used for the filename.
         """
-        if self.phantom and self.phantom.valid:
+        if self.cdp and self.cdp.valid:
             filename = "{0}-{1}.png".format(label or self.label, title)
-            self.phantom.show(filename)
-            attach(filename)
+            ret = self.cdp.invoke("Page.captureScreenshot", no_trace=True)
+            if "data" in ret:
+                with open(filename, 'wb') as f:
+                    f.write(base64.standard_b64decode(ret["data"]))
+                attach(filename)
+                print("Wrote screenshot to " + filename)
+            else:
+                print("Screenshot not available")
+
             filename = "{0}-{1}.html".format(label or self.label, title)
-            self.phantom.dump(filename)
+            html = self.cdp.invoke("Runtime.evaluate", expression="document.documentElement.outerHTML",
+                                   no_trace=True)["result"]["value"]
+            with open(filename, 'wb') as f:
+                f.write(html.encode('UTF-8'))
             attach(filename)
+            print("Wrote HTML dump to " + filename)
+
+    def get_js_log(self):
+        """Return the current javascript log"""
+
+        if self.cdp:
+            return self.cdp.get_js_log()
+        return []
 
     def copy_js_log(self, title, label=None):
         """Copy the current javascript log"""
-        if self.phantom and self.phantom.valid:
+
+        logs = list(self.get_js_log())
+        if logs:
             filename = "{0}-{1}.js.log".format(label or self.label, title)
-            self.phantom.dump_log(filename)
+            with open(filename, 'wb') as f:
+                f.write('\n'.join(logs).encode('UTF-8'))
             attach(filename)
+            print("Wrote JS log to " + filename)
 
     def kill(self):
-        self.phantom.kill()
+        self.cdp.kill()
 
 
 class MachineCase(unittest.TestCase):
@@ -602,11 +668,14 @@ class MachineCase(unittest.TestCase):
     def tearDown(self):
         if self.checkSuccess() and self.machine.ssh_reachable:
             self.check_journal_messages()
+            self.check_browser_messages()
         shutil.rmtree(self.tmpdir)
 
     def login_and_go(self, path=None, user=None, host=None, authorized=True):
         self.machine.start_cockpit(host)
         self.browser.login_and_go(path, user=user, host=host, authorized=authorized)
+
+    allow_core_dumps = False
 
     allowed_messages = [
         # This is a failed login, which happens every time
@@ -642,6 +711,8 @@ class MachineCase(unittest.TestCase):
         "(audit: )?type=1404 audit.*",
         # happens on Atomic (https://bugzilla.redhat.com/show_bug.cgi?id=1298157)
         "(audit: )?type=1400 audit.*: avc:  granted .*",
+        # HACK: affects *all* tests, impractical for a naughty (https://bugzilla.redhat.com/show_bug.cgi?id=1461893)
+        "type=1401 audit(.*): op=security_compute_av reason=bounds .* tclass=process.*",
 
         # https://bugzilla.redhat.com/show_bug.cgi?id=1242656
         "(audit: )?type=1400 .*denied.*comm=\"cockpit-ws\".*name=\"unix\".*dev=\"proc\".*",
@@ -662,10 +733,13 @@ class MachineCase(unittest.TestCase):
 
         # Various operating systems see this from time to time
         "Journal file.*truncated, ignoring file.",
+
+        # our core dump retrieval is not entirely reliable
+        "Failed to send coredump datagram:.*",
     ]
 
     def allow_journal_messages(self, *patterns):
-        """Don't fail if the journal containes a entry matching the given regexp"""
+        """Don't fail if the journal contains a entry matching the given regexp"""
         for p in patterns:
             self.allowed_messages.append(p)
 
@@ -679,6 +753,8 @@ class MachineCase(unittest.TestCase):
                                     ".*Broken pipe.*",
                                     "g_dbus_connection_real_closed: Remote peer vanished with error: Underlying GIOStream returned 0 bytes on an async read \\(g-io-error-quark, 0\\). Exiting.",
                                     "connection unexpectedly closed by peer",
+                                    "cockpit-session: .*timed out.*",
+                                    "ignoring failure from session process:.*",
                                     "peer did not close io when expected",
                                     "request timed out, closing",
                                     "PolicyKit daemon disconnected from the bus.",
@@ -690,10 +766,12 @@ class MachineCase(unittest.TestCase):
                                     'localhost: dropping message while waiting for child to exit',
                                     '.*: GDBus.Error:org.freedesktop.PolicyKit1.Error.Failed: .*',
                                     '.*g_dbus_connection_call_finish_internal.*G_IS_DBUS_CONNECTION.*',
+                                    '.*Message recipient disconnected from message bus without replying.*',
                                     )
 
     def allow_authorize_journal_messages(self):
         self.allow_journal_messages("cannot reauthorize identity.*:.*unix-user:admin.*",
+                                    "cannot reauthorize identity\(s\).*:.*unix-user:.*",
                                     ".*: pam_authenticate failed: Authentication failure",
                                     ".*is not in the sudoers file.  This incident will be reported.",
                                     ".*: a password is required",
@@ -713,8 +791,27 @@ class MachineCase(unittest.TestCase):
         """Check for unexpected journal entries."""
         machine = machine or self.machine
         syslog_ids = [ "cockpit-ws", "cockpit-bridge" ]
+        if not self.allow_core_dumps:
+            syslog_ids += [ "systemd-coredump" ]
         messages = machine.journal_messages(syslog_ids, 5)
-        messages += machine.audit_messages("14") # 14xx is selinux
+        if "TEST_AUDIT_NO_SELINUX" not in os.environ:
+            messages += machine.audit_messages("14") # 14xx is selinux
+
+        # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1557913
+        # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1563143
+        # these fail tons of tests due to the SELinux violations (so naughty override causes too much spamming)
+        if self.image in ['fedora-28', 'fedora-atomic', 'fedora-testing']:
+            self.allowed_messages.append('audit: type=1400 audit(.*): avc:  denied  { dac_override }.*')
+            self.allowed_messages.append('audit: type=1400 audit(.*): avc:  denied  { module_request }.*')
+            self.allowed_messages.append('audit: type=1400 audit(.*): avc:  denied  { getattr } for .* comm="which" path="/usr/sbin/setfiles".*')
+
+        if self.image == 'rhel-x':
+            # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1559820
+            # this affects every boot (so naughty override causes too much spamming)
+            self.allowed_messages.append('audit: type=1400 audit(.*): avc:  denied  { create } for  pid=1 comm="systemd" name="bpf".*')
+            # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1573501
+            self.allowed_messages.append('audit: type=1400 audit(.*): avc:  denied  { create } for .*comm="nft" .*firewalld_t.*')
+
         all_found = True
         first = None
         for m in messages:
@@ -727,15 +824,78 @@ class MachineCase(unittest.TestCase):
                     found = True
                     break
             if not found:
-                print("Unexpected journal message '%s'" % m)
                 all_found = False
                 if not first:
+                    print("Unexpected journal messages:")
                     first = m
+                print(m)
         if not all_found:
             self.copy_js_log("FAIL")
             self.copy_journal("FAIL")
             self.copy_cores("FAIL")
             raise Error(first)
+
+    def check_browser_messages(self):
+        if not self.browser:
+            return
+        for log in self.browser.get_js_log():
+            if log.startswith("error: uncaught"):
+                raise Error(log)
+
+    def check_axe(self, label=None, suffix=""):
+        """Run aXe check on the currently active frame
+
+        The report gets written into an attachment
+        "<label>-axe-{violations,incomplete}.json". If you specify a suffix, it
+        will be appended to the file name, which is useful if you call this
+        more than once within one test.
+        """
+        # only run this on the default OS test, that's enough
+        if os.getenv("TEST_OS") not in [None, testvm.TEST_OS_DEFAULT]:
+            return
+
+        report = self.browser.eval_js("axe.run()", no_trace=True)
+
+        # trim the report
+        def delkeys(dict, *keys):
+            for key in keys:
+                try:
+                    del dict[key]
+                except KeyError:
+                    pass
+        delkeys(report, "passes", "inapplicable", "timestamp")
+
+        for outcome in ["violations", "incomplete"]:
+            for test in report[outcome]:
+                delkeys(test, "tags", "help", "impact")
+
+                # failureSummary in nodes is highly repetitive and long, so summarize it on violation level
+                summaries = set()
+                for result in test["nodes"]:
+                    if "failureSummary" in result:
+                        summaries.add(result["failureSummary"])
+                    delkeys(result, "all", "any", "none", "impact", "failureSummary")
+
+                    # trim containing iframes from targets
+                    if result.get("target", []):
+                        result["target"] = result["target"][-1]
+
+                if summaries:
+                    test["failureSummaries"] = list(summaries)
+
+
+        # write the report
+        if suffix:
+            suffix = "-" + suffix
+        filename = "{0}{1}-axe.json.gz".format(label or self.label(), suffix)
+        with gzip.open(filename, "wb") as f:
+            f.write(json.dumps(report).encode('UTF-8'))
+        print("Wrote accessibility report to " + filename)
+        attach(filename)
+
+        # aXe triggers that *shrug*
+        self.allow_journal_messages("received invalid message without channel prefix")
+
 
     def snapshot(self, title, label=None):
         """Take a snapshot of the current screen and save it as a PNG.
@@ -751,7 +911,7 @@ class MachineCase(unittest.TestCase):
             self.browser.copy_js_log(title, label)
 
     def copy_journal(self, title, label=None):
-        for name, m in self.machines.iteritems():
+        for name, m in self.machines.items():
             if m.ssh_reachable:
                 log = "%s-%s-%s.log" % (label or self.label(), m.label, title)
                 with open(log, "w") as fp:
@@ -760,7 +920,7 @@ class MachineCase(unittest.TestCase):
                     attach(log)
 
     def copy_cores(self, title, label=None):
-        for name, m in self.machines.iteritems():
+        for name, m in self.machines.items():
             if m.ssh_reachable:
                 directory = "%s-%s-%s.core" % (label or self.label(), m.label, title)
                 dest = os.path.abspath(directory)
@@ -777,76 +937,34 @@ some_failed = False
 def jsquote(str):
     return json.dumps(str)
 
-# See phantom-driver for the methods that are defined
-class Phantom:
-    def __init__(self, lang=None):
-        self.lang = lang
-        self.timeout = 60
-        self.valid = False
-        self._driver = None
-
-    def __getattr__(self, name):
-        if not name.startswith("_"):
-            return lambda *args: self._invoke(name, *args)
-        raise AttributeError
-
-    def _invoke(self, name, *args):
-        if not self._driver:
-            self.start()
-        if opts.trace:
-            print("-> {0}({1})".format(name, repr(args)[1:-2]))
-        line = json.dumps({
-            "cmd": name,
-            "args": args,
-            "timeout": self.timeout * 1000
-        }).replace("\n", " ") + "\n"
-        self._driver.stdin.write(line)
-        line = self._driver.stdout.readline()
-        if not line:
-            self.kill()
-            raise Error("PhantomJS or driver broken")
-        try:
-            res = json.loads(line)
-        except:
-            print(line.strip())
-            raise
-        if 'error' in res:
-            if opts.trace:
-                print("<- raise", res['error'])
-            raise Error(res['error'])
-        if 'result' in res:
-            if opts.trace:
-                print("<-", repr(res['result']))
-            return res['result']
-        raise Error("unexpected: " + line.strip())
-
-    def start(self):
-        environ = os.environ.copy()
-        if self.lang:
-            environ["LC_ALL"] = self.lang
-        path = os.path.dirname(__file__)
-        command = [
-            "%s/phantom-command" % path,
-            "%s/phantom-driver.js" % path,
-            "%s/sizzle.js" % path,
-            "%s/test-functions.js" % path
-        ]
-        self.valid = True
-        self._driver = subprocess.Popen(command, env=environ,
-                                        stdout=subprocess.PIPE,
-                                        stdin=subprocess.PIPE, close_fds=True)
-
-    def kill(self):
-        self.valid = False
-        if self._driver:
-            self._driver.terminate()
-            self._driver.wait()
-            self._driver = None
-
 def skipImage(reason, *args):
     if testvm.DEFAULT_IMAGE in args:
         return unittest.skip("{0}: {1}".format(testvm.DEFAULT_IMAGE, reason))
     return lambda func: func
+
+def skipPackage(*args):
+    packages_env = os.environ.get("TEST_SKIP_PACKAGES","").split()
+    for package in args:
+        if package in packages_env:
+            return unittest.skip("{0} is excluded in $TEST_SKIP_PACKAGES".format(package))
+    return lambda func: func
+
+def enableAxe(method):
+    """Enable aXe accessibility test code injection for this test case"""
+
+    # only run this on the default OS test, that's enough
+    if os.getenv("TEST_OS") not in [None, testvm.TEST_OS_DEFAULT]:
+        return method
+
+    def wrapper(*args):
+        with open(os.path.join(TEST_DIR, "common/axe.js")) as f:
+            script = f.read()
+        # first method argument is "self", a MachineCase instance
+        args[0].browser.cdp.invoke("Page.addScriptToEvaluateOnLoad", scriptSource=script, no_trace=True)
+        return method(*args)
+
+    return wrapper
+
 
 class TestResult(tap.TapResult):
     def __init__(self, stream, descriptions, verbosity):
@@ -873,7 +991,7 @@ class OutputBuffer(object):
         while self.fds:
             for p in self.poll.poll(1000):
                 data = os.read(p[0], 1024)
-                if data == "":
+                if data == b"":
                     self.poll.unregister(p[0])
                 else:
                     self.buffers[p[0]] += data
@@ -883,7 +1001,7 @@ class OutputBuffer(object):
     def push(self, pid, fd):
         self.poll.register(fd, select.POLLIN)
         self.fds[pid] = fd
-        self.buffers[fd] = ""
+        self.buffers[fd] = b""
 
     def pop(self, pid):
         fd = self.fds.pop(pid)
@@ -894,7 +1012,7 @@ class OutputBuffer(object):
             pass
         while True:
             data = os.read(fd, 1024)
-            if data == "":
+            if data == b"":
                 break
             buffer += data
         os.close(fd)
@@ -968,7 +1086,7 @@ class TapRunner(object):
                     failed = (code >> 8) & 0xff
                 if pid:
                     if buffer:
-                        output = buffer.pop(pid)
+                        output = buffer.pop(pid).decode("UTF-8")
                         test = pids[pid]
                         failed, retry = self.filterOutput(test, failed, output)
                         if retry:
@@ -1038,16 +1156,18 @@ class TapRunner(object):
         # Otherwise pass through this command if it exists
         cmd = [ "tests-policy", testvm.DEFAULT_IMAGE ]
         try:
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-            (output, error) = proc.communicate(output)
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, universal_newlines=True)
+            (changed, unused) = proc.communicate(output)
+            if proc.returncode == 0:
+                output = changed
         except OSError as ex:
             if ex.errno != errno.ENOENT:
-                sys.stderr.write("Couldn't check known issue: {0}\n".format(str(ex)))
+                sys.stderr.write("Couldn't run tests-policy: {0}\n".format(str(ex)))
 
         # Write the output
         sys.stdout.write(output)
 
-        if "# SKIP " in output:
+        if "# SKIP " in output or "# RETRY" in output:
             failed = 0
 
         # Whether we should retry the test or not
@@ -1085,8 +1205,12 @@ def test_main(options=None, suite=None, attachments=None, **kwargs):
     global opts
 
     # Turn off python stdout buffering
+    buf_arg = 0
+    if sys.version_info[0] >= 3:
+        os.environ['PYTHONUNBUFFERED'] = '1'
+        buf_arg = 1
     sys.stdout.flush()
-    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buf_arg)
 
     standalone = options is None
     parser = arg_parser()
@@ -1183,4 +1307,5 @@ def sit(machines={ }):
     """
     for (name, machine) in machines.items():
         sys.stderr.write(machine.diagnose())
-    raw_input ("Press RET to continue... ")
+    print("Press RET to continue...")
+    sys.stdin.readline()

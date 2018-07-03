@@ -28,11 +28,11 @@ var StorageControls = require("./storage-controls.jsx");
 var FormatDialog = require("./format-dialog.jsx");
 
 var StorageButton = StorageControls.StorageButton;
-var FormatButton =  FormatDialog.FormatButton;
+var FormatButton = FormatDialog.FormatButton;
 
 var _ = cockpit.gettext;
 
-var SwapTab =  React.createClass({
+var SwapTab = React.createClass({
     onSamplesChanged: function () {
         this.setState({});
     },
@@ -72,10 +72,10 @@ var SwapTab =  React.createClass({
             <div>
                 <div className="tab-actions">
                     { (is_active)
-                          ? <StorageButton onClick={stop}>{_("Stop")}</StorageButton>
-                          : <StorageButton onClick={start}>{_("Start")}</StorageButton>
+                        ? <StorageButton onClick={stop}>{_("Stop")}</StorageButton>
+                        : <StorageButton onClick={start}>{_("Start")}</StorageButton>
                     }
-                    <FormatButton client={this.props.client} block={this.props.block}/>
+                    <FormatButton client={this.props.client} block={this.props.block} />
                 </div>
                 <table className="info-table-ct">
                     <tr>

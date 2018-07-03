@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -23,6 +23,8 @@ from testlib import *
 from packagelib import *
 
 @skipImage("Not supported", "continuous-atomic", "fedora-atomic", "rhel-atomic")
+@skipPackage("cockpit-apps")
+@skipImage("https://bugzilla.redhat.com/show_bug.cgi?id=1559414", "rhel-x")
 class TestApps(PackageCase):
 
     def setUp(self):
@@ -67,7 +69,7 @@ class TestApps(PackageCase):
 </components>
             """.format(body)})
         self.enableRepo()
-        self.machine.execute("pkcon refresh force")
+        self.machine.execute("systemctl stop packagekit && pkcon refresh force")
         self.machine.execute("pkcon -y install appstream-data-test")
 
     def testBasic(self):
@@ -110,7 +112,10 @@ class TestApps(PackageCase):
 
         # Switching to a language might produce these messages, which seem to be harmless.
         self.allow_journal_messages("invalid or unusable locale.*",
-                                    "Error receiving data: Connection reset by peer")
+                                    "Error .* data: Connection reset by peer")
+
+        # Reset everything
+        m.execute("rm -rf /usr/share/metainfo /usr/share/app-info /var/cache/app-info")
 
         m.start_cockpit()
         b.login_and_go("/apps")
@@ -148,6 +153,8 @@ class TestApps(PackageCase):
             b.set_val("#display-language select", lang)
             b.click("#display-language-select-button")
             b.expect_load()
+            # HACK: work around language switching in Chrome not working in current session (issue #8160)
+            b.reload(ignore_cache=True)
             b.wait_present("#content")
             b.enter_page("/apps")
 
@@ -162,6 +169,9 @@ class TestApps(PackageCase):
     def testBrokenXML(self):
         b = self.browser
         m = self.machine
+
+        # Reset everything
+        m.execute("rm -rf /usr/share/metainfo /usr/share/app-info /var/cache/app-info")
 
         m.start_cockpit()
         b.login_and_go("/apps")
@@ -255,6 +265,35 @@ This <is <not XML.
 </components>""")
         b.wait_present(".app-list-empty")
         reset()
+
+        # Error (launchable without type) in earlier entry, shouldn't affect the later entry
+        m.write("/usr/share/app-info/xmls/test.xml", """
+<components origin="test">
+  <component type="addon">
+    <extends>cockpit.desktop</extends>
+    <id>org.cockpit-project.test2</id>
+    <name>Name</name>
+    <summary>Summary</summary>
+    <description>
+        <p>Description 2</p>
+    </description>
+    <launchable>foo</launchable>
+    <pkgname>foo</pkgname>
+  </component>
+  <component type="addon">
+    <extends>cockpit.desktop</extends>
+    <id>org.cockpit-project.test</id>
+    <name>Name</name>
+    <summary>Summary 2</summary>
+    <description>
+        <p>Description</p>
+    </description>
+    <launchable type="cockpit-manifest">foo</launchable>
+    <pkgname>foo</pkgname>
+  </component>
+</components>""")
+        b.wait_not_present(".app-list-empty")
+        b.wait_present(".app-list tr:contains('Summary 2')")
 
 if __name__ == '__main__':
     test_main()

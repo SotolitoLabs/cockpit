@@ -40,6 +40,8 @@ override_dh_auto_configure: debian/git-patches-applied
 	dh_auto_configure -- \
 		--with-networkmanager-needs-root=yes \
 		--with-cockpit-user=cockpit-ws \
+		--with-appstream-config-packages='[ "appstream" ]' \
+		--with-nfs-client-packages='"nfs-common"' \
 		--with-pamdir=/lib/$(DEB_HOST_MULTIARCH)/security \
 		--libexecdir=/usr/lib/cockpit $(CONFIG_OPTIONS)
 
@@ -60,6 +62,8 @@ override_dh_install:
 
 	# unpackaged modules
 	for m in kdump kubernetes ostree selinux sosreport subscriptions ovirt; do rm -r debian/tmp/usr/share/cockpit/$$m; done
+	rm debian/tmp/usr/share/metainfo/org.cockpit-project.cockpit-sosreport.metainfo.xml
+	rm debian/tmp/usr/share/pixmaps/cockpit-sosreport.png
 	# part of kubernetes
 	rm -f debian/tmp/usr/lib/cockpit/cockpit-stub
 

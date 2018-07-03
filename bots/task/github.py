@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -22,22 +22,19 @@
 # our GitHub interacition.
 
 import errno
-import httplib
+import http.client
 import json
 import os
-import re
 import socket
-import subprocess
 import sys
 import time
-import urlparse
+import urllib.parse
 
-import cache
+from . import cache
 
 __all__ = (
     'GitHub',
     'Checklist',
-    'whitelist',
     'TESTING',
     'NO_TESTING',
     'NOT_TESTED'
@@ -52,6 +49,9 @@ OUR_CONTEXTS = [
     "avocado/",
     "container/",
     "selenium/",
+
+    # generic prefix for external repos
+    "cockpit/",
 ]
 
 ISSUE_TITLE_IMAGE_REFRESH = "Image refresh for {0}"
@@ -59,63 +59,13 @@ ISSUE_TITLE_IMAGE_REFRESH = "Image refresh for {0}"
 BASE = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TOKEN = "~/.config/github-token"
 
-# the user name is accepted if it's found in either list
-WHITELIST = os.path.join(BASE, "bots", "whitelist")
-WHITELIST_LOCAL = "~/.config/github-whitelist"
-
-def determine_github_base():
-    # pick a base
-    try:
-        # see where we get master from, e.g. origin
-        get_remote_command = ["git", "config", "--local", "--get", "branch.master.remote"]
-        remote = subprocess.Popen(get_remote_command, stdout=subprocess.PIPE, cwd=BASE).communicate()[0].strip()
-        # see if we have a git checkout - it can be in https or ssh format
-        formats = [
-            re.compile("""https:\/\/github\.com\/(.*)\.git"""),
-            re.compile("""git@github.com:(.*)\.git""")
-            ]
-        remote_output = subprocess.Popen(
-                ["git", "ls-remote", "--get-url", remote],
-                stdout=subprocess.PIPE, cwd=BASE
-            ).communicate()[0].strip()
-        for f in formats:
-            m = f.match(remote_output)
-            if m:
-                return list(m.groups())[0]
-    except subprocess.CalledProcessError:
-        sys.stderr.write("Unable to get git repo information, using defaults\n")
-
-    # if we still don't have something, default to cockpit-project/cockpit
-    return "cockpit-project/cockpit"
-
+TEAM_CONTRIBUTORS = "Contributors"
 
 def known_context(context):
     for prefix in OUR_CONTEXTS:
         if context.startswith(prefix):
             return True
     return False
-
-def whitelist(filename=WHITELIST):
-    # Try to load the whitelists
-    whitelist = []
-    try:
-        with open(filename, "r") as wh:
-            whitelist += [x.strip() for x in wh.read().split("\n") if x.strip()]
-    except IOError as exc:
-        if exc.errno != errno.ENOENT:
-            raise
-
-    # The local file may or may not exist
-    try:
-        path = os.path.expanduser(WHITELIST_LOCAL)
-        wh = open(path, "r")
-        whitelist += [x.strip() for x in wh.read().split("\n") if x.strip()]
-    except IOError as exc:
-        if exc.errno != errno.ENOENT:
-            raise
-
-    # Remove duplicate entries
-    return set(whitelist)
 
 class Logger(object):
     def __init__(self, directory):
@@ -132,11 +82,13 @@ class Logger(object):
             f.write(value)
 
 class GitHub(object):
-    def __init__(self, base=None, cacher=None):
+    def __init__(self, base=None, cacher=None, repo=None):
         if base is None:
+            if repo is None:
+                repo = os.environ.get("GITHUB_BASE", "cockpit-project/cockpit")
             netloc = os.environ.get("GITHUB_API", "https://api.github.com")
-            base = "{0}/repos/{1}/".format(netloc, os.environ.get("GITHUB_BASE", determine_github_base()))
-        self.url = urlparse.urlparse(base)
+            base = "{0}/repos/{1}/".format(netloc, repo)
+        self.url = urllib.parse.urlparse(base)
         self.conn = None
         self.token = None
         self.debug = False
@@ -162,7 +114,7 @@ class GitHub(object):
         self.log.write("")
 
     def qualify(self, resource):
-        return urlparse.urljoin(self.url.path, resource)
+        return urllib.parse.urljoin(self.url.path, resource)
 
     def request(self, method, resource, data="", headers=None):
         if headers is None:
@@ -174,23 +126,28 @@ class GitHub(object):
         while not connected:
             if not self.conn:
                 if self.url.scheme == 'http':
-                    self.conn = httplib.HTTPConnection(self.url.netloc)
+                    self.conn = http.client.HTTPConnection(self.url.netloc)
                 else:
-                    self.conn = httplib.HTTPSConnection(self.url.netloc, strict=True)
+                    self.conn = http.client.HTTPSConnection(self.url.netloc)
                 connected = True
             self.conn.set_debuglevel(self.debug and 1 or 0)
             try:
                 self.conn.request(method, self.qualify(resource), data, headers)
                 response = self.conn.getresponse()
                 break
-            # This happens when TLS is the source of a disconnection
-            except socket.error as ex:
-                if connected or ex.errno != errno.EPIPE:
+            # This happens when GitHub disconnects in python3
+            except ConnectionResetError:
+                if connected:
                     raise
                 self.conn = None
             # This happens when GitHub disconnects a keep-alive connection
-            except httplib.BadStatusLine:
+            except http.client.BadStatusLine:
                 if connected:
+                    raise
+                self.conn = None
+            # This happens when TLS is the source of a disconnection
+            except socket.error as ex:
+                if connected or ex.errno != errno.EPIPE:
                     raise
                 self.conn = None
         heads = { }
@@ -207,7 +164,7 @@ class GitHub(object):
             "status": response.status,
             "reason": response.reason,
             "headers": heads,
-            "data": response.read()
+            "data": response.read().decode('utf-8')
         }
 
     def get(self, resource):
@@ -231,7 +188,7 @@ class GitHub(object):
             return json.loads(cached['data'] or "null")
         elif response['status'] < 200 or response['status'] >= 300:
             sys.stderr.write("{0}\n{1}\n".format(resource, response['data']))
-            raise Exception("GitHub API problem: {0}".format(response['reason'] or response['status']))
+            raise RuntimeError("GitHub API problem: {0}".format(response['reason'] or response['status']))
         else:
             self.cache.write(qualified, response)
             return json.loads(response['data'] or "null")
@@ -241,7 +198,7 @@ class GitHub(object):
         status = response['status']
         if (status < 200 or status >= 300) and status not in accept:
             sys.stderr.write("{0}\n{1}\n".format(resource, response['data']))
-            raise Exception("GitHub API problem: {0}".format(response['reason'] or status))
+            raise RuntimeError("GitHub API problem: {0}".format(response['reason'] or status))
         self.cache.mark()
         return json.loads(response['data'])
 
@@ -250,7 +207,7 @@ class GitHub(object):
         status = response['status']
         if (status < 200 or status >= 300) and status not in accept:
             sys.stderr.write("{0}\n{1}\n".format(resource, response['data']))
-            raise Exception("GitHub API problem: {0}".format(response['reason'] or status))
+            raise RuntimeError("GitHub API problem: {0}".format(response['reason'] or status))
         self.cache.mark()
         return json.loads(response['data'])
 
@@ -328,6 +285,41 @@ class GitHub(object):
                 result.append(issue)
         return result
 
+    def commits(self, branch='master', since=None):
+        page = 1
+        count = 100
+        if since:
+            since = "&since={0}".format(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since)))
+        else:
+            since = ""
+        while count == 100:
+            commits = self.get("commits?page={0}&per_page={1}&sha={2}{3}".format(page, count, branch, since))
+            count = 0
+            page += 1
+            for commit in commits or []:
+                yield commit
+                count += 1
+
+    def whitelist(self):
+        users = set()
+        teamId = self.teamIdFromName(TEAM_CONTRIBUTORS)
+        page = 1
+        count = 100
+        while count == 100:
+            data = self.get("/teams/{0}/members?page={1}&per_page={2}".format(teamId, page, count)) or []
+            users.update(user.get("login") for user in data)
+            count = len(data)
+            page += 1
+        return users
+
+    def teamIdFromName(self, name):
+        for team in self.get("/orgs/cockpit-project/teams") or []:
+            if team.get("name") == name:
+                return team["id"]
+        else:
+            raise KeyError("Team {0} not found".format(name))
+
+
 class Checklist(object):
     def __init__(self, body=None):
         self.process(body or "")
@@ -335,7 +327,7 @@ class Checklist(object):
     @staticmethod
     def format_line(item, check):
         status = ""
-        if isinstance(check, basestring):
+        if isinstance(check, str):
             status = check + ": "
             check = False
         return " * [{0}] {1}{2}".format(check and "x" or " ", status, item)

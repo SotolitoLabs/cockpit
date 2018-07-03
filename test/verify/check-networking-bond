@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -25,7 +25,7 @@ from netlib import *
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": { "address": "10.111.113.1/20" },
-        "machine2": { "image": "fedora-26", "address": "10.111.113.2/20", "dhcp": True }
+        "machine2": { "image": "fedora-28", "address": "10.111.113.2/20", "dhcp": True }
     }
 
     def testBond(self):
@@ -149,7 +149,7 @@ class TestNetworking(NetworkCase):
 
         b.click("#networking-interfaces tr[data-interface='tbond'] td:first-child")
         b.wait_visible("#network-interface")
-        b.click(".panel-heading .btn:contains('On')")
+        b.click("#network-interface .panel-heading .btn:contains('On')")
         b.wait_in_text("tr:contains('Status')", "Configuring")
 
         b.click("tr:contains('Bond') a")
@@ -158,6 +158,31 @@ class TestNetworking(NetworkCase):
         b.click("#network-bond-settings-dialog button:contains('Apply')")
         b.wait_popdown("network-bond-settings-dialog")
         b.wait_text("#network-interface-name", "tbond3000")
+
+    def testBondActive(self):
+        b = self.browser
+
+        self.login_and_go("/network")
+
+        iface = self.add_iface()
+        self.wait_for_iface(iface)
+        ip = b.text("#networking-interfaces tr[data-interface='%s'] td:nth-child(2)" % iface)
+
+        # Put an active interface into a bond.  The bond should get the same IP as the active interface.
+
+        b.click("button:contains('Add Bond')")
+        b.wait_popup("network-bond-settings-dialog")
+        b.set_val("#network-bond-settings-dialog tr:contains('Name') input", "tbond")
+        b.set_checked("input[data-iface='%s']" % iface, True)
+        b.click("#network-bond-settings-dialog button:contains('Apply')")
+        b.wait_popdown("network-bond-settings-dialog")
+        b.wait_present("#networking-interfaces tr[data-interface='tbond']")
+
+        # Check that it has the interface enslaved and the right IP address
+        b.click("#networking-interfaces tr[data-interface='tbond'] td:first-child")
+        b.wait_visible("#network-interface")
+        b.wait_present("#network-interface-slaves tr[data-interface='%s']" % iface)
+        b.wait_in_text("#network-interface .panel:contains('tbond')", ip)
 
     @skipImage("Main interface can't be managed", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable")
     def testBondingMain(self):

@@ -35,12 +35,12 @@
                     <table className="form-table-ct">
                         <tr>
                             <td className="top">
-                                <label className="control-label" for="control-1">
+                                <label className="control-label" htmlFor="control-1">
                                     Label
                                 </label>
                             </td>
                             <td>
-                                <input id="control-1" className="form-control" type="text"/>
+                                <input id="control-1" className="form-control" type="text" />
                             </td>
                         </tr>
                         <tr>
@@ -54,7 +54,7 @@
                                     <Select.SelectEntry data='one'>One</Select.SelectEntry>
                                     <Select.SelectEntry data='two'>Two</Select.SelectEntry>
                                     <Select.SelectEntry data='three'>Three</Select.SelectEntry>
-                                    <Select.SelectEntry data='four'></Select.SelectEntry>
+                                    <Select.SelectEntry data='four' />
                                 </Select.Select>
                             </td>
                         </tr>

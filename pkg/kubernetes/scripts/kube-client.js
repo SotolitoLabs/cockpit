@@ -38,6 +38,7 @@
 
     var KUBE = "/api/v1";
     var OPENSHIFT = "/oapi/v1";
+    var KUBEVIRT = "/apis/kubevirt.io/v1alpha1";
     var DEFAULT = { api: KUBE, create: 0 };
     var SCHEMA = flatSchema([
         { kind: "DeploymentConfig", type: "deploymentconfigs", api: OPENSHIFT },
@@ -62,10 +63,11 @@
         { kind: "Service", type: "services", api: KUBE, create: -80 },
         { kind: "SubjectAccessReview", type: "subjectaccessreviews", api: OPENSHIFT },
         { kind: "User", type: "users", api: OPENSHIFT, global: true },
+        { kind: "VirtualMachine", type: "virtualmachines", api: KUBEVIRT },
     ]);
 
     var NAME_RE = /^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$/;
-    var USER_NAME_RE = /^[a-zA-Z0-9_.]([-a-zA-Z0-9 ,=@._]*[a-zA-Z0-9._])?$/;
+    var USER_NAME_RE = /^[a-zA-Z0-9_.]([-a-zA-Z0-9 ,=@._:]*[a-zA-Z0-9._:])?$/;
 
     /* Timeout for non-GET requests */
     var REQ_TIMEOUT = "120s";
@@ -305,6 +307,8 @@
      */
 
     .value("KUBE_SCHEMA", SCHEMA)
+
+    .constant("KubevirtPrefix", KUBEVIRT)
 
     /**
      * KUBE_NAME_RE
@@ -654,7 +658,7 @@
             function connectUntil(ret, until) {
                 if (until) {
                     if (until.$on) {
-                        until.$on("destroy", function() {
+                        until.$on("$destroy", function() {
                             ret.cancel();
                         });
                     } else {
@@ -1319,14 +1323,14 @@
                 if (meta) {
                     ex = null;
                     if (meta.name !== undefined) {
-                        var check_re = (resource.kind == "User") ? USER_NAME_RE : NAME_RE;
+                        var check_re = (resource.kind == "User" || resource.kind == "Group") ? USER_NAME_RE : NAME_RE;
                         if (!meta.name)
                             ex = new Error("The name cannot be empty");
                         else if (!check_re.test(meta.name))
                             if (check_re == NAME_RE) {
                                 ex = new Error("The name contains invalid characters. Only letters, numbers and dashes are allowed");
                             } else {
-                                ex = new Error("The name contains invalid characters. Only letters, numbers, spaces and the following symbols are allowed: , = @  . _");
+                                ex = new Error("The name contains invalid characters. Only letters, numbers, spaces and the following symbols are allowed: , = @  . _ - :");
                             }
                     }
                     if (ex) {

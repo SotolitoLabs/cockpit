@@ -21,15 +21,14 @@
 
 #include "config.h"
 
-#include "cockpitchannel.h"
 #include "cockpithttpstream.h"
 #include "cockpitpackages.h"
 
-#include "mock-transport.h"
-
+#include "common/cockpitchannel.h"
 #include "common/cockpitlog.h"
 #include "common/cockpitjson.h"
 #include "common/cockpittest.h"
+#include "common/mock-transport.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -37,8 +36,14 @@
 
 /*
  * To recalculate the checksums found in this file, do something like:
- * $ XDG_DATA_DIRS=$PWD/src/bridge/mock-resource/glob/ XDG_DATA_HOME=/nonexistant cockpit-bridge --packages
+ * $ XDG_DATA_DIRS=$PWD/src/bridge/mock-resource/glob/ XDG_DATA_HOME=/nonexistant ./cockpit-bridge --packages
  */
+#define CHECKSUM_GLOB           "f5d1bfe84c378dee517cea3e0f0380ad2c9201f6be021fbae877a89d4cb51859"
+#define CHECKSUM_BADPACKAGE     "86ae6170eb6245c5c80dbcbcc0ba12beddee2e1d807cfdb705440e944b177fbc"
+#define CHECKSUM_RELOAD_OLD     "53264dd51401b6f6de0ba63180397919697155653855848dee0f6f71c6e93f40"
+#define CHECKSUM_RELOAD_NEW     "eae62ca12c4a92b4ae7f6b0d2f41cb20be0005a6fc62466fccda1ebe0532cc23"
+#define CHECKSUM_RELOAD_UPDATED "0d1c0b7c6133cc7c3956197fd8a76bef68b158bd78beac75cfa80b75c36aa827"
+#define CHECKSUM_CSP            "25cab69451c3667cb9ed33f006fc7003c248f1029dae4a763bbadb0c4cafaf8d"
 
 extern const gchar **cockpit_bridge_data_dirs;
 extern const gchar *cockpit_bridge_local_address;
@@ -189,7 +194,7 @@ test_simple (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Cache-Control\":\"no-cache, no-store\"}}"
+  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Cache-Control\":\"no-cache, no-store\"}}"
                            "These are the contents of file.ext\nOh marmalaaade\n", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
@@ -214,7 +219,7 @@ test_forwarded (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Content-Security-Policy\":\"default-src 'self' https://blah:9090; connect-src 'self' https://blah:9090 ws: wss:\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\",\"Access-Control-Allow-Origin\":\"https://blah:9090\"}}<html>\x0A<head>\x0A<title>In home dir</title>\x0A</head>\x0A<body>In home dir</body>\x0A</html>\x0A", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Referrer-Policy\":\"no-referrer\",\"X-DNS-Prefetch-Control\":\"off\",\"Content-Security-Policy\":\"default-src 'self' https://blah:9090; connect-src 'self' https://blah:9090 wss://blah:9090; form-action 'self' https://blah:9090; base-uri 'self' https://blah:9090; object-src 'none'; block-all-mixed-content\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\",\"Access-Control-Allow-Origin\":\"https://blah:9090\"}}<html>\x0A<head>\x0A<title>In home dir</title>\x0A</head>\x0A<body>In home dir</body>\x0A</html>\x0A", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
 }
@@ -222,6 +227,7 @@ test_forwarded (TestCase *tc,
 static const Fixture fixture_pig = {
   .path = "/another/test.html",
   .accept = { "pig" },
+  .headers = { "Host", "blah:9090" },
 };
 
 static void
@@ -238,7 +244,7 @@ test_localized_translated (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Content-Security-Policy\":\"default-src 'self'; connect-src 'self' ws: wss:\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>Inlay omehay irday</title>\n</head>\n<body>Inlay omehay irday</body>\n</html>\n", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Referrer-Policy\":\"no-referrer\",\"X-DNS-Prefetch-Control\":\"off\",\"Content-Security-Policy\":\"default-src 'self' http://blah:9090; connect-src 'self' http://blah:9090 ws://blah:9090; form-action 'self' http://blah:9090; base-uri 'self' http://blah:9090; object-src 'none'; block-all-mixed-content\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>Inlay omehay irday</title>\n</head>\n<body>Inlay omehay irday</body>\n</html>\n", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
 }
@@ -246,6 +252,7 @@ test_localized_translated (TestCase *tc,
 static const Fixture fixture_unknown = {
   .path = "/another/test.html",
   .accept = { "unknown" },
+  .headers = { "Host", "blah:9090" },
 };
 
 static void
@@ -262,7 +269,7 @@ test_localized_unknown (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Content-Security-Policy\":\"default-src 'self'; connect-src 'self' ws: wss:\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>In home dir</title>\n</head>\n<body>In home dir</body>\n</html>\n", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Referrer-Policy\":\"no-referrer\",\"X-DNS-Prefetch-Control\":\"off\",\"Content-Security-Policy\":\"default-src 'self' http://blah:9090; connect-src 'self' http://blah:9090 ws://blah:9090; form-action 'self' http://blah:9090; base-uri 'self' http://blah:9090; object-src 'none'; block-all-mixed-content\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>In home dir</title>\n</head>\n<body>In home dir</body>\n</html>\n", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
 }
@@ -270,6 +277,7 @@ test_localized_unknown (TestCase *tc,
 static const Fixture fixture_prefer_region = {
   .path = "/another/test.html",
   .accept = { "pig-pen" },
+  .headers = { "Host", "blah:9090" },
 };
 
 static void
@@ -286,7 +294,7 @@ test_localized_prefer_region (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Content-Security-Policy\":\"default-src 'self'; connect-src 'self' ws: wss:\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>Inway omeha irda</title>\n</head>\n<body>Inway omeha irda</body>\n</html>\n", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Referrer-Policy\":\"no-referrer\",\"X-DNS-Prefetch-Control\":\"off\",\"Content-Security-Policy\":\"default-src 'self' http://blah:9090; connect-src 'self' http://blah:9090 ws://blah:9090; form-action 'self' http://blah:9090; base-uri 'self' http://blah:9090; object-src 'none'; block-all-mixed-content\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>Inway omeha irda</title>\n</head>\n<body>Inway omeha irda</body>\n</html>\n", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
 }
@@ -294,6 +302,7 @@ test_localized_prefer_region (TestCase *tc,
 static const Fixture fixture_fallback = {
   .path = "/another/test.html",
   .accept = { "pig-barn" },
+  .headers = { "Host", "blah:9090" },
 };
 
 static void
@@ -310,7 +319,7 @@ test_localized_fallback (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Content-Security-Policy\":\"default-src 'self'; connect-src 'self' ws: wss:\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>Inlay omehay irday</title>\n</head>\n<body>Inlay omehay irday</body>\n</html>\n", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Referrer-Policy\":\"no-referrer\",\"X-DNS-Prefetch-Control\":\"off\",\"Content-Security-Policy\":\"default-src 'self' http://blah:9090; connect-src 'self' http://blah:9090 ws://blah:9090; form-action 'self' http://blah:9090; base-uri 'self' http://blah:9090; object-src 'none'; block-all-mixed-content\",\"Content-Type\":\"text/html\",\"Cache-Control\":\"no-cache, no-store\"}}<html>\n<head>\n<title>Inlay omehay irday</title>\n</head>\n<body>Inlay omehay irday</body>\n</html>\n", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
 }
@@ -333,7 +342,7 @@ test_incompatible_version (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":503,\"reason\":\"This package requires Cockpit version 999.5 or later\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}<html><head><title>This package requires Cockpit version 999.5 or later</title></head><body>This package requires Cockpit version 999.5 or later</body></html>\n", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":503,\"reason\":\"This package requires Cockpit version 999.5 or later\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}<html><head><title>This package requires Cockpit version 999.5 or later</title></head><body>This package requires Cockpit version 999.5 or later</body></html>\n", -1);
   g_bytes_unref (data);
 }
 
@@ -355,7 +364,7 @@ test_incompatible_requires (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":503,\"reason\":\"This package is not compatible with this version of Cockpit\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}<html><head><title>This package is not compatible with this version of Cockpit</title></head><body>This package is not compatible with this version of Cockpit</body></html>\n", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":503,\"reason\":\"This package is not compatible with this version of Cockpit\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}<html><head><title>This package is not compatible with this version of Cockpit</title></head><body>This package is not compatible with this version of Cockpit</body></html>\n", -1);
   g_bytes_unref (data);
 }
 
@@ -389,7 +398,7 @@ test_large (TestCase *tc,
 
   /* Should not have been sent as one block */
   g_assert_cmpuint (count, ==, 8);
-  prefix = "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Cache-Control\":\"no-cache, no-store\"}}";
+  prefix = "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Cache-Control\":\"no-cache, no-store\"}}";
   g_assert_cmpuint (g_bytes_get_size (data), >, strlen (prefix));
   g_assert (strncmp (g_bytes_get_data (data, NULL), prefix, strlen (prefix)) == 0);
   sub = g_bytes_new_from_bytes (data, strlen (prefix), g_bytes_get_size (data) - strlen (prefix));
@@ -422,7 +431,7 @@ test_listing (TestCase *tc,
   object = cockpit_json_parse_bytes (message, &error);
   g_assert_no_error (error);
   cockpit_assert_json_eq (object,
-                          "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"Cache-Control\":\"no-cache, no-store\",\"Content-Type\":\"application/json\"}}");
+                          "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Cache-Control\":\"no-cache, no-store\",\"Content-Type\":\"application/json\"}}");
   json_object_unref (object);
 
   message = mock_transport_pop_channel (tc->transport, "444");
@@ -479,7 +488,7 @@ test_not_found (TestCase *tc,
     g_main_context_iteration (NULL, TRUE);
 
   data = mock_transport_pop_channel (tc->transport, "444");
-  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
 }
 
 static const Fixture fixture_unknown_package = {
@@ -498,7 +507,7 @@ test_unknown_package (TestCase *tc,
     g_main_context_iteration (NULL, TRUE);
 
   data = mock_transport_pop_channel (tc->transport, "444");
-  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
 }
 
 static const Fixture fixture_no_path = {
@@ -517,7 +526,7 @@ test_no_path (TestCase *tc,
     g_main_context_iteration (NULL, TRUE);
 
   data = mock_transport_pop_channel (tc->transport, "444");
-  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
 }
 
 static const Fixture fixture_bad_path = {
@@ -536,7 +545,7 @@ test_bad_path (TestCase *tc,
     g_main_context_iteration (NULL, TRUE);
 
   data = mock_transport_pop_channel (tc->transport, "444");
-  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
 }
 
 static const Fixture fixture_no_package = {
@@ -555,7 +564,7 @@ test_no_package (TestCase *tc,
     g_main_context_iteration (NULL, TRUE);
 
   data = mock_transport_pop_channel (tc->transport, "444");
-  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
 }
 
 static const Fixture fixture_bad_package = {
@@ -576,7 +585,7 @@ test_bad_package (TestCase *tc,
     g_main_context_iteration (NULL, TRUE);
 
   data = mock_transport_pop_channel (tc->transport, "444");
-  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":404,\"reason\":\"Not Found\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/html; charset=utf8\"}}", -1);
 }
 
 static void
@@ -585,7 +594,7 @@ test_bad_receive (TestCase *tc,
 {
   GBytes *bad;
 
-  cockpit_expect_message ("444: channel received message after done");
+  cockpit_expect_log ("cockpit-protocol", G_LOG_LEVEL_MESSAGE, "444: channel received message after done");
 
   /* A resource2 channel should never have payload sent to it */
   bad = g_bytes_new_static ("bad", 3);
@@ -617,8 +626,9 @@ test_list_bad_name (TestCase *tc,
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
   cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":"
-                                     "{\"X-Cockpit-Pkg-Checksum\":\"524d07b284cda92c86a908c67014ee882a80193b\",\"Content-Type\":\"application/json\",\"ETag\":\"\\\"$524d07b284cda92c86a908c67014ee882a80193b\\\"\"}}"
-                                 "{\".checksum\":\"524d07b284cda92c86a908c67014ee882a80193b\",\"ok\":{\".checksum\":\"524d07b284cda92c86a908c67014ee882a80193b\"}}", -1);
+                                     "{\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\","
+                                     "\"X-Cockpit-Pkg-Checksum\":\"" CHECKSUM_BADPACKAGE "\",\"Content-Type\":\"application/json\",\"ETag\":\"\\\"$" CHECKSUM_BADPACKAGE "\\\"\"}}"
+                                 "{\".checksum\":\"" CHECKSUM_BADPACKAGE "\",\"ok\":{\".checksum\":\"" CHECKSUM_BADPACKAGE "\"}}", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
 }
@@ -643,7 +653,7 @@ test_glob (TestCase *tc,
   message = mock_transport_pop_channel (tc->transport, "444");
   object = cockpit_json_parse_bytes (message, &error);
   g_assert_no_error (error);
-  cockpit_assert_json_eq (object, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"X-Cockpit-Pkg-Checksum\":\"4f2a5a7bb5bf355776e1fc83831b1d846914182e\",\"Content-Type\":\"text/plain\"}}");
+  cockpit_assert_json_eq (object, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"X-Cockpit-Pkg-Checksum\":\"" CHECKSUM_GLOB "\",\"Referrer-Policy\":\"no-referrer\",\"Content-Type\":\"text/plain\"}}");
   json_object_unref (object);
 
   message = mock_transport_pop_channel (tc->transport, "444");
@@ -909,15 +919,15 @@ test_reload_added (TestCase *tc,
   setup_reload_packages (datadir, "old");
   tc->packages = cockpit_packages_new ();
 
-  assert_manifest_checksum (tc, NULL,  "0e4445bda678eede7c520a0a0b87aae56e7570cf");
-  assert_manifest_checksum (tc, "old", "0e4445bda678eede7c520a0a0b87aae56e7570cf");
+  assert_manifest_checksum (tc, NULL,  CHECKSUM_RELOAD_OLD);
+  assert_manifest_checksum (tc, "old", CHECKSUM_RELOAD_OLD);
 
   setup_reload_packages (datadir, "new");
   cockpit_packages_reload (tc->packages);
 
-  assert_manifest_checksum (tc, NULL,  "0e4445bda678eede7c520a0a0b87aae56e7570cf");
-  assert_manifest_checksum (tc, "old", "0e4445bda678eede7c520a0a0b87aae56e7570cf");
-  assert_manifest_checksum (tc, "new", "516e9877b1255fa22f18c869e1715f39dd4b39ec");
+  assert_manifest_checksum (tc, NULL,  CHECKSUM_RELOAD_OLD);
+  assert_manifest_checksum (tc, "old", CHECKSUM_RELOAD_OLD);
+  assert_manifest_checksum (tc, "new", CHECKSUM_RELOAD_NEW);
 
   teardown_reload_packages (datadir);
 }
@@ -935,15 +945,15 @@ test_reload_removed (TestCase *tc,
   setup_reload_packages (datadir, "new");
   tc->packages = cockpit_packages_new ();
 
-  assert_manifest_checksum (tc, NULL,  "516e9877b1255fa22f18c869e1715f39dd4b39ec");
-  assert_manifest_checksum (tc, "old", "516e9877b1255fa22f18c869e1715f39dd4b39ec");
-  assert_manifest_checksum (tc, "new", "516e9877b1255fa22f18c869e1715f39dd4b39ec");
+  assert_manifest_checksum (tc, NULL,  CHECKSUM_RELOAD_NEW);
+  assert_manifest_checksum (tc, "old", CHECKSUM_RELOAD_NEW);
+  assert_manifest_checksum (tc, "new", CHECKSUM_RELOAD_NEW);
 
   setup_reload_packages (datadir, "old");
   cockpit_packages_reload (tc->packages);
 
-  assert_manifest_checksum (tc, NULL,  "516e9877b1255fa22f18c869e1715f39dd4b39ec");
-  assert_manifest_checksum (tc, "old", "516e9877b1255fa22f18c869e1715f39dd4b39ec");
+  assert_manifest_checksum (tc, NULL,  CHECKSUM_RELOAD_NEW);
+  assert_manifest_checksum (tc, "old", CHECKSUM_RELOAD_NEW);
   assert_manifest_checksum (tc, "new", NULL);
 
   teardown_reload_packages (datadir);
@@ -962,14 +972,14 @@ test_reload_updated (TestCase *tc,
   setup_reload_packages (datadir, "old");
   tc->packages = cockpit_packages_new ();
 
-  assert_manifest_checksum (tc, NULL,  "0e4445bda678eede7c520a0a0b87aae56e7570cf");
-  assert_manifest_checksum (tc, "old", "0e4445bda678eede7c520a0a0b87aae56e7570cf");
+  assert_manifest_checksum (tc, NULL,  CHECKSUM_RELOAD_OLD);
+  assert_manifest_checksum (tc, "old", CHECKSUM_RELOAD_OLD);
 
   setup_reload_packages (datadir, "updated");
   cockpit_packages_reload (tc->packages);
 
-  assert_manifest_checksum (tc, NULL,  "0e4445bda678eede7c520a0a0b87aae56e7570cf");
-  assert_manifest_checksum (tc, "old", "252178c3fba5843c8c3bb4ce7733b405741cedee");
+  assert_manifest_checksum (tc, NULL,  CHECKSUM_RELOAD_OLD);
+  assert_manifest_checksum (tc, "old", CHECKSUM_RELOAD_UPDATED);
 
   teardown_reload_packages (datadir);
 }
@@ -977,6 +987,7 @@ test_reload_updated (TestCase *tc,
 static const Fixture fixture_csp_strip = {
   .path = "/strip/test.html",
   .datadirs = { SRCDIR "/src/bridge/mock-resource/csp", NULL },
+  .headers = { "Host", "blah:9090" },
 };
 
 static void
@@ -993,7 +1004,7 @@ test_csp_strip (TestCase *tc,
   g_assert_cmpstr (tc->problem, ==, NULL);
 
   data = mock_transport_combine_output (tc->transport, "444", &count);
-  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"X-Cockpit-Pkg-Checksum\":\"0c58347ff749c5918f7f311c109369c377dc2ba1\",\"Content-Type\":\"text/html\",\"Content-Security-Policy\":\"connect-src 'self' ws: wss:; img-src: 'self' data:; default-src 'self'\"}}<html>\x0A<head>\x0A<title>Test</title>\x0A</head>\x0A<body>Test</body>\x0A</html>\x0A", -1);
+  cockpit_assert_bytes_eq (data, "{\"status\":200,\"reason\":\"OK\",\"headers\":{\"X-DNS-Prefetch-Control\":\"off\",\"X-Cockpit-Pkg-Checksum\":\"" CHECKSUM_CSP "\",\"Content-Type\":\"text/html\",\"Referrer-Policy\":\"no-referrer\",\"Content-Security-Policy\":\"connect-src 'self' http://blah:9090 ws://blah:9090; form-action 'self' http://blah:9090; base-uri 'self' http://blah:9090; object-src 'none'; block-all-mixed-content; img-src: 'self' http://blah:9090 data:; default-src 'self' http://blah:9090\"}}<html>\x0A<head>\x0A<title>Test</title>\x0A</head>\x0A<body>Test</body>\x0A</html>\x0A", -1);
   g_assert_cmpuint (count, ==, 2);
   g_bytes_unref (data);
 }

@@ -54,6 +54,8 @@
     </div>
   </div>
 
+  <div id="account-page">
+
   <div id="account-failure" class="curtains-ct blank-slate-pf" hidden>
     <div class="blank-slate-pf-icon">
       <i class="fa fa-exclamation-circle"></i>
@@ -149,6 +151,8 @@
       <div class="list-group" id="account-authorized-keys-list">
       </div>
     </div>
+  </div>
+
   </div>
 
   <div class="modal" id="accounts-create-dialog"
@@ -476,6 +480,12 @@
       </label>
     </div>
     {{/roles}}
+    {{#changed}}
+    <div class="alert alert-info">
+      <span class="pficon pficon-info"></span>
+      <span translatable>The user must log out and log back in to fully change roles.</span>
+    </div>
+    {{/changed}}
   </script>
 
 </body>

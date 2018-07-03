@@ -65,12 +65,16 @@ if [ -n "$do_build" ]; then
     echo "config_opts['rpmbuild_networking'] = True" >>/etc/mock/site-defaults.cfg
     # don't destroy the mock after building, we want to run rpmlint
     echo "config_opts['cleanup_on_success'] = False" >>/etc/mock/site-defaults.cfg
+    # HACK: don't fall over on unavailable repositories, as we are offline
+    # (https://bugzilla.redhat.com/show_bug.cgi?id=1549291)
+    sed --follow-symlinks -i '/skip_if_unavailable=False/d' /etc/mock/default.cfg
 
     rm -rf build-results
     srpm=$(/var/lib/testvm/make-srpm "$tar")
     LC_ALL=C.UTF-8 su builder -c "/usr/bin/mock --offline --no-clean --resultdir build-results $mock_opts --rebuild $srpm"
 
     su builder -c "/usr/bin/mock --offline --shell" <<EOF
+rm -rf /builddir/build
 if type rpmlint >/dev/null 2>&1; then
     # blacklist "E: no-changelogname-tag" rpmlint error, expected due to our template cockpit.spec
     mkdir -p ~/.config
@@ -99,6 +103,13 @@ if [ -n "$do_install" ]; then
         firewall-cmd --add-service=cockpit --permanent
     fi
 
+    # Make sure we clean out the journal
+    journalctl --flush
+    journalctl --sync || killall systemd-journald
     rm -rf /var/log/journal/*
     rm -rf /var/lib/NetworkManager/dhclient-*.lease
+fi
+
+if [ -n "$do_build" ]; then
+    su builder -c "mock --clean"
 fi

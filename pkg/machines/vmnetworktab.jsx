@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -36,7 +35,7 @@ const VmNetworkTab = function ({ vm, dispatch, hostDevices }) {
         for (let i in hostDevices) {
             if (hostDevices[i].valid && hostDevices[i].Interface == network) {
                 return true;
-            } 
+            }
         }
         return false;
     }
@@ -89,7 +88,7 @@ const VmNetworkTab = function ({ vm, dispatch, hostDevices }) {
             const additionalMap = [
                 { name: _("MTU"), value: 'mtu' },
                 { name: _("Virtualport"), value: 'virtualportType' },
-                { name: _("Managed"), value: rephraseUI('networkManaged', network.managed)  },
+                { name: _("Managed"), value: rephraseUI('networkManaged', network.managed) },
                 { name: _("Portgroup"), value: (network) => {
                     if (network.source.portgroup) {
                         return network.source.portgroup;
@@ -118,14 +117,14 @@ const VmNetworkTab = function ({ vm, dispatch, hostDevices }) {
             return (<div>{columns}</div>);
         }},
         { name: _("State"), value: (network, networkId) => {
-                const isUp = network.state === 'up';
-                return (<div className='machines-network-state' id={`${id}-network-${networkId}-state`}>
-                    <span className='machines-network-state-text'>{rephraseUI('networkState', network.state)}</span>
-                    <button className='btn btn-default' onClick={onChangeState(network)} title={`${ isUp ? _("Unplug") : _("Plug")}`}>
-                        {isUp ? 'Unplug' : 'Plug'}
-                    </button>
-                </div>);
-            }
+            const isUp = network.state === 'up';
+            return (<div className='machines-network-state' id={`${id}-network-${networkId}-state`}>
+                <span className='machines-network-state-text'>{rephraseUI('networkState', network.state)}</span>
+                <button className='btn btn-default' onClick={onChangeState(network)} title={`${isUp ? _("Unplug") : _("Plug")}`}>
+                    {isUp ? 'Unplug' : 'Plug'}
+                </button>
+            </div>);
+        }
         },
     ];
 

@@ -17,7 +17,6 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-
 var cockpit = require("cockpit");
 var React = require("react");
 
@@ -84,7 +83,7 @@ var TunedDialogBody = React.createClass({
     },
     handleProfileClick: function(profile) {
         if (profile != this.state.selected_profile) {
-            this.setState( { selected_profile: profile } );
+            this.setState({ selected_profile: profile });
             this.props.change_selected(profile);
         }
     },
@@ -94,7 +93,7 @@ var TunedDialogBody = React.createClass({
             itm.active = (self.props.active_profile == itm.profile);
             itm.selected = (self.state.selected_profile == itm.name);
             itm.click = self.handleProfileClick.bind(self, itm.name);
-            return <TunedDialogProfile { ...itm }/>;
+            return <TunedDialogProfile { ...itm } />;
         });
         return (
             <div className="modal-body">
@@ -130,15 +129,7 @@ var TunedLink = React.createClass({
             classes += " disabled";
         }
 
-        return (
-            <div>
-                <a className={ classes } {...opts}>{ text }</a>
-                <a tabindex="0" data-toggle="popover" data-trigger="focus"
-                    data-placement="top" data-html="true" data-content="">
-                    <span className="fa fa-lg fa-info-circle"></span>
-                </a>
-            </div>
-        );
+        return <a className={ classes } {...opts}>{ text }</a>;
     }
 });
 

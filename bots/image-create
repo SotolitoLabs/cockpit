@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # This file is part of Cockpit.
 #
 # Copyright (C) 2015 Red Hat, Inc.
@@ -49,7 +49,7 @@ parser.add_argument('image', help='The image to create')
 args = parser.parse_args()
 
 # default to --no-build for some images
-if args.image in ["candlepin", "continuous-atomic", "fedora-atomic", "ipa", "rhel-atomic", "selenium", "openshift", "openshift-node", "ovirt"]:
+if args.image in ["candlepin", "continuous-atomic", "fedora-atomic", "ipa", "rhel-atomic", "selenium", "openshift", "openshift-prerelease", "openshift-node", "ovirt", "rhel-x"]:
     if not args.no_build:
         if args.verbose:
             print("Creating machine without build capabilities based on the image type")
@@ -107,18 +107,19 @@ class MachineBuilder:
             self.machine.message("run setup script on guest")
 
             try:
-                self.machine.execute(script="/var/tmp/SETUP " + self.machine.image, environment=env, quiet=not self.machine.verbose)
+                self.machine.execute(script="/var/tmp/SETUP " + self.machine.image,
+                                     environment=env, quiet=not self.machine.verbose, timeout=7200)
                 self.machine.execute(command="rm -f /var/tmp/SETUP")
                 self.machine.execute(command="rm -rf /root/.rhel")
 
                 if self.machine.image == 'openshift':
                     # update our local openshift kube config file to match the new image
-                    self.machine.download("/root/.kube/config", "images/files/openshift.kubeconfig")
+                    self.machine.download("/root/.kube/config", os.path.join(BOTS, "images/files/openshift.kubeconfig"))
 
             except subprocess.CalledProcessError as ex:
                 if args.sit:
                     sys.stderr.write(self.machine.diagnose())
-                    raw_input ("Press RET to continue... ")
+                    input ("Press RET to continue... ")
                 raise testvm.Failure("setup failed with code {0}\n".format(ex.returncode))
 
         finally:
@@ -147,7 +148,7 @@ class MachineBuilder:
         if args.no_build:
             source = None
         else:
-            source = subprocess.check_output([ os.path.join(BOTS, "make-source") ]).strip()
+            source = subprocess.check_output([ os.path.join(BOTS, "make-source") ], universal_newlines=True).strip()
         self.run_setup_script(script, source)
 
         tries_left = 3
@@ -182,7 +183,7 @@ class MachineBuilder:
         subprocess.check_call([ "qemu-img", "convert", "-c", "-O", "qcow2", self.machine.image_file, partial ])
 
         # Hash the image here
-        (sha, x1, x2) = subprocess.check_output([ "sha256sum", partial ]).partition(" ")
+        (sha, x1, x2) = subprocess.check_output([ "sha256sum", partial ], universal_newlines=True).partition(" ")
         if not sha:
             raise testvm.Failure("sha256sum returned invalid output")
 

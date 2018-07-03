@@ -25,6 +25,8 @@ var plot = require("plot");
 
 var machines = require("machines");
 var mdialogs = require("machine-dialogs");
+var cpu_ram_info = require("machine-info.es6").cpu_ram_info;
+
 require("patterns");
 
 var image_editor = require("./image-editor");
@@ -55,24 +57,26 @@ var common_plot_options = {
 
 var resource_monitors = [
     { selector: "#dashboard-plot-0",
-      plot: {
-          direct: [
-              "kernel.all.cpu.nice",
-              "kernel.all.cpu.user",
-              "kernel.all.cpu.sys"
-          ],
-          internal: [
-              "cpu.basic.nice",
-              "cpu.basic.user",
-              "cpu.basic.system"
-          ],
-          units: "millisec",
-          derive: "rate",
-          factor: 0.1  // millisec / sec -> percent
+      plot: function (info) {
+          return {
+              direct: [
+                  "kernel.all.cpu.nice",
+                  "kernel.all.cpu.user",
+                  "kernel.all.cpu.sys"
+              ],
+              internal: [
+                  "cpu.basic.nice",
+                  "cpu.basic.user",
+                  "cpu.basic.system"
+              ],
+              units: "millisec",
+              derive: "rate",
+              factor: 0.1 / info.cpus // millisec / sec -> percent
+          };
       },
       options: { yaxis: { tickColor: "#e1e6ed",
                           tickFormatter: function(v) { return v + "%"; }} },
-      ymax_unit: 100
+      ymax_min: 100
     },
     { selector: "#dashboard-plot-1",
       plot: {
@@ -196,7 +200,7 @@ function host_edit_dialog(machine_manager, machine_dialogs, host) {
     avatar_editor.stop_cropping();
     avatar_editor.load_data(machine.avatar || "images/server-large.png").
         fail(function () {
-            $('#host-edit-fail').text("Can't load image").show();
+            $('#host-edit-fail').text(_("Can't load image")).show();
         });
 }
 
@@ -233,6 +237,7 @@ PageDashboard.prototype = {
         var self = this;
 
         self.machines = machines.instance();
+        self.infos = { };
 
         self.mdialogs = mdialogs.new_manager(self.machines);
 
@@ -309,11 +314,26 @@ PageDashboard.prototype = {
                 var item = $(this);
                 var addr = item.attr("data-address");
                 var machine = self.machines.lookup(addr);
+                var info = self.infos[addr];
                 if (!machine || machine.state != "connected")
                     return;
+
+                if (!info) {
+                    self.infos[addr] = true;
+                    cpu_ram_info(machine.connection_string)
+                        .done(function (info) {
+                            self.infos[addr] = info;
+                            update_series();
+                        });
+                    return;
+                } else if (info === true) {
+                    // still retrieving
+                    return;
+                }
+
                 delete seen[addr];
                 if (!series[addr]) {
-                    series[addr] = plot_add(addr);
+                    series[addr] = plot_add(addr, info);
                 }
                 series[addr].forEach(function (s) {
                     $(s)
@@ -365,6 +385,20 @@ PageDashboard.prototype = {
                     return "../shell/images/server-small.png";
             }
 
+            function aria_role() {
+                if (this.state == "failed")
+                    return "alert";
+                else
+                    return "presentation";
+            }
+
+            function alt_text() {
+                if (this.state == "failed")
+                    return _("Connection Error");
+                else
+                    return "";
+            }
+
             function avatar_display() {
                 if (this.restarting)
                     return "hidden";
@@ -383,6 +417,8 @@ PageDashboard.prototype = {
                 var text = Mustache.render(template, {
                     machines: self.machines.list,
                     render_avatar: render_avatar,
+                    aria_role: aria_role,
+                    alt_text: alt_text,
                     avatar_display: avatar_display,
                     connecting_display: connecting_display
                 });
@@ -422,7 +458,7 @@ PageDashboard.prototype = {
             self.plots.forEach(function (p) { p.refresh(); });
         }
 
-        function plot_add(addr) {
+        function plot_add(addr, info) {
             var machine = self.machines.lookup(addr);
 
             if (!machine || machine.state != "connected")
@@ -432,8 +468,11 @@ PageDashboard.prototype = {
             var i = 0;
             resource_monitors.forEach(function (rm) {
                 if (self.plots[i]) {
+                    var desc = rm.plot;
+                    if (rm.plot.apply)
+                        desc = rm.plot(info);
                     series.push(self.plots[i].add_metrics_sum_series($.extend({ host: machine.connection_string},
-                                                                              rm.plot),
+                                                                              desc),
                                                                      { color: machine.color,
                                                                        lines: {
                                                                            lineWidth: 2

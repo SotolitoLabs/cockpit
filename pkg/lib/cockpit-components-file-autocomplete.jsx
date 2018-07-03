@@ -146,7 +146,6 @@ var FileAutoComplete = React.createClass({
                 results.push(item);
             }
 
-
             if (results.length > 5000) {
                 error = _("Too many files found");
                 channel.close();
@@ -255,7 +254,7 @@ var FileAutoComplete = React.createClass({
 
     renderError: function(error) {
         return (
-            <li className="alert alert-warning">
+            <li key="error" className="alert alert-warning">
                 {error}
             </li>
         );
@@ -279,16 +278,18 @@ var FileAutoComplete = React.createClass({
             listItems = [this.renderError(this.state.error)];
             classes += " error";
         } else {
-            listItems = React.Children.map(this.state.displayFiles, function(file) {
-                return <li className={file.type}><a data-type={file.type}>{file.path}</a></li>;
-            });
+            listItems = this.state.displayFiles.map(file => (
+                <li className={file.type} key={file.path}>
+                    <a data-type={file.type}>{file.path}</a>
+                </li>
+            ));
         }
 
         return (
-            <div className="combobox-container" id={this.props.id}>
+            <div className="combobox-container file-autocomplete-ct" id={this.props.id}>
                 <div className={classes}>
-                    <input ref="input" autocomplete="false" placeholder={placeholder} className="combobox form-control" type="text" onChange={this.delayedOnChange} value={this.state.value} onBlur={this.onBlur} />
-                    <span onClick={this.showAllOptions} className={controlClasses}></span>
+                    <input ref="input" autoComplete="false" placeholder={placeholder} className="combobox form-control" type="text" onChange={this.delayedOnChange} value={this.state.value} onBlur={this.onBlur} />
+                    <span onClick={this.showAllOptions} className={controlClasses} />
                     <ul onMouseDown={this.onMouseDown} onClick={this.selectItem} className="typeahead typeahead-long dropdown-menu">
                         {listItems}
                     </ul>

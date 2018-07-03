@@ -28,6 +28,9 @@
 
     var docker = require("./docker");
     var bar = require("./bar");
+    var journal = require("journal");
+    var moment = require("moment");
+    moment.locale(cockpit.language);
 
     var _ = cockpit.gettext;
 
@@ -89,10 +92,12 @@
     };
 
     util.render_container_state = function render_container_state (state) {
-        if (state.Running)
-            return cockpit.format(_("Up since $StartedAt"), state);
-        else
-            return cockpit.format(_("Exited $ExitCode"), state);
+        if (state.Running) {
+            var momentDate = moment(state.StartedAt);
+            return cockpit.format(_("Up since $0"), momentDate.isValid() ?
+                                  momentDate.calendar() : state.startedAt);
+        }
+        return cockpit.format(_("Exited $ExitCode"), state);
     };
 
     util.render_container_restart_policy = function render_restart_policy(policy) {
@@ -359,7 +364,7 @@
             if (data !== undefined)
                 $(slider).prop("value", (Math.log(data) - minv) / scale);
             $(slider)
-                .attr("disabled", data === undefined)
+                .attr("disabled", !check.checked)
                 .trigger("change");
             updating = false;
         }
@@ -588,6 +593,77 @@
 
         $('#confirmation-dialog').modal('show');
         return deferred.promise();
+    };
+
+    util.find_container_log = function find_container_log(client, entry, resultCallback) {
+        client.call(entry, "org.freedesktop.DBus.Properties", "GetAll",
+                    ["org.freedesktop.Problems2.Entry"]).
+        fail(function (error) {
+            console.log(error);
+        }).
+        done(function (sem_result) {
+            client.call(entry, "org.freedesktop.Problems2.Entry",
+                        "ReadElements", [['container_id'], 0x4]).
+            fail(function (error) {
+                console.log(error);
+            }).
+            done(function (elem_result) {
+                if ('container_id' in elem_result[0]){
+                    var problem_id = sem_result[0]['ID'].v;
+                    // Wait for a while, until ABRT processes the problem and writes it into journal
+                    window.setTimeout(util.problem_log, 2000, 0, problem_id, elem_result[0]['container_id'].v, resultCallback);
+                }
+            });
+        });
+    };
+
+    util.problem_log = function problem_log (poll_count, problem_id, c_id, resultCallback) {
+        var url = null;
+        var message = "";
+        var match = [ ];
+        var log_found = false;
+        match.push('SYSLOG_IDENTIFIER=abrt-notification');
+        match.push('PROBLEM_DIR=' + problem_id);
+        journal.journalctl(match, { follow: false, reverse: true, all: true} ).
+            stream(function(entries) {
+                log_found = true;
+                // Only first entry is enough, since others are only previous occurrences
+                url = cockpit.location.encode(entries[0]['__CURSOR']);
+                url = "/system/logs#" + url;
+                if (entries[0]['PROBLEM_REASON'])
+                    message = entries[0]['PROBLEM_REASON'];
+                else
+                    message = entries[0]['MESSAGE'];
+
+                resultCallback(c_id, url, message);
+            }).
+            done(function(){
+                // Try pooling for minute, then give up
+                if (!log_found){
+                    if (poll_count < 30){
+                        window.setTimeout(util.problem_log, 2000, ++poll_count, problem_id, c_id, resultCallback);
+                    }
+                    else{
+                        console.warn("No journal log found for problem " + problem_id);
+                    }
+                }
+            });
+    };
+
+    util.find_all_problems = function find_problems(problems, client, service, resultCallback) {
+        problems.wait(function() {
+            try {
+                service.GetProblems(0, {}).
+                    done(function(problem_paths, options) {
+                        for (var i in problem_paths) {
+                            util.find_container_log(client, problem_paths[i], resultCallback);
+                        }
+                    });
+            }
+            catch(err) {
+                /* ignore errors */
+            }
+        });
     };
 
     module.exports = util;

@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -23,20 +23,13 @@ from testlib import *
 import json
 import os
 
+@skipPackage("cockpit-docker")
 class TestDocker(MachineCase):
     def setUp(self):
         MachineCase.setUp(self)
         m = self.machine
 
-        # HACK: https://github.com/docker/docker/issues/25246
-        if m.image in [ "debian-8", "debian-testing" ]:
-            m.execute("printf '\\n\\n[Service]\\nKillMode=process\\n' >> /lib/systemd/system/docker.service")
-            m.execute("systemctl daemon-reload")
-
         m.execute("systemctl start docker || systemctl start docker-latest")
-
-        # HACK: docker fails to start a container without /etc/resolv.conf
-        m.execute("touch /etc/resolv.conf")
 
     def confirm(self):
         b = self.browser
@@ -258,6 +251,12 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
         b.set_val(".containers-run-portmapping form:eq(1) input:eq(0)", nport)
         b.set_val(".containers-run-portmapping form:eq(1) input:eq(1)", nport)
 
+        # Add a mount point
+        b.click("#mount-volumes")
+        b.wait_present("#select-mounted-volumes form:eq(0)")
+        b.set_val("#select-mounted-volumes form:eq(0) input:eq(0)", "/blah")
+        b.set_val("#select-mounted-volumes form:eq(0) input:eq(1)", "/mnt")
+
         b.click("#containers-run-image-run");
         b.wait_popdown("containers_run_image_dialog")
         b.wait_in_text("#containers-containers", "PROBE2")
@@ -269,6 +268,7 @@ CMD ["/listen-on-port.sh", "%(port)d", "%(message)s"]
         b.wait_visible("#container-details")
         b.wait_in_text("#container-details-ports", ":%d -> %d/tcp" % (port, port))
         b.wait_in_text("#container-details-ports", ":%d -> %d/tcp" % (nport, nport))
+        b.wait_in_text("#container-details-volumes", "/mnt:/blah")
         self.wait_for_message(message)
 
         # Check connection on first port, remove trailing whitespace
@@ -356,22 +356,22 @@ CMD ["/bin/sh"]
 
         # Wait for the container to wake up
         try:
-            b.key_press( [ 'Return', 'Return', 'Return' ] )
+            b.key_press("\r\r\r")
             b.wait_in_text("#container-terminal", "#")
         except Error as ex:
             if not ex.msg.startswith('timeout'):
                 raise
 
-        b.key_press( [ 'c', 'l', 'e', 'a', 'r', 'Return' ] )
+        b.key_press("clear\r")
         b.wait_in_text("#container-terminal", "#")
 
         b.focus('#container-terminal .console-ct .terminal')
-        b.key_press( [ 'e', 'n', 'v', 'Return' ] )
+        b.key_press("env\r")
         b.wait_in_text("#container-terminal", "zero=GGG")
         b.wait_in_text("#container-terminal", "SECOND=marmalade")
 
         b.focus('#container-terminal .console-ct .terminal')
-        b.key_press( [ 'l', 's', ' ', '/', 'b', 'l', 'a', 'h', '/', 'Return' ] )
+        b.key_press("ls /blah/\r")
         b.wait_in_text("#container-terminal", "dripping.txt")
 
         self.allow_journal_messages('.*denied.*name_connect.*docker.*')
@@ -387,11 +387,6 @@ CMD ["/bin/sh"]
         # to have the same name as our admin test user
         m.execute("usermod -G '' admin; sed -i '/^%admin/d' /etc/sudoers")
 
-        # HACK: Logging in without the admin group will try to write to
-        # /var/lib/cockpit/, but this will fail.
-        # https://github.com/cockpit-project/cockpit/issues/1248
-        #
-        self.allow_journal_messages(".*Failed to create file '/var/lib/cockpit/.*': Permission denied")
         self.allow_journal_messages("http:///var/run/docker.sock/.*: couldn't connect: .*")
 
         self.login_and_go("/docker", authorized=False)
@@ -411,7 +406,8 @@ CMD ["/bin/sh"]
         b.wait_visible("#curtain")
         b.wait_text("#curtain h1", "Docker is not installed or activated on the system")
         b.click("#curtain button[data-action='docker-start']")
-        b.wait_visible("#containers-containers")
+        with b.wait_timeout(120):
+            b.wait_visible("#containers-containers")
 
         self.allow_authorize_journal_messages()
         self.allow_journal_messages("cannot reauthorize identity.*:.*unix-user:root.*")
@@ -421,10 +417,8 @@ CMD ["/bin/sh"]
         b = self.browser
         m = self.machine
 
-        # HACK: https://github.com/docker/docker/issues/25246
-        if m.image in [ "debian-stable", "debian-testing" ]:
-            m.execute("printf '\\n\\n[Service]\\nKillMode=process\\n' >> /lib/systemd/system/docker.service")
-            m.execute("systemctl daemon-reload")
+        # This happens due to the Docker restart
+        self.allow_journal_messages('.*received truncated HTTP response.*')
 
         m.execute("systemctl start docker || systemctl start docker-latest")
 
@@ -459,13 +453,12 @@ CMD ["/bin/sh"]
 
         # Restart docker, docker.socket needs special handling
         b.logout()
-        if m.image in [ "debian-x8" ]:
-            m.execute("systemctl stop docker.socket")
-        m.execute("systemctl restart docker || systemctl restart docker-latest")
+        m.execute("(systemctl kill --signal=9 docker-containerd && systemctl restart docker-containerd ) || systemctl restart docker || systemctl restart docker-latest")
         self.login_and_go("/docker")
 
         # show all containers to interact with stopped ones
-        b.wait_visible("#containers-containers")
+        with b.wait_timeout(120):
+            b.wait_visible("#containers-containers")
         b.click("#containers-containers-filter button")
         b.wait_visible("#containers-containers-filter .dropdown-menu")
         b.click("#containers-containers-filter li[data-data='all'] a")
@@ -531,14 +524,60 @@ CMD ["/bin/sh"]
         # This should be updated
         b.wait_in_text("#container-details-cpu-row", "1024 shares")
 
+    @skipImage("Newer version of ABRT required", "centos-7", "rhel-7", "fedora-i386", "rhel-7-5")
+    @skipImage("ABRT not available", "debian-stable", "debian-testing", "ubuntu-stable", "ubuntu-1604", "rhel-atomic", "fedora-atomic", "continuous-atomic", "rhel-x")
+    def testContainerProblems(self):
+        b = self.browser
+        m = self.machine
+
+        m.execute("systemctl start docker || systemctl start docker-latest")
+
+        # start abrt-ccpp service until abrt-journal-core patch is released
+        # https://github.com/abrt/abrt/commit/da2ae52f307f05f2eac0ad6e647561633544722a
+        m.execute("systemctl start abrt-ccpp")
+
+        # start container
+        m.execute('docker run -dit --name crashing_container busybox /bin/sh')
+
+        # crash in container
+        m.execute('docker exec crashing_container timeout -s ABRT -t 1 sleep 5 || true')
+
+        # login and go to docker page (Containers)
+        self.login_and_go("/docker")
+
+        sel = "#containers-containers .listing-ct-item .listing-ct-toggle"
+        b.wait_present(sel)
+        b.wait_visible(sel)
+        b.click(sel)
+
+        # wait for the Problems tab then click it
+        sel = '#containers-containers .listing-ct-panel .listing-ct-head ul li a:contains("Problems")'
+        b.wait_present(sel)
+        b.wait_visible(sel)
+        b.click(sel)
+
+        # open link to logs
+        sel = "#containers-containers .listing-ct-panel .listing-ct-body a.list-group-item"
+        b.wait_present(sel)
+        b.wait_visible(sel)
+        b.wait_in_text(sel, "sleep" )
+        b.click(sel + ':contains("sleep")')
+
+        # wait for the page to load
+        b.enter_page("/system/logs")
+
+        # check for abrtd service in text
+        b.wait_present("#journal-entry-id")
+        b.wait_in_text("#journal-entry-id", "sleep")
+        b.wait_in_text("#journal-entry-fields","abrtd.service")
+
 @skipImage("Skip on systems without atomic and ones with missing deps", "centos-7", "debian-stable", "debian-testing", "ubuntu-1604", "ubuntu-stable", "rhel-atomic", "fedora-atomic", "fedora-i386")
+@skipPackage("cockpit-docker")
 class TestAtomicScan(MachineCase):
     def setUp(self):
         MachineCase.setUp(self)
-        self.machine.execute("systemctl start docker")
 
-        # HACK: docker fails to start a container without /etc/resolv.conf
-        self.machine.execute("touch /etc/resolv.conf")
+        self.machine.execute("systemctl start docker")
 
     def testBasic(self):
         b = self.browser

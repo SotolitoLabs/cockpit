@@ -17,8 +17,12 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
+require("polyfills.js");
 var $ = require("jquery");
 var cockpit = require("cockpit");
+var machine_info = require("machine-info.es6");
+var packagekit = require("packagekit.es6");
+var install_dialog = require("cockpit-components-install-dialog.jsx").install_dialog;
 
 var Mustache = require("mustache");
 var plot = require("plot");
@@ -39,12 +43,13 @@ var C_ = cockpit.gettext;
 var permission = cockpit.permission({ admin: true });
 $(permission).on("changed", update_hostname_privileged);
 $(permission).on("changed", update_shutdown_privileged);
+$(permission).on("changed", update_systime_privileged);
 
 function update_hostname_privileged() {
     $(".hostname-privileged").update_privileged(
         permission, cockpit.format(
             _("The user <b>$0</b> is not permitted to modify hostnames"),
-            permission.user ? permission.user.name : '')
+            permission.user ? permission.user.name : ''), null, $('#hostname-tooltip')
     );
 }
 
@@ -56,47 +61,17 @@ function update_shutdown_privileged() {
     );
 }
 
+function update_systime_privileged() {
+    $(".systime-privileged").update_privileged(
+        permission, cockpit.format(
+            _("The user <b>$0</b> is not permitted to change the system time"),
+            permission.user ? permission.user.name : ''), null, $('#systime-tooltip')
+    );
+}
+
 function debug() {
     if (window.debugging == "all" || window.debugging == "system")
         console.debug.apply(console, arguments);
-}
-
-/* machine_info(address).done(function (info) { })
- *
- * Get information about the machine at ADDRESS.  The returned object
- * has these fields:
- *
- * memory  -  amount of physical memory
- */
-
-var machine_info_promises = { };
-
-function machine_info(address) {
-    var pr = machine_info_promises[address];
-    var dfd;
-    if (!pr) {
-        dfd = $.Deferred();
-        machine_info_promises[address] = pr = dfd.promise();
-
-        cockpit.spawn(["cat", "/proc/meminfo", "/proc/cpuinfo"]).
-            done(function(text) {
-                var info = { };
-                var match = text.match(/MemTotal:[^0-9]*([0-9]+) [kK]B/);
-                var total_kb = match && parseInt(match[1], 10);
-                if (total_kb)
-                    info.memory = total_kb*1024;
-
-                info.cpus = 0;
-                var re = new RegExp("^processor", "gm");
-                while (re.test(text))
-                    info.cpus += 1;
-                dfd.resolve(info);
-            }).
-            fail(function() {
-                dfd.reject();
-            });
-    }
-    return pr;
 }
 
 function ServerTime() {
@@ -233,6 +208,9 @@ PageServer.prototype = {
         this.server_time = null;
         this.client = null;
         this.hostname_proxy = null;
+        this.os_updates = null; // packagekit.Enum.INFO_* → #count
+        this.os_updates_icon = document.getElementById("system_information_updates_icon");
+        this.unregistered = false;
     },
 
     getTitle: function() {
@@ -300,16 +278,17 @@ PageServer.prototype = {
             self.host_keys_hide();
         });
 
+        var $ntp_status = $('#system_information_systime_ntp_status');
+
         function update_ntp_status() {
-            var $elt = $('#system_information_systime_ntp_status');
 
             if (!self.server_time.timedate.NTP) {
-                $elt.hide();
-                $elt.popover('hide');
+                $ntp_status.hide();
+                $ntp_status.attr("data-original-title", null);
                 return;
             }
 
-            $elt.show();
+            $ntp_status.show();
 
             var model = {
                 Synched: self.server_time.timedate.NTPSynchronized,
@@ -333,19 +312,15 @@ PageServer.prototype = {
                     model.SubStatus = timesyncd_status;
             }
 
-            var popover_html = Mustache.render(self.ntp_status_tmpl, model);
-            if (popover_html != $elt.attr('data-content')) {
-                $elt.attr("data-content", popover_html);
-                // Refresh the popover if it is open
-                if ($elt.data('bs.popover').tip().hasClass('in'))
-                    $elt.popover('show');
-            }
+            var tooltip_html = Mustache.render(self.ntp_status_tmpl, model);
+            if (tooltip_html != $ntp_status.attr("data-original-title"))
+                $ntp_status.attr("data-original-title", tooltip_html);
 
             var icon_html = Mustache.render(self.ntp_status_icon_tmpl, model);
-            $elt.html(icon_html);
+            $ntp_status.html(icon_html);
         }
 
-        $('#system_information_systime_ntp_status').popover();
+        $ntp_status.tooltip();
 
         $(self.server_time.timesyncd_service).on("changed", update_ntp_status);
         $(self.server_time.timedate).on("changed", update_ntp_status);
@@ -369,43 +344,158 @@ PageServer.prototype = {
         var pmcd_service = service.proxy("pmcd");
         var pmlogger_service = service.proxy("pmlogger");
         var pmlogger_promise;
+        var pmlogger_exists = false;
+        var packagekit_exists = false;
 
-        $("#server-pmlogger-switch").on("change", function(ev) {
-            var val = $(this).onoff('value');
-            if (pmlogger_service.exists) {
-                if (val) {
-                    pmlogger_promise = cockpit.all(pmcd_service.enable(),
-                           pmcd_service.start(),
-                           pmlogger_service.enable(),
-                           pmlogger_service.start()).
-                        fail(function (error) {
-                            console.warn("Enabling pmlogger failed", error);
-                        });
-                } else {
-                    pmlogger_promise = cockpit.all(pmlogger_service.disable(),
-                           pmlogger_service.stop()).
-                        fail(function (error) {
-                            console.warn("Disabling pmlogger failed", error);
-                        });
-                }
-                pmlogger_promise.always(function() {
-                    pmlogger_promise = null;
-                    refresh_pmlogger_state();
-                });
-            }
-        });
-
-        function refresh_pmlogger_state() {
-            if (!pmlogger_service.exists)
+        function update_pmlogger_row() {
+            if (!pmlogger_exists) {
+                $('#system-information-enable-pcp').toggle(packagekit_exists);
                 $('#server-pmlogger-onoff-row').hide();
-            else if (!pmlogger_promise) {
+            } else if (!pmlogger_promise) {
+                $('#system-information-enable-pcp').hide();
                 $("#server-pmlogger-switch").onoff('value', pmlogger_service.enabled);
                 $('#server-pmlogger-onoff-row').show();
             }
         }
 
-        $(pmlogger_service).on('changed', refresh_pmlogger_state);
-        refresh_pmlogger_state();
+        function pmlogger_service_changed() {
+            pmlogger_exists = pmlogger_service.exists;
+
+            /* HACK: The pcp packages on Ubuntu and Debian include SysV init
+             * scripts in /etc, which stay around when removing (as opposed to
+             * purging) the package. Systemd treats those as valid units, even
+             * if they're not backed by packages anymore. Thus,
+             * pmlogger_service.exists will be true. Check for the binary
+             * directly to make sure the package is actually available.
+             */
+            if (pmlogger_exists) {
+                cockpit.spawn([ "which", "pmlogger" ], { err: "ignore" })
+                    .fail(function () {
+                        pmlogger_exists = false;
+                    })
+                    .always(update_pmlogger_row);
+            } else {
+                update_pmlogger_row();
+            }
+        }
+
+        packagekit.detect().then(function (exists) {
+            packagekit_exists = exists;
+            update_pmlogger_row();
+        });
+
+        $("#server-pmlogger-switch").on("change", function(ev) {
+            if (!pmlogger_exists)
+                return;
+
+            if ($(this).onoff('value')) {
+                pmlogger_promise = cockpit.all(pmcd_service.enable(),
+                       pmcd_service.start(),
+                       pmlogger_service.enable(),
+                       pmlogger_service.start()).
+                    fail(function (error) {
+                        console.warn("Enabling pmlogger failed", error);
+                    });
+            } else {
+                pmlogger_promise = cockpit.all(pmlogger_service.disable(),
+                       pmlogger_service.stop()).
+                    fail(function (error) {
+                        console.warn("Disabling pmlogger failed", error);
+                    });
+            }
+            pmlogger_promise.always(function() {
+                pmlogger_promise = null;
+                pmlogger_service_changed();
+            });
+        });
+
+        $(pmlogger_service).on('changed', pmlogger_service_changed);
+        pmlogger_service_changed();
+
+        // if cockpit component "page" is available, set element content to a link to it, otherwise just text
+        function set_page_link(element_sel, page, text) {
+            if (cockpit.manifests[page]) {
+                var link = document.createElement("a");
+                link.innerHTML = text;
+                link.addEventListener("click", function() { cockpit.jump("/" + page); });
+                $(element_sel).html(link);
+            } else {
+                $(element_sel).text(text);
+            }
+        }
+
+        function refresh_os_updates_state() {
+            self.os_updates_icon.className = ""; // hide spinner
+
+            // if system is unregistered, always show that
+            if (self.unregistered) {
+                self.os_updates_icon.className = "pficon pficon-warning-triangle-o";
+                set_page_link("#system_information_updates_text", "subscriptions", _("System Not Registered"));
+                return;
+            }
+
+            var infos = Object.keys(self.os_updates || {}).sort();
+            if (infos.length === 0) {
+                $("#system_information_updates_text").text(_("System Up To Date"));
+                return;
+            }
+
+            // show highest severity level
+            var severity = infos[infos.length - 1];
+            var text;
+            self.os_updates_icon.className = packagekit.getSeverityIcon(
+                severity > packagekit.Enum.INFO_UNKNOWN ? severity : packagekit.Enum.INFO_NORMAL);
+            if (severity == packagekit.Enum.INFO_SECURITY)
+                text = _("Security Updates Available");
+            else if (severity >= packagekit.Enum.INFO_NORMAL)
+                text = _("Bug Fix Updates Available");
+            else if (severity >= packagekit.Enum.INFO_LOW)
+                text = _("Enhancement Updates Available");
+            else
+                text = _("Updates Available");
+
+            set_page_link("#system_information_updates_text", "updates", text);
+        }
+
+        function check_for_updates() {
+            var os_updates = { };
+            self.os_updates = null;
+
+            packagekit.cancellableTransaction("GetUpdates", [0],
+                function (data) {
+                    // we are getting progress, so PackageKit works; show spinner
+                    if (self.os_updates === null) {
+                        self.os_updates = os_updates;
+                        $("#system_information_updates_text").text(_("Checking for updates…"));
+                        self.os_updates_icon.className = "spinner spinner-xs spinner-inline";
+                    }
+                },
+                {
+                    Package: function (info) {
+                        // dnf backend yields wrong severity (https://bugs.freedesktop.org/show_bug.cgi?id=101070)
+                        if (info < packagekit.Enum.INFO_LOW || info > packagekit.Enum.INFO_SECURITY)
+                            info = packagekit.Enum.INFO_UNKNOWN;
+                        os_updates[info] = (os_updates[info] || 0) + 1;
+                    }
+                })
+                .then(refresh_os_updates_state)
+                .catch(function (ex) {
+                    // if PackageKit is not available, hide the table line
+                    console.warn("Checking for available updates failed:", ex.toString());
+                    self.os_updates_icon.className = "";
+                    $("#system_information_updates_text").toggle(false);
+                });
+        }
+
+        // check for updates now and on page switches, in case they get applied on /updates or terminal
+        $(cockpit).on("visibilitychange", check_for_updates);
+        check_for_updates();
+
+        // check for unregistered system
+        packagekit.watchRedHatSubscription(function (subscribed) {
+            self.unregistered = !subscribed;
+            refresh_os_updates_state();
+        });
     },
 
     enter: function() {
@@ -413,8 +503,9 @@ PageServer.prototype = {
 
         var machine_id = cockpit.file("/etc/machine-id");
         machine_id.read().done(function (content) {
-            $("#system_machine_id").text(content);
-            $("#system_machine_id").attr("title", content);
+            $("#system_machine_id")
+                .text(content)
+                .tooltip({ title: content, placement: "bottom" });
         }).fail(function (ex) {
             console.error("Error reading machine id", ex);
         }).always(function () {
@@ -431,12 +522,11 @@ PageServer.prototype = {
                                                 '/org/projectatomic/rpmostree1/Sysroot');
         $(self.sysroot).on("changed", $.proxy(this, "sysroot_changed"));
 
-        self.client = cockpit.dbus('org.freedesktop.hostname1');
+        self.client = cockpit.dbus('org.freedesktop.hostname1',
+                                   {"superuser" : "try"});
         self.hostname_proxy = self.client.proxy('org.freedesktop.hostname1',
                                      '/org/freedesktop/hostname1');
         self.kernel_hostname = null;
-
-        var series;
 
         /* CPU graph */
 
@@ -454,7 +544,7 @@ PageServer.prototype = {
                                     });
         self.cpu_plot = plot.plot($("#server_cpu_graph"), 300);
         self.cpu_plot.set_options(cpu_options);
-        series = self.cpu_plot.add_metrics_sum_series(cpu_data, { });
+        // This is added to the plot once we have the machine info, see below.
 
         /* Memory graph */
 
@@ -475,7 +565,7 @@ PageServer.prototype = {
 
         self.memory_plot = plot.plot($("#server_memory_graph"), 300);
         self.memory_plot.set_options(memory_options);
-        series = self.memory_plot.add_metrics_sum_series(memory_data, { });
+        self.memory_plot.add_metrics_sum_series(memory_data, { });
 
         /* Network graph */
 
@@ -505,7 +595,7 @@ PageServer.prototype = {
 
         self.network_plot = plot.plot($("#server_network_traffic_graph"), 300);
         self.network_plot.set_options(network_options);
-        series = self.network_plot.add_metrics_sum_series(network_data, { });
+        self.network_plot.add_metrics_sum_series(network_data, { });
 
         /* Disk IO graph */
 
@@ -535,12 +625,15 @@ PageServer.prototype = {
 
         self.disk_plot = plot.plot($("#server_disk_io_graph"), 300);
         self.disk_plot.set_options(disk_options);
-        series = self.disk_plot.add_metrics_sum_series(disk_data, { });
+        self.disk_plot.add_metrics_sum_series(disk_data, { });
 
-        machine_info().
+        machine_info.cpu_ram_info().
             done(function (info) {
-                cpu_options.yaxis.max = info.cpus * 100;
-                self.cpu_plot.set_options(cpu_options);
+                $('#link-cpu').text(cockpit.format(cockpit.ngettext("of $0 CPU core", "of $0 CPU cores",
+                                                                    info.cpus),
+                                                   info.cpus));
+                cpu_data.factor = 0.1 / info.cpus; // millisec / sec -> percent
+                self.cpu_plot.add_metrics_sum_series(cpu_data, { });
                 memory_options.yaxis.max = info.memory;
                 self.memory_plot.set_options(memory_options);
             });
@@ -554,45 +647,18 @@ PageServer.prototype = {
             self.disk_plot.resize();
         });
 
-        /*
-         * Parses output like:
-         *
-         * bios_vendor:LENOVO
-         * bios_version:8CET46WW
-         */
-        function parse_lines(output) {
-            var ret = { };
-            $.each(output.split("\n"), function(i, line) {
-                var pos = line.indexOf(":");
-                if (pos !== -1)
-                    ret[line.substring(0, pos)] = line.substring(pos + 1);
-            });
-            return ret;
-        }
-
-        cockpit.spawn(["grep", "\\w", "sys_vendor", "product_name"],
-                      { directory: "/sys/devices/virtual/dmi/id", err: "ignore" })
-            .done(function(output) {
-                var fields = parse_lines(output);
-                $("#system_information_hardware_text").text(fields.sys_vendor + " " +
-                                                            fields.product_name);
-            })
-            .fail(function(ex) {
-                debug("couldn't read dmi info: " + ex);
-            });
-
-        cockpit.spawn(["grep", "\\w", "product_serial", "chassis_serial"],
-                      { directory: "/sys/devices/virtual/dmi/id", superuser: "try", err: "ignore" })
-            .done(function(output) {
-                var fields = parse_lines(output);
+        machine_info.dmi_info()
+            .done(function(fields) {
+                $("#system_information_hardware_text")
+                    .tooltip({ title: _("Click to see system hardware information"), placement: "bottom" })
+                    .text(fields.sys_vendor + " " + fields.product_name);
                 var present = !!(fields.product_serial || fields.chassis_serial);
-                $("#system_information_asset_tag_text").text(fields.product_serial ||
-                                                             fields.chassis_serial);
+                $("#system_information_asset_tag_text")
+                    .text(fields.product_serial || fields.chassis_serial);
                 $("#system-info-asset-row").toggle(present);
             })
             .fail(function(ex) {
-                $("#system-info-asset-row").toggle(false);
-                debug("couldn't read serial dmi info: " + ex);
+                debug("couldn't read dmi info: " + ex);
             });
 
         function hostname_text() {
@@ -628,9 +694,6 @@ PageServer.prototype = {
     },
 
     show: function() {
-        /* HACK: Overflow: auto on motd pre element causes a phantomjs crash */
-        $('#motd').toggleClass("phantom", window.navigator.userAgent.indexOf("PhantomJS") > -1);
-
         this.cpu_plot.start_walking();
         this.memory_plot.start_walking();
         this.disk_plot.start_walking();
@@ -1358,15 +1421,17 @@ PageCpuStatus.prototype = {
     enter: function() {
         var self = this;
 
+        var n_cpus = 1;
+
         var options = {
             series: {shadowSize: 0,
                      lines: {lineWidth: 0, fill: true}
                     },
             yaxis: {min: 0,
-                    max: 100,
+                    max: n_cpus * 1000,
                     show: true,
                     ticks: 5,
-                    tickFormatter: function(v) { return (v / 10) + "%"; }},
+                    tickFormatter: function(v) { return (v / 10 / n_cpus) + "%"; }},
             xaxis: {show: true,
                     ticks: [[0.0*60, "5 min"],
                             [1.0*60, "4 min"],
@@ -1410,9 +1475,15 @@ PageCpuStatus.prototype = {
 
         this.plot = plot.setup_complicated_plot("#cpu_status_graph", self.grid, series, options);
 
-        machine_info().
+        machine_info.cpu_ram_info().
             done(function (info) {
-                self.plot.set_yaxis_max(info.cpus * 1000);
+                // Setting n_cpus changes the tick labels, see tickFormatter above.
+                n_cpus = info.cpus;
+                self.plot.set_yaxis_max(n_cpus * 1000);
+                $("#cpu_status_title").text(cockpit.format(cockpit.ngettext("Usage of $0 CPU core",
+                                                                            "Usage of $0 CPU cores",
+                                                                            n_cpus),
+                                                           n_cpus));
             });
     },
 
@@ -1530,6 +1601,16 @@ $("#link-network").on("click", function() {
 $("#link-disk").on("click", function() {
     cockpit.jump("/storage", cockpit.transport.host);
     return false;
+});
+
+$("#system_information_hardware_text").on("click", function() {
+    $("#system_information_hardware_text").tooltip("hide");
+    cockpit.jump("/system/hwinfo", cockpit.transport.host);
+    return false;
+});
+
+$("#system-information-enable-pcp-link").on("click", function() {
+    install_dialog("cockpit-pcp");
 });
 
 

@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -22,6 +22,7 @@ import parent
 from testlib import *
 import time
 import subprocess
+import packagelib
 
 os_release = """
 NAME="Foobar Adventure Linux Server"
@@ -47,6 +48,7 @@ def ssh_reconnect(machine, timeout_sec=120):
 
 class TestSystemInfo(MachineCase):
 
+    @enableAxe
     def testBasic(self):
         m = self.machine
         b = self.browser
@@ -74,6 +76,8 @@ class TestSystemInfo(MachineCase):
         mid = m.execute("cat /etc/machine-id")
         b.wait_present('#system_machine_id')
         b.wait_text('#system_machine_id', mid)
+
+        self.check_axe()
 
         # Generate a new rsa key and change the config
         m.execute("ssh-keygen -f /etc/ssh/weirdname -t rsa -N ''")
@@ -252,7 +256,16 @@ class TestSystemInfo(MachineCase):
         self.assertIn("Mon Jun  4 06:34:", m.execute("date"))
         self.assertIn("EEST 2018\n", m.execute("date"))
 
-    @skipImage("No NTP servers config", "centos-7", "continuous-atomic", "rhel-7", "rhel-7-4", "rhel-7-5", "rhel-atomic")
+        if m.image != 'rhel-7-5':
+            self.allow_authorize_journal_messages()
+            b.relogin('/system', authorized=False)
+            b.wait_present('.systime-privileged.disabled')
+            b.mouse('#systime-tooltip', 'mouseover')
+            b.wait_text('#systime-tooltip ~ div.tooltip', 'The user admin is not permitted to change the system time')
+            b.mouse('#systime-tooltip', 'mouseout')
+            b.wait_not_present('#systime-tooltip ~ div.tooltip')
+
+    @skipImage("No NTP servers config", "centos-7", "continuous-atomic", "rhel-7", "rhel-7-5", "rhel-atomic")
     def testTimeServers(self):
         m = self.machine
         b = self.browser
@@ -333,6 +346,92 @@ class TestSystemInfo(MachineCase):
 
         # because of the reload
         self.allow_restart_journal_messages()
+
+    @skipImage("Introduced in Cockpit 161", "rhel-7-5")
+    def testHardwareInfo(self):
+        b = self.browser
+
+        self.login_and_go("/system")
+        b.wait_present('#system_information_hardware_text')
+        b.wait_visible('#system_information_hardware_text')
+        b.wait_in_text('#system_information_hardware_text', "QEMU")
+        b.click('#system_information_hardware_text')
+        b.enter_page("/system/hwinfo")
+
+        # system info
+        b.wait_present('#hwinfo .info-table-ct')
+        b.wait_in_text('#hwinfo .info-table-ct', "CPU")
+        # QEMU VM type
+        b.wait_in_text('#hwinfo .info-table-ct tbody:nth-of-type(1) tr:nth-of-type(1) td', "Other")
+        # Name
+        b.wait_in_text('#hwinfo .info-table-ct tbody:nth-of-type(1) tr:nth-of-type(2) td', "Standard PC")
+        # BIOS
+        b.wait_in_text('#hwinfo .info-table-ct tbody:nth-of-type(2) tr:nth-of-type(1) td', "SeaBIOS")
+        # BIOS date; just ensure it's from this century
+        b.wait_in_text('#hwinfo .info-table-ct tbody:nth-of-type(2) tr:nth-of-type(3) td', "/20")
+
+        # PCI
+        b.wait_present('#hwinfo .listing-ct caption')
+        b.wait_in_text('#hwinfo .listing-ct caption', "PCI")
+        b.wait_in_text('#hwinfo .listing-ct', "0000:00:00.0")
+
+        # sorted by device class by default; this makes some assumptions about QEMU devices
+        b.wait_in_text('#hwinfo .listing-ct tbody:first-of-type td:nth-of-type(2)', "Bridge")
+        b.wait_in_text('#hwinfo .listing-ct tbody:last-of-type td:nth-of-type(2)', "Unclassified")
+
+        # sort by model
+        b.click('#hwinfo .listing-ct thead th:nth-of-type(3)')
+        b.wait_in_text('#hwinfo .listing-ct tbody:first-of-type td:nth-of-type(3)', "440FX")
+        b.wait_in_text('#hwinfo .listing-ct tbody:last-of-type td:nth-of-type(3)', "Virtio SCSI")
+        b.wait_not_in_text('#hwinfo .listing-ct tbody:last-of-type td:nth-of-type(2)', "Unclassified")
+
+        # go back to system page
+        b.click('.breadcrumb a')
+        b.enter_page("/system")
+
+
+class TestPcp(packagelib.PackageCase):
+
+    @skipImage("cockpit-system doesn't have the install-on-demand feature", "rhel-7-5")
+    @skipImage("doesn't have pcp", "debian-stable")
+    @skipImage("https://bugzilla.redhat.com/show_bug.cgi?id=1559414", "rhel-x")
+    def testEnablePcpLink(self):
+        m = self.machine
+        b = self.browser
+
+        # the atomics don't have pcp and can't install additional software
+        if m.atomic_image:
+            self.login_and_go("/system")
+            b.wait_present("#server-pmlogger-onoff-row")
+            b.wait_not_visible("#server-pmlogger-onoff-row")
+            b.wait_not_visible("#system-information-enable-pcp")
+            return
+
+        m.execute("pkcon remove -y pcp")
+
+        pmlogger = {
+            "/usr/bin/pmlogger": "",
+            "/etc/systemd/system/pmlogger.service": "[Service]\nExecStart=/bin/true"
+        }
+
+        self.createPackage("cockpit-pcp", "999", "1", content=pmlogger, postinst="chmod +x /usr/bin/pmlogger; systemctl daemon-reload")
+        self.enableRepo()
+        m.execute("pkcon refresh")
+
+        # the offer to install it should be visible
+        self.login_and_go("/system")
+        b.wait_present("#server-pmlogger-onoff-row")
+        b.wait_not_visible("#server-pmlogger-onoff-row")
+        b.wait_visible("#system-information-enable-pcp")
+        b.wait_in_text("#system-information-enable-pcp", "Enable persistent metrics…")
+        b.click("#system-information-enable-pcp-link")
+        b.wait_present("#cockpit_modal_dialog .modal-footer button.btn-primary:not([disabled])")
+        b.click("#cockpit_modal_dialog .modal-footer button.btn-primary")
+        b.wait_not_present("#cockpit_modal_dialog")
+
+        b.wait_visible("#server-pmlogger-onoff-row")
+        b.wait_not_visible("#system-information-enable-pcp")
+
 
 if __name__ == '__main__':
     test_main()

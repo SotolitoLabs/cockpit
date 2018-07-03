@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
@@ -21,6 +21,7 @@
 import parent
 from testlib import *
 from storagelib import *
+from packagelib import *
 
 @skipImage("NetworkManager and NFS don't work together", "ubuntu-1604")
 class TestStorage(StorageCase):
@@ -39,7 +40,7 @@ class TestStorage(StorageCase):
         b.wait_visible("#nfs-mounts .empty-panel-text")
 
         # Add /home/foo
-        b.click("#nfs-mounts button[data-action=mount-add]")
+        b.click("#nfs-mounts button .fa-plus")
         self.dialog_wait_open()
         self.dialog_set_val("server", "127.0.0.1")
         self.dialog_set_combobox("remote", "/home/foo")
@@ -53,7 +54,7 @@ class TestStorage(StorageCase):
         b.wait_text_not("#nfs-mounts tr:contains(/mnt) .usage-text", "")
 
         # Add /home/bar
-        b.click("#nfs-mounts button[data-action=mount-add]")
+        b.click("#nfs-mounts button .fa-plus")
         self.dialog_wait_open()
         self.dialog_set_val("server", "127.0.0.1")
         self.dialog_set_combobox("remote", "/home/bar")
@@ -67,32 +68,61 @@ class TestStorage(StorageCase):
         b.wait_text_not("#nfs-mounts tr:contains(/mounts/bar) .usage-text", "")
         m.execute("test -d /mounts/bar")
 
-        # Change mount point of /home/bar
-        b.click("#nfs-mounts .nfs-arm-button")
-        b.click("#nfs-mounts button[data-action=mount-edit][data-arg=1]")
+        # Go to details of /home/bar
+        b.click("#nfs-mounts tr:contains(/home/bar)")
+        b.wait_visible('#storage-detail')
+        b.wait_text('#detail-header tr:contains("Server") td:nth-child(2)', "127.0.0.1:/home/bar")
+        b.wait_text('#detail-header tr:contains("Mount Point") td:nth-child(2)', "/mounts/bar")
 
+        # Change mount point of /home/bar
+        b.click('#detail-header button:contains("Edit")')
         self.dialog_wait_open()
         self.dialog_set_val("dir", "/mounts/barbar")
         self.dialog_apply()
         self.dialog_wait_close()
 
-        b.wait_present("#nfs-mounts td:contains(/mounts/barbar)")
+        b.wait_text('#detail-header tr:contains("Mount Point") td:nth-child(2)', "/mounts/barbar")
         m.execute("! test -e /mounts/bar")
         m.execute("test -d /mounts/barbar")
+        self.assertEqual (m.execute("findmnt -s -n -o OPTIONS /mounts/barbar").strip(), "defaults")
+
+        # Set options for /home/bar
+        b.click('#detail-header button:contains("Edit")')
+
+        def wait_checked(field):
+            b.wait_present(self.dialog_field(field) + ":checked")
+
+        def wait_not_checked(field):
+            b.wait_present(self.dialog_field(field) + ":not(:checked)")
+
+        self.dialog_wait_open()
+        wait_checked("mount_auto")
+        wait_not_checked("mount_ro")
+        self.dialog_set_val("mount_auto", False)
+        self.dialog_set_val("mount_ro", True)
+        self.dialog_set_val("mount_extra_options", CheckBoxText("ac"))
+        self.dialog_apply()
+        self.dialog_wait_close()
+
+        self.assertEqual (m.execute("findmnt -s -n -o OPTIONS /mounts/barbar").strip(), "noauto,ro,ac")
+
+        # Go to details of /home/foo
+        b.go("#/")
+        b.wait_visible("#storage")
+        b.click("#nfs-mounts tr:contains(/home/foo)")
+        b.wait_visible('#storage-detail')
+        b.wait_text('#detail-header tr:contains("Server") td:nth-child(2)', "127.0.0.1:/home/foo")
+        b.wait_text('#detail-header tr:contains("Mount Point") td:nth-child(2)', "/mnt")
 
         # Unmount and remount /home/foo
-        b.click("#nfs-mounts .nfs-arm-button")
-        b.click("#nfs-mounts button[data-action=mount-unmount][data-arg=0]")
-        b.wait_in_text("#nfs-mounts tr:contains(/home/foo)", "Not mounted")
-
-        b.click("#nfs-mounts .nfs-arm-button")
-        b.click("#nfs-mounts button[data-action=mount-mount][data-arg=0]")
-        b.wait_present("#nfs-mounts tr:contains(/mnt) .usage-text")
-        b.wait_text_not("#nfs-mounts tr:contains(/mnt) .usage-text", "")
+        b.click("#detail-header button:contains(Unmount)")
+        b.wait_present("#detail-header button:contains(Mount)")
+        b.click("#detail-header button:contains(Mount)")
+        b.wait_present("#detail-header button:contains(Unmount)")
 
         # Remove /home/foo
-        b.click("#nfs-mounts .nfs-arm-button")
-        b.click("#nfs-mounts button[data-action=mount-remove][data-arg=0]")
+        b.click("#detail-header button:contains(Remove)")
+        b.wait_visible("#storage")
         b.wait_not_present("#nfs-mounts td:contains(/home/foo)")
         m.execute("! test -e /mnt")
 
@@ -107,7 +137,7 @@ class TestStorage(StorageCase):
         m.write("/etc/exports", "/home/foo 127.0.0.0/24(rw)\n/home/bar 127.0.0.0/24(rw)\n")
         m.execute("systemctl restart nfs-server")
 
-        b.click("#nfs-mounts button[data-action=mount-add]")
+        b.click("#nfs-mounts .fa-plus")
         self.dialog_wait_open()
         self.dialog_set_val("server", "127.0.0.1")
 
@@ -134,7 +164,7 @@ class TestStorage(StorageCase):
         b.wait_visible("#nfs-mounts .empty-panel-text")
 
         # Add /home/foo
-        b.click("#nfs-mounts button[data-action=mount-add]")
+        b.click("#nfs-mounts .fa-plus")
         self.dialog_wait_open()
         self.dialog_set_val("server", "127.0.0.1")
         self.dialog_set_combobox("remote", "/home/foo")
@@ -147,23 +177,86 @@ class TestStorage(StorageCase):
         b.wait_present("#nfs-mounts tr:contains(/mounts/foo) .usage-text")
         b.wait_text_not("#nfs-mounts tr:contains(/mounts/foo) .usage-text", "")
 
+        # Go to details of /home/foo
+        b.go("#/")
+        b.wait_visible("#storage")
+        b.click("#nfs-mounts tr:contains(/home/foo)")
+        b.wait_visible('#storage-detail')
+        b.wait_text('#detail-header tr:contains("Server") td:nth-child(2)', "127.0.0.1:/home/foo")
+        b.wait_text('#detail-header tr:contains("Mount Point") td:nth-child(2)', "/mounts/foo")
+
         m.spawn("cd /mounts/foo; sleep infinity", "busy")
-        b.click("#nfs-mounts .nfs-arm-button")
-        b.click("#nfs-mounts button[data-action=mount-edit][data-arg=0]")
+        b.click('#detail-header button:contains("Edit")')
 
         self.dialog_wait_open()
         self.dialog_wait_alert("This NFS mount is in use")
         self.dialog_cancel()
         self.dialog_wait_close()
 
-        b.click("#nfs-mounts .nfs-arm-button")
-        b.click("#nfs-mounts button[data-action=mount-unmount][data-arg=0]")
+        b.click("#detail-header button:contains(Unmount)")
         self.dialog_wait_open()
         b.wait_in_text("#dialog", "The filesystem is in use")
         b.wait_in_text("#dialog", "of user root")
         self.dialog_apply()
 
-        b.wait_in_text("#nfs-mounts tr:contains(/home/foo)", "Not mounted")
+        b.wait_present("#detail-header button:contains(Mount)")
+
+@skipImage("NetworkManager and NFS don't work together", "ubuntu-1604")
+@skipImage("https://bugzilla.redhat.com/show_bug.cgi?id=1559414", "rhel-x")
+class TestStoragePackages(StorageCase, PackageCase):
+
+    def testNfsMissingPackages(self):
+        m = self.machine
+        b = self.browser
+
+        # Override configuration so that we don't have to remove the
+        # real package.
+
+        self.machine.write("/usr/share/cockpit/storaged/override.json",
+                           """{ "config": { "nfs_client_package": "fake-nfs-utils" } }""")
+
+        m.execute("mv /sbin/mount.nfs /sbin/mount.nfs.off")
+
+        self.login_and_go("/storage")
+
+        # The fake-nfs-utils package is not available yet
+
+        b.wait_present("button:contains('Install NFS Support')")
+        b.click("button:contains('Install NFS Support')")
+
+        self.dialog_wait_open()
+        b.wait_in_text("#dialog", "fake-nfs-utils is not available from any repository.")
+        self.dialog_cancel()
+        self.dialog_wait_close()
+
+        # Now make the package available
+
+        self.createPackage("dummy", "1.0", "1")
+        self.createPackage("fake-nfs-utils", "1.0", "1", depends="fake-libnfs")
+        self.createPackage("fake-libnfs", "1.0", "1")
+        self.enableRepo()
+
+        # HACK
+        #
+        # The first simulated install seems to silently not report
+        # anything on the Debian test images, for unknown reasons.  So
+        # we install a dummy package to warm up all parts of the
+        # machinery and distribute the fluids evenly.
+        #
+        if "debian" in m.image or "ubuntu" in m.image:
+            m.execute("pkcon refresh && pkcon install -y dummy")
+
+        b.reload()
+        b.enter_page("/storage")
+        b.wait_present("button:contains('Install NFS Support')")
+        b.click("button:contains('Install NFS Support')")
+        self.dialog_wait_open()
+        b.wait_in_text("#dialog", "fake-nfs-utils will be installed")
+        b.wait_in_text("#dialog", "fake-libnfs")
+        self.dialog_apply()
+        self.dialog_wait_close()
+
+        b.wait_present("#nfs-mounts button .fa-plus")
 
 if __name__ == '__main__':
     test_main()

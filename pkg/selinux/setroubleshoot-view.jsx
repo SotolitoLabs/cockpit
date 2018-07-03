@@ -33,7 +33,7 @@ var SELinuxEventDetails = React.createClass({
         var expanded;
         // all details are collapsed by default
         if (this.props.details)
-            expanded = this.props.details.pluginAnalysis.map(function() { return false; } );
+            expanded = this.props.details.pluginAnalysis.map(function() { return false; });
 
         return {
             solutionExpanded: expanded, // show details for solution
@@ -42,7 +42,7 @@ var SELinuxEventDetails = React.createClass({
     handleSolutionDetailsClick: function(itmIdx, e) {
         var solutionExpanded = this.state.solutionExpanded;
         solutionExpanded[itmIdx] = !solutionExpanded[itmIdx];
-        this.setState( { solutionExpanded: solutionExpanded } );
+        this.setState({ solutionExpanded: solutionExpanded });
         e.stopPropagation();
         e.preventDefault();
     },
@@ -51,7 +51,7 @@ var SELinuxEventDetails = React.createClass({
         var solutionExpanded = this.state.solutionExpanded;
         if (solutionExpanded[itmIdx]) {
             solutionExpanded[itmIdx] = false;
-            this.setState( { solutionExpanded: solutionExpanded } );
+            this.setState({ solutionExpanded: solutionExpanded });
         }
         var localId = this.props.details.localId;
         var analysisId = this.props.details.pluginAnalysis[itmIdx].analysisId;
@@ -66,7 +66,7 @@ var SELinuxEventDetails = React.createClass({
                     icon={ waiting ? 'waiting' : 'error' }
                     description={ waiting ? _("Waiting for details...") : _("Unable to get alert details.") }
                     message={null}
-                    relative={true}/>
+                    relative />
             );
         }
         var self = this;
@@ -78,7 +78,7 @@ var SELinuxEventDetails = React.createClass({
                     if (self.props.fix.running) {
                         msg = (
                             <div>
-                                <div className="spinner setroubleshoot-progress-spinner"></div>
+                                <div className="spinner setroubleshoot-progress-spinner" />
                                 <span className="setroubleshoot-progress-message"> { _("Applying solution...") }</span>
                             </div>
                         );
@@ -86,14 +86,14 @@ var SELinuxEventDetails = React.createClass({
                         if (self.props.fix.success) {
                             msg = (
                                 <div className="alert alert-success">
-                                    <span className="pficon pficon-ok"></span>
-                              <span> { _("Solution applied successfully") }: {self.props.fix.result}</span>
+                                    <span className="pficon pficon-ok" />
+                                    <span> { _("Solution applied successfully") }: {self.props.fix.result}</span>
                                 </div>
                             );
                         } else {
                             msg = (
                                 <div className="alert alert-danger">
-                                    <span className="pficon pficon-error-circle-o"></span>
+                                    <span className="pficon pficon-error-circle-o" />
                                     <span> { _("Solution failed") }: {self.props.fix.result}</span>
                                 </div>
                             );
@@ -104,7 +104,7 @@ var SELinuxEventDetails = React.createClass({
                     <div className="setroubleshoot-listing-action">
                         <button className="btn btn-default"
                                 onClick={ self.runFix.bind(self, itmIdx) }
-                                >{ _("Apply this solution") }
+                        >{ _("Apply this solution") }
                         </button>
                     </div>
                 );
@@ -113,16 +113,16 @@ var SELinuxEventDetails = React.createClass({
                     <div className="setroubleshoot-listing-action">
                         <span>{ _("Unable to apply this solution automatically") }</span>
                     </div>
-                  );
+                );
             }
-            var detailsLink = <a href="#" onClick={ self.handleSolutionDetailsClick.bind(self, itmIdx) }>{ _("solution details") }</a>;
+            var detailsLink = <a href="#" tabIndex="0" onClick={ self.handleSolutionDetailsClick.bind(self, itmIdx) }>{ _("solution details") }</a>;
             var doState;
             var doElem;
             var caret;
             if (self.state.solutionExpanded[itmIdx]) {
                 caret = <i className="fa fa-angle-down" />;
                 doState = <div>{caret} {detailsLink}</div>;
-                doElem =  <div>{itm.doText}</div>;
+                doElem = <div>{itm.doText}</div>;
             } else {
                 caret = <i className="fa fa-angle-right" />;
                 doState = <div>{caret} {detailsLink}</div>;
@@ -164,7 +164,7 @@ var SELinuxEventLog = React.createClass({
                     icon={ waiting ? 'waiting' : 'error' }
                     description={ waiting ? _("Waiting for details...") : _("Unable to get alert details.") }
                     message={null}
-                    relative={true}/>
+                    relative />
             );
         }
         var self = this;
@@ -201,9 +201,9 @@ var EmptyState = React.createClass({
 
         var icon = this.props.icon;
         if (icon == 'waiting')
-            icon = <div className="spinner spinner-lg"></div>;
+            icon = <div className="spinner spinner-lg" />;
         else if (icon == 'error')
-            icon = <div className="pficon pficon-error-circle-o"></div>;
+            icon = <div className="pficon pficon-error-circle-o" />;
 
         return (
             <div className={ curtains + " blank-slate-pf" }>
@@ -235,7 +235,7 @@ var DismissableError = React.createClass({
                 <span className="pficon pficon-error-circle-o" />
                 <span>{this.props.children}</span>
                 <button type="button" className="close" aria-hidden="true" onClick={this.handleDismissError}>
-                    <span className="pficon pficon-close"/>
+                    <span className="pficon pficon-close" />
                 </button>
             </div>
         );
@@ -286,7 +286,7 @@ var SELinuxStatus = React.createClass({
                 <h2>{_("SELinux Policy")}</h2>
                 {errorMessage}
                 <label>{_("Enforce policy:")}
-                <OnOffSwitch state={this.props.selinuxStatus.enforcing} onChange={this.props.changeSelinuxMode} />
+                    <OnOffSwitch state={this.props.selinuxStatus.enforcing} onChange={this.props.changeSelinuxMode} />
                 </label>
                 {note}
             </div>
@@ -333,10 +333,10 @@ var SETroubleshootPage = React.createClass({
         if (this.props.selinuxStatus.enabled === false) {
             return (
                 <EmptyState
-                    icon={ <div className="fa fa-exclamation-circle"></div> }
+                    icon={ <div className="fa fa-exclamation-circle" /> }
                     description={ _("SELinux is disabled on the system") }
                     message={null}
-                    relative={false}/>
+                    relative={false} />
             );
         }
         var self = this;
@@ -348,7 +348,7 @@ var SETroubleshootPage = React.createClass({
             if (this.props.connecting) {
                 emptyCaption = (
                     <div>
-                        <div className="spinner spinner-sm"></div>
+                        <div className="spinner spinner-sm" />
                         <span>{_("Connecting to SETroubleshoot daemon...")}</span>
                     </div>
                 );
@@ -370,7 +370,7 @@ var SETroubleshootPage = React.createClass({
                         listingDetail = cockpit.format(_("Occurred between $0 and $1"),
                                                        itm.details.firstSeen.calendar(),
                                                        itm.details.lastSeen.calendar()
-                                                      );
+                        );
                     } else {
                         listingDetail = cockpit.format(_("Occurred $0"), itm.details.firstSeen.calendar());
                     }
@@ -408,10 +408,10 @@ var SETroubleshootPage = React.createClass({
                 var title;
                 if (itm.count > 1) {
                     title = cockpit.format(cockpit.ngettext("$0 occurrence", "$1 occurrences", itm.count),
-                            itm.count);
+                                           itm.count);
                     columns.push(<span className="badge" title={title}>{itm.count}</span>);
                 } else {
-                    columns.push(<span></span>);
+                    columns.push(<span />);
                 }
                 return (
                     <cockpitListing.ListingRow
@@ -427,7 +427,7 @@ var SETroubleshootPage = React.createClass({
             <cockpitListing.Listing
                     title={ title }
                     emptyCaption={ emptyCaption }
-                    >
+            >
                 {entries}
             </cockpitListing.Listing>
         );
@@ -439,7 +439,7 @@ var SETroubleshootPage = React.createClass({
                     <span className="pficon pficon-error-circle-o" />
                     <span>{this.props.error}</span>
                     <button type="button" className="close" aria-hidden="true" onClick={this.handleDismissError}>
-                        <span className="pficon pficon-close"/>
+                        <span className="pficon pficon-close" />
                     </button>
                 </div>
             );

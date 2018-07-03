@@ -121,6 +121,9 @@ SUBST_RULE = \
 	-e 's,[@]selinux_config_type[@],$(COCKPIT_SELINUX_CONFIG_TYPE),g' \
 	-e 's,[@]with_networkmanager_needs_root[@],$(with_networkmanager_needs_root),g' \
 	-e 's,[@]with_storaged_iscsi_sessions[@],$(with_storaged_iscsi_sessions),g' \
+	-e 's,[@]with_appstream_config_packages[@],$(with_appstream_config_packages),g' \
+	-e 's,[@]with_appstream_data_packages[@],$(with_appstream_data_packages),g' \
+	-e 's,[@]with_nfs_client_package[@],$(with_nfs_client_package),g' \
 	$< > $@.tmp && $(MV) $@.tmp $@ \
 	$(NULL)
 
@@ -172,12 +175,10 @@ WEBPACK_PACKAGES = \
 
 V_WEBPACK = $(V_WEBPACK_$(V))
 V_WEBPACK_ = $(V_WEBPACK_$(AM_DEFAULT_VERBOSITY))
-V_WEBPACK_0 = @echo "  WEBPACK  $(@:dist/%/Makefile.deps=%)";
+V_WEBPACK_0 = @echo "  WEBPACK  $(@:dist/%/stamp=%)";
 
 WEBPACK_MAKE = NODE_ENV=$(NODE_ENV) SRCDIR=$(abspath $(srcdir)) BUILDDIR=$(builddir) \
 	       $(srcdir)/tools/missing $(srcdir)/tools/webpack-make
-
-WEBPACK_RULE = $(V_WEBPACK) $(WEBPACK_MAKE)
 
 WEBPACK_CONFIG = $(srcdir)/webpack.config.js
 WEBPACK_INPUTS =
@@ -185,18 +186,32 @@ WEBPACK_PO =
 WEBPACK_OUTPUTS =
 WEBPACK_INSTALL = $(WEBPACK_PACKAGES:%=dist/%/manifest.json)
 WEBPACK_DEPS = $(WEBPACK_PACKAGES:%=dist/%/Makefile.deps)
+WEBPACK_STAMPS = $(WEBPACK_PACKAGES:%=dist/%/stamp)
 WEBPACK_MANIFEST_IN = $(WEBPACK_PACKAGES:%=pkg/%/manifest.json.in)
 
-noinst_SCRIPTS += $(WEBPACK_DEPS) $(WEBPACK_INSTALL)
-CLEANFILES += $(WEBPACK_DEPS) $(WEBPACK_OUTPUTS)
-EXTRA_DIST += $(WEBPACK_DEPS) $(WEBPACK_MANIFEST_IN) webpack.config.js
+noinst_SCRIPTS += $(WEBPACK_STAMPS) $(WEBPACK_INSTALL)
+CLEANFILES += $(WEBPACK_STAMPS) $(WEBPACK_DEPS) $(WEBPACK_OUTPUTS)
+EXTRA_DIST += $(WEBPACK_STAMPS) $(WEBPACK_DEPS) $(WEBPACK_MANIFEST_IN) webpack.config.js
 
-# Run webpack if we don't have the include file or if its out of date
-# If we have distributed a copy in a tarball, copy that into place
-dist/%/Makefile.deps: $(WEBPACK_CONFIG)
-	$(AM_V_GEN) $(MKDIR_P) $(dir $@) && if test $(srcdir)/dist/$*/Makefile.deps -nt $(WEBPACK_CONFIG); \
-	then cp -p $(srcdir)/dist/$*/Makefile.deps $@.tmp && $(MV) $@.tmp $@; \
-	else $(WEBPACK_MAKE) -d $@ $<; fi
+PRINT_COPY_MSG_0 = echo "  COPY    " $@ &&
+PRINT_COPY_MSG_ = $(PRINT_COPY_MSG_$(AM_DEFAULT_VERBOSITY))
+
+# Copy an original copy of each Makefile.deps from the srcdir, in case
+# of an out-of-tree build from a tarball.  This is needed because the
+# 'include' below won't find the file in srcdir.
+# This rule needs to have a successful exit, or make will become unhappy.
+dist/%/Makefile.deps:
+	$(AM_V_at)test "$(srcdir)" == "$(builddir)" -o ! $(srcdir)/$@ -nt $@ || ( \
+	  $(PRINT_COPY_MSG_$(V))$(MKDIR_P) $(dir $@) && \
+	  cp -p $(srcdir)/$@ $@.tmp && \
+	  mv $@.tmp $@)
+
+# This is the primary rule for running webpack
+dist/%/stamp: $(WEBPACK_CONFIG) $(srcdir)/tools/webpack-make
+	$(V_WEBPACK) $(MKDIR_P) dist/$* && \
+	  $(WEBPACK_MAKE) -d dist/$*/Makefile.deps $(WEBPACK_CONFIG) && \
+	  touch $@
+
 dist/%/manifest.json: pkg/%/manifest.json
 	$(COPY_RULE)
 
@@ -211,10 +226,10 @@ install-data-local:: $(WEBPACK_DEBUG)
 	$(MKDIR_P) $(DESTDIR)$(debugdir)$(pkgdatadir)
 	tar -cf - $^ | tar -C $(DESTDIR)$(debugdir)$(pkgdatadir) --strip-components=1 -xvf -
 uninstall-local::
-	find $(DESTDIR)$(pkgdatadir) -type f -delete
-	find $(DESTDIR)$(pkgdatadir) -type d -empty -delete
-	find $(DESTDIR)$(debugdir)$(pkgdatadir) -type f -delete
-	find $(DESTDIR)$(debugdir)$(pkgdatadir) -type d -empty -delete
+	find $(DESTDIR)$(pkgdatadir) -ignore_readdir_race -type f -exec rm -f {} \;
+	find $(DESTDIR)$(pkgdatadir) -ignore_readdir_race -type d -empty -delete
+	find $(DESTDIR)$(debugdir)$(pkgdatadir) -ignore_readdir_race -type f -delete
+	find $(DESTDIR)$(debugdir)$(pkgdatadir) -ignore_readdir_race -type d -empty -delete
 dist-hook:: $(WEBPACK_INPUTS) $(WEBPACK_OUTPUTS) $(WEBPACK_PO)
 	tar -cf - $^ | tar -C $(distdir) -xf -
 
@@ -254,11 +269,8 @@ TEST_EXTENSIONS = .html .sh
 SH_LOG_DRIVER = $(top_srcdir)/tools/tap-driver
 HTML_LOG_DRIVER = $(top_srcdir)/tools/tap-driver
 HTML_TEST_SERVER = $(builddir)/test-server
-if WITH_PHANTOMJS
-HTML_LOG_COMPILER = $(PHANTOMJS) $(top_srcdir)/tools/tap-phantom --strip=$(top_srcdir)/ -- $(HTML_TEST_SERVER)
-else
-HTML_LOG_DRIVER_FLAGS = --missing=phantomjs
-endif
+
+HTML_LOG_COMPILER = $(top_srcdir)/test/common/tap-cdp --strip=$(top_srcdir)/ -- $(HTML_TEST_SERVER)
 
 VALGRIND_ARGS = --trace-children=yes --quiet --error-exitcode=33 \
 	--suppressions=valgrind-suppressions --gen-suppressions=all \
@@ -354,7 +366,7 @@ COMMITTED_DIST = \
 
 # Build up the distribution using $COMMITTED_DIST and include node_modules licenses
 # also automatically update minimum base dependency in RPM spec file
-dist-hook::
+dist-hook:: $(WEBPACK_PACKAGES:%=dist/%/manifest.json)
 	( cd $(srcdir); git ls-tree HEAD --name-only -r $(COMMITTED_DIST) || (echo $(COMMITTED_DIST) | tr ' ' '\n' ) ) | \
 		tar -C $(srcdir) -cf - -T - | tar -C $(distdir) -xf -
 	echo $(VERSION) > $(distdir)/.tarball
@@ -363,7 +375,7 @@ dist-hook::
 	[ ! -e $(distdir)/tools/cockpit.spec ] || $(srcdir)/tools/gen-spec-dependencies $(distdir)/tools/cockpit.spec
 
 DIST_TAR_MAIN = tar --format=posix -cf - "$(distdir)"
-DIST_TAR_CACHE = tar --format=posix -cf - --exclude='phantomjs*' --transform="s/^/$(distdir)/" \
+DIST_TAR_CACHE = tar --format=posix -cf - --transform="flags=r;s|^\./||" --transform="flags=r;s|^|$(distdir)/|" \
 	"$(srcdir)/node_modules" "$(srcdir)/package.json"
 
 DIST_ARCHIVES = \
@@ -381,12 +393,6 @@ dist-xz: distdir
 
 distcheck-hook::
 	$(srcdir)/tools/check-dist $(distdir)
-
-install-integration-tests::
-	$(MKDIR_P) $(DESTDIR)$(pkgdatadir)
-	( cd $(srcdir); git ls-tree HEAD --full-tree --name-only -r test || echo test ) | \
-		tar -C $(srcdir) -cf - -T - | tar -C $(DESTDIR)$(pkgdatadir) -xf -
-	rm -r $(DESTDIR)$(pkgdatadir)/test/tmp; ln -sf /var/tmp/cockpit $(DESTDIR)$(pkgdatadir)/test/tmp
 
 include po/Makefile.am
 include pkg/Makefile.am

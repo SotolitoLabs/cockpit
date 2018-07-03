@@ -14,6 +14,7 @@ $(function() {
 
     cockpit.translate();
     var _ = cockpit.gettext;
+    moment.locale(cockpit.language);
 
     /* Notes about the systemd D-Bus API
      *
@@ -471,8 +472,8 @@ $(function() {
         });
 
         $('#services-filter button').on('click', function () {
-            $('#services-filter button').removeClass('active');
-            $(this).addClass('active');
+            $('#services-filter button').removeClass('active').removeAttr('aria-current');
+            $(this).addClass('active').attr('aria-current', true);
             render();
         });
 
@@ -515,6 +516,9 @@ $(function() {
         { title: _("Restart"),               action: 'RestartUnit' },
         { title: _("Reload"),                action: 'ReloadUnit' }
     ];
+
+    var permission = cockpit.permission({ admin: true });
+    $(permission).on('changed', unit_action_update_privilege);
 
     function unit_action() {
         /* jshint validthis:true */
@@ -565,6 +569,17 @@ $(function() {
         }
     }
 
+    function unit_action_update_privilege() {
+        $('#service-unit-action>button').update_privileged(
+            permission, cockpit.format(
+                _("The user <b>$0</b> is not permitted to start or stop services"),
+                permission.user ? permission.user.name : ''));
+        $('#service-file-action>button').update_privileged(
+            permission, cockpit.format(
+                _("The user <b>$0</b> is not permitted to enable or disable services"),
+                permission.user ? permission.user.name : ''));
+    }
+
     function show_unit(unit_id) {
         if (cur_unit) {
             $(cur_unit).off('changed');
@@ -612,7 +627,7 @@ $(function() {
 
             var since = "";
             if (timestamp)
-                since = cockpit.format(_("Since $0"), new Date(timestamp/1000).toLocaleString());
+                since = cockpit.format(_("Since $0"), moment(timestamp/1000).format('LLL'));
 
             var unit_action_btn = mustache.render(action_btn_template,
                                                   {
@@ -652,10 +667,33 @@ $(function() {
                                            UnitButton: unit_action_btn,
                                            FileButton: file_action_btn,
                                            NotMetConditions: not_met_conditions,
+                                           Relationships: [
+                                               { Name: _("Requires"),               Units: cur_unit.Requires },
+                                               { Name: _("Requisite"),              Units: cur_unit.Requisite },
+                                               { Name: _("Wants"),                  Units: cur_unit.Wants },
+                                               { Name: _("Binds To"),               Units: cur_unit.BindsTo },
+                                               { Name: _("Part Of"),                Units: cur_unit.PartOf },
+                                               { Name: _("Required By"),            Units: cur_unit.RequiredBy },
+                                               { Name: _("Requisite Of"),           Units: cur_unit.RequisiteOf },
+                                               { Name: _("Wanted By"),              Units: cur_unit.WantedBy },
+                                               { Name: _("Bound By"),               Units: cur_unit.BoundBy },
+                                               { Name: _("Consists Of"),            Units: cur_unit.ConsistsOf },
+                                               { Name: _("Conflicts"),              Units: cur_unit.Conflicts },
+                                               { Name: _("Conflicted By"),          Units: cur_unit.ConflictedBy },
+                                               { Name: _("Before"),                 Units: cur_unit.Before },
+                                               { Name: _("After"),                  Units: cur_unit.After },
+                                               { Name: _("On Failure"),             Units: cur_unit.OnFailure },
+                                               { Name: _("Triggers"),               Units: cur_unit.Triggers },
+                                               { Name: _("Triggered By"),           Units: cur_unit.TriggeredBy },
+                                               { Name: _("Propagates Reload To"),   Units: cur_unit.PropagatesReloadTo },
+                                               { Name: _("Reload Propagated From"), Units: cur_unit.ReloadPropagatedFrom },
+                                               { Name: _("Joins Namespace Of"),     Units: cur_unit.JoinsNamespaceOf }
+                                           ]
                                        });
             $('#service-unit').html(text);
             $('#service-unit-action').on('click', "[data-action]", unit_action);
             $('#service-file-action').on('click', "[data-action]", unit_file_action);
+            unit_action_update_privilege();
         }
 
         function render_template() {
@@ -828,7 +866,6 @@ $(function() {
     /* Timer Creation
      * timer_unit contains all the user's valid inputs from create-timer modal.
      */
-    var permission = cockpit.permission({ admin: true });
     $(permission).on("changed", function() {
         if (permission.allowed === false) {
             $("#create-timer").addClass("accounts-privileged");
@@ -854,20 +891,21 @@ $(function() {
     });
 
     function update_time() {
-        cockpit.spawn(["grep", "\\w", "timer_list"],
-                      { directory: "/proc" }).
+        cockpit.spawn(["cat", "/proc/uptime"]).
             fail(function (err) {
                 console.log(err);
             }).
-            done(function (timer_list) {
-                clock_monotonic_now = parseInt(timer_list.match(/now at (\d+)/)[1]/1000, 10);
+            done(function (contents) {
+                // first number is time since boot in seconds with two fractional digits
+                var uptime = parseFloat(contents.split(' ')[0]);
+                clock_monotonic_now = parseInt(uptime * 1000000, 10);
             });
-        cockpit.spawn(["date", "-R"]).
+        cockpit.spawn(["date", "+%s"]).
             fail(function (err) {
                 console.log(err);
             }).
             done(function (time) {
-                clock_realtime_now = moment(time, "ddd, DD MMM YYYY HH:mm:ss ZZ"); // rfc822 date
+                clock_realtime_now = moment.unix(parseInt(time));
             });
     }
     update_time();
@@ -967,8 +1005,8 @@ $(function() {
         $("#description").val("");
         $("#servicename").val("");
         set_boot_or_calendar(1);
-        $("span", $("#boot-or-specific-time")).first().text("After system boot");
-        $("span", $("#drop-time")).first().text("Seconds");
+        $("span", $("#boot-or-specific-time")).first().text(_("After system boot"));
+        $("span", $("#drop-time")).first().text(_("Seconds"));
         $("span", $("#drop-time")).first().attr("value", "1");
         $(".form-control").removeClass("has-error");
         $(".has-error").hide();
@@ -1118,7 +1156,7 @@ $(function() {
             $("#specific-time-error-row").hide();
             $("#repeat-options").show();
             repeat_options(0);
-            $("span", $("#drop-repeat")).first().text("Don't Repeat");
+            $("span", $("#drop-repeat")).first().text(_("Don't Repeat"));
             timer_unit.Calendar_or_Boot = "Calendar";
         }
     }

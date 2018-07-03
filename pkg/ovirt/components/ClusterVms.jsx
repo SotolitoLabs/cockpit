@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -23,14 +22,15 @@ import cockpit from 'cockpit';
 import CONFIG from '../config.es6';
 
 import { Listing, ListingRow } from "cockpit-components-listing.jsx";
-import { StateIcon, DropdownButtons } from "../../machines/hostvmslist.jsx";
+import StateIcon from "../../machines/components/vm/stateIcon.jsx";
+import DropdownButtons from "../../machines/components/dropdownButtons.jsx";
+import VCPUModal from './vcpuModal.jsx';
 
 import { toGigaBytes, valueOrDefault, isSameHostAddress } from '../helpers.es6';
 import { startVm, goToSubpage } from '../actions.es6';
 import rephraseUI from '../rephraseUI.es6';
 import { getCurrentCluster, getHost } from '../selectors.es6';
 
-React;
 const _ = cockpit.gettext;
 
 const NoVm = () => (<div>{_("No VM found in oVirt.")}</div>);
@@ -41,10 +41,18 @@ const VmOS = ({ os }) => (<div>{os.type}</div>);
 const VmStateless = ({ stateless }) => (<div>{rephraseUI('stateless', stateless)}</div>);
 const VmDescription = ({ descr }) => (<span>{descr}</span>); // cropping is not needed, the text wraps
 
-const VmCpu = ({ cpu }) => { // TODO: render CPU architecture and topology?
-    const vCpus = valueOrDefault(cpu.topology.sockets, 1) * valueOrDefault(cpu.topology.cores, 1) * valueOrDefault(cpu.topology.threads, 1);
-    const tooltip = `${_("sockets")}: ${cpu.topology.sockets}\n${_("cores")}: ${cpu.topology.cores}\n${_("threads")}: ${cpu.topology.threads}`;
-    return (<span title={tooltip} data-toggle='tooltip' data-placement='left'>{vCpus}</span>);
+const VmCpu = ({ vm, dispatch }) => {
+    const vCpus = valueOrDefault(vm.cpu.topology.sockets, 1) * valueOrDefault(vm.cpu.topology.cores, 1) * valueOrDefault(vm.cpu.topology.threads, 1);
+    const tooltip = `${_("sockets")}: ${vm.cpu.topology.sockets}\n${_("cores")}: ${vm.cpu.topology.cores}\n${_("threads")}: ${vm.cpu.topology.threads}`;
+
+    const handleOpenModal = function () {
+        VCPUModal({
+            vm,
+            dispatch
+        });
+    };
+
+    return (<a title={tooltip} id={`cluster-${vm.name}-cpus`} data-toggle='tooltip' data-placement='left' onClick={handleOpenModal}>{vCpus}</a>);
 };
 
 const VmHost = ({ id, hosts, dispatch }) => {
@@ -53,14 +61,14 @@ const VmHost = ({ id, hosts, dispatch }) => {
     }
     const host = hosts[id];
     if (isSameHostAddress(host.address)) {
-        return (<a href='#' onClick={() => dispatch(goToSubpage('hostvms'))}>
+        return (<a href='#' tabIndex="0" onClick={() => dispatch(goToSubpage('hostvms'))}>
             {_("Host")}
-            </a>);
+        </a>);
     }
 
     const cockpitUrl = `https://${host.address}:${CONFIG.cockpitPort}/machines`;
-    // just the <a href> without the onClick handler is not working
-    return (<a href={cockpitUrl} onClick={() => {window.top.location=cockpitUrl;}}>
+    // just the <a href> without the tabIndex="0" onClick handler is not working
+    return (<a href={cockpitUrl} tabIndex="0" onClick={() => { window.top.location = cockpitUrl; }}>
         {host.name}
     </a>);
 };
@@ -102,8 +110,8 @@ const VmActions = ({ vm, hostName, dispatch }) => {
     if (buttons) {
         return (
             <span>
-                <DropdownButtons buttons={buttons}/>
-                <VmLastMessage vm={vm}/>
+                <DropdownButtons buttons={buttons} />
+                <VmLastMessage vm={vm} />
             </span>
         );
     }
@@ -129,7 +137,7 @@ const VmLastMessage = ({ vm }) => {
 };
 
 const Vm = ({ vm, hosts, templates, config, dispatch }) => {
-    const stateIcon = (<StateIcon state={vm.state} config={config}/>);
+    const stateIcon = (<StateIcon state={vm.state} config={config} />);
     const ovirtConfig = config.providerState && config.providerState.ovirtConfig;
     const currentHost = getHost(hosts, ovirtConfig);
     const hostName = currentHost && currentHost.name;
@@ -140,14 +148,14 @@ const Vm = ({ vm, hosts, templates, config, dispatch }) => {
             <VmDescription descr={vm.description} />,
             <VmTemplate id={vm.templateId} templates={templates} />,
             <VmMemory mem={vm.memory} />,
-            <VmCpu cpu={vm.cpu} />,
+            <VmCpu vm={vm} dispatch={dispatch} />,
             <VmOS os={vm.os} />,
             <VmHA highAvailability={vm.highAvailability} />,
             <VmStateless stateless={vm.stateless} />,
             <VmHost id={vm.hostId} hosts={hosts} dispatch={dispatch} />,
             <VmActions vm={vm} dispatch={dispatch} hostName={hostName} />,
             stateIcon
-            ]}
+        ]}
     />);
 };
 
@@ -170,10 +178,10 @@ const ClusterVms = ({ dispatch, config }) => {
 
     return (<div className='container-fluid'>
         <Listing title={title} columnTitles={[
-        _("Name"), _("Description"), _("Template"), _("Memory"), _("vCPUs"), _("OS"),
-        _("HA"), _("Stateless"), _("Host"),
-        (<div className='ovirt-provider-cluster-vms-actions'>{_("Action")}</div>),
-        (<div className='ovirt-provider-cluster-vms-state'>{_("State")}</div>)]}>
+            _("Name"), _("Description"), _("Template"), _("Memory"), _("vCPUs"), _("OS"),
+            _("HA"), _("Stateless"), _("Host"),
+            (<div className='ovirt-provider-cluster-vms-actions'>{_("Action")}</div>),
+            (<div className='ovirt-provider-cluster-vms-state'>{_("State")}</div>)]}>
             {Object.getOwnPropertyNames(vms).map(vmId => {
                 return (
                     <Vm vm={vms[vmId]}
@@ -187,51 +195,6 @@ const ClusterVms = ({ dispatch, config }) => {
     </div>);
 };
 
-// --- hack for phantomJS:
-// https://tc39.github.io/ecma262/#sec-array.prototype.find
-if (!Array.prototype.find) {
-    Object.defineProperty(Array.prototype, 'find', {
-        value: function(predicate) {
-            // 1. Let O be ? ToObject(this value).
-            if (this == null) {
-                throw new TypeError('"this" is null or not defined');
-            }
-
-            var o = Object(this);
-
-            // 2. Let len be ? ToLength(? Get(O, "length")).
-            var len = o.length >>> 0;
-
-            // 3. If IsCallable(predicate) is false, throw a TypeError exception.
-            if (typeof predicate !== 'function') {
-                throw new TypeError('predicate must be a function');
-            }
-
-            // 4. If thisArg was supplied, let T be thisArg; else let T be undefined.
-            var thisArg = arguments[1];
-
-            // 5. Let k be 0.
-            var k = 0;
-
-            // 6. Repeat, while k < len
-            while (k < len) {
-                // a. Let Pk be ! ToString(k).
-                // b. Let kValue be ? Get(O, Pk).
-                // c. Let testResult be ToBoolean(? Call(predicate, T, « kValue, k, O »)).
-                // d. If testResult is true, return kValue.
-                var kValue = o[k];
-                if (predicate.call(thisArg, kValue, k, o)) {
-                    return kValue;
-                }
-                // e. Increase k by 1.
-                k++;
-            }
-
-            // 7. Return undefined.
-            return undefined;
-        }
-    });
-}
 // ------------
 
 export { VmLastMessage, VmDescription, VmMemory, VmCpu, VmOS, VmHA, VmStateless };

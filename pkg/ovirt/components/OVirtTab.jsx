@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -25,13 +24,12 @@ import { vmId } from '../../machines/helpers.es6';
 import { migrateVm } from '../actions.es6';
 
 import ConfirmButtons from './ConfirmButtons.jsx';
-import { VmOverviewTabRecord as VmProperty } from '../../machines/hostvmslist.jsx';
+import VmProperty from '../../machines/components/infoRecord.jsx';
 import rephraseUI from '../rephraseUI.es6';
 
-React;
-const _ = cockpit.gettext;
-
 import './OVirtTab.css';
+
+const _ = cockpit.gettext;
 
 function canVmMigrateToHost ({ host }) {
     return host.status === 'up';
@@ -58,17 +56,17 @@ class MigrateTo extends React.Component {
             dispatch(migrateVm(vm.id, vm.name, this.state.selectedHostId));
         };
 
-        const idPrefix =`${vmId(vm.name)}-ovirt`;
+        const idPrefix = `${vmId(vm.name)}-ovirt`;
 
         return (
             <tr>
                 <td>
-                    {this.state.confirmAction ?
-                        (<ConfirmButtons confirmText={_("Confirm migration")}
+                    {this.state.confirmAction
+                        ? (<ConfirmButtons confirmText={_("Confirm migration")}
                                          dismissText={_("Cancel")}
                                          onYes={onActionConfirmed}
-                                         onNo={onActionCanceled}/>) :
-                        (<button className="btn btn-default btn-danger" onClick={onAction} id={`${idPrefix}-migratetobutton`}>
+                                         onNo={onActionCanceled} />)
+                        : (<button className="btn btn-default btn-danger" onClick={onAction} id={`${idPrefix}-migratetobutton`}>
                             {_("Migrate To:")}
                         </button>)
                     }
@@ -79,14 +77,14 @@ class MigrateTo extends React.Component {
                             <i>{_("Automatically selected host")}</i>
                         </option>
                         {Object.getOwnPropertyNames(hosts)
-                            .filter( hostId => canVmMigrateToHost({host: hosts[hostId]}))
-                            .map(hostId => (
-                                <option value={hostId}
+                                .filter(hostId => canVmMigrateToHost({host: hosts[hostId]}))
+                                .map(hostId => (
+                                    <option value={hostId}
                                         selected={hostId === this.state.selectedHostId}
                                         disabled={isSameHostAddress(hosts[hostId].address)}>
-                                    {hosts[hostId].name}
-                                </option>
-                            ))}
+                                        {hosts[hostId].name}
+                                    </option>
+                                ))}
                     </select>
                 </td>
             </tr>
@@ -110,8 +108,8 @@ const VmTemplate = ({ clusterVm, templates, id }) => {
     const version = template.version;
     return (
         <VmProperty descr={_("Base template:")}
-                    value={version.name ?
-                          (`${version.name} (${template.name})`)
+                    value={version.name
+                        ? (`${version.name} (${template.name})`)
                         : template.name}
                     id={id}
         />
@@ -124,7 +122,7 @@ const VmHA = ({ clusterVm, id }) => {
         value = _("enabled");
     }
 
-    return (<VmProperty descr={_("HA:")} value={value} id={id}/>);
+    return (<VmProperty descr={_("HA:")} value={value} id={id} />);
 };
 
 const OVirtTab = ({ vm, providerState, dispatch }) => {
@@ -133,28 +131,28 @@ const OVirtTab = ({ vm, providerState, dispatch }) => {
         return (<div>{_("This virtual machine is not managed by oVirt")}</div>);
     }
 
-    const idPrefix =`${vmId(vm.name)}-ovirt`;
+    const idPrefix = `${vmId(vm.name)}-ovirt`;
 
     return (
         <table className='machines-width-max'>
             <tr className='machines-listing-ct-body-detail'>
                 <td className='ovirt-provider-listing-top-column'>
                     <table className='form-table-ct'>
-                        <VmProperty descr={_("Description:")} value={clusterVm.description} id={`${idPrefix}-description`}/>
-                        <VmTemplate clusterVm={clusterVm} templates={providerState.templates} id={`${idPrefix}-template`}/>
-                        <VmProperty descr={_("OS Type:")} value={clusterVm.os.type} id={`${idPrefix}-ostype`}/>
+                        <VmProperty descr={_("Description:")} value={clusterVm.description} id={`${idPrefix}-description`} />
+                        <VmTemplate clusterVm={clusterVm} templates={providerState.templates} id={`${idPrefix}-template`} />
+                        <VmProperty descr={_("OS Type:")} value={clusterVm.os.type} id={`${idPrefix}-ostype`} />
                     </table>
                 </td>
                 <td className='ovirt-provider-listing-top-column'>
                     <table className='form-table-ct'>
-                        <VmHA clusterVm={clusterVm} id={`${idPrefix}-ha`}/>
-                        <VmProperty descr={_("Stateless:")} value={rephraseUI('stateless', clusterVm.stateless)} id={`${idPrefix}-stateless`}/>
-                        <VmProperty descr={_("Optimized for:")} value={clusterVm.type} id={`${idPrefix}-optimizedfor`}/>
+                        <VmHA clusterVm={clusterVm} id={`${idPrefix}-ha`} />
+                        <VmProperty descr={_("Stateless:")} value={rephraseUI('stateless', clusterVm.stateless)} id={`${idPrefix}-stateless`} />
+                        <VmProperty descr={_("Optimized for:")} value={clusterVm.type} id={`${idPrefix}-optimizedfor`} />
                     </table>
                 </td>
                 <td className='ovirt-provider-listing-top-column'>
                     <table className='form-table-ct'>
-                        <MigrateTo vm={vm} hosts={providerState.hosts} dispatch={dispatch}/>
+                        <MigrateTo vm={vm} hosts={providerState.hosts} dispatch={dispatch} />
                     </table>
                 </td>
             </tr>

@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -28,19 +27,28 @@ import { virt } from './provider.es6';
  */
 
 // --- Provider actions -----------------------------------------
+export function initDataRetrieval() {
+    return virt('INIT_DATA_RETRIEVAL');
+}
+
 /**
  *
  * @param connectionName optional - if `undefined` then for all connections
+ * @param libvirtServiceName
  */
-export function getAllVms(connectionName) {
-    return virt('GET_ALL_VMS', {connectionName});
+export function getAllVms(connectionName, libvirtServiceName) {
+    return virt('GET_ALL_VMS', { connectionName, libvirtServiceName });
 }
 
 export function getVm(connectionName, lookupId) {
     return virt('GET_VM', {
         lookupId, // provider-specific (i.e. libvirt uses vm_name)
-        connectionName
+        connectionName,
     });
+}
+
+export function getOsInfoList() {
+    return virt('GET_OS_INFO_LIST');
 }
 
 export function shutdownVm(vm) {
@@ -67,6 +75,14 @@ export function deleteVm(vm, options) {
     return virt('DELETE_VM', { name: vm.name, id: vm.id, connectionName: vm.connectionName, options: options });
 }
 
+export function installVm(vm) {
+    return virt('INSTALL_VM', vm);
+}
+
+export function createVm(vmParams) {
+    return virt('CREATE_VM', vmParams);
+}
+
 export function vmDesktopConsole(vm, consoleDetail) {
     return virt('CONSOLE_VM', { name: vm.name, id: vm.id, connectionName: vm.connectionName, consoleDetail });
 }
@@ -85,6 +101,36 @@ export function sendNMI(vm) {
 
 export function changeNetworkState(vm, networkMac, state) {
     return virt('CHANGE_NETWORK_STATE', { name: vm.name, networkMac, state, connectionName: vm.connectionName });
+}
+
+export function checkLibvirtStatus(serviceName) {
+    return virt('CHECK_LIBVIRT_STATUS', { serviceName });
+}
+
+export function startLibvirt(serviceName) {
+    return virt('START_LIBVIRT', { serviceName });
+}
+
+export function enableLibvirt(enable, serviceName) {
+    return virt('ENABLE_LIBVIRT', { enable, serviceName });
+}
+
+export function setVCPUSettings(vm, max, count, sockets, threads, cores) {
+    return virt('SET_VCPU_SETTINGS', {
+        id: vm.id,
+        name: vm.name,
+        connectionName: vm.connectionName,
+        max,
+        count,
+        sockets,
+        threads,
+        cores,
+        isRunning: vm.state == 'running'
+    });
+}
+
+export function getHypervisorMaxVCPU(connectionName) {
+    return virt('GET_HYPERVISOR_MAX_VCPU', { connectionName });
 }
 
 /**
@@ -122,28 +168,106 @@ export function delayPolling(action, timeout) {
 export function setProvider(provider) {
     return {
         type: 'SET_PROVIDER',
-        provider
+        provider,
     };
 }
 
 export function setRefreshInterval(refreshInterval) {
     return {
         type: 'SET_REFRESH_INTERVAL',
-        refreshInterval
+        refreshInterval,
     };
 }
 
 export function updateOrAddVm(props) {
     return {
         type: 'UPDATE_ADD_VM',
-        vm: props
+        vm: props,
     };
 }
 
 export function updateVm(props) {
     return {
         type: 'UPDATE_VM',
-        vm: props
+        vm: props,
+    };
+}
+
+export function updateOsInfoList(osInfoList) {
+    return {
+        type: 'UPDATE_OS_INFO_LIST',
+        osInfoList,
+    };
+}
+
+export function addUiVm(vm) {
+    return {
+        type: 'ADD_UI_VM',
+        vm,
+    };
+}
+
+export function updateUiVm(vm) {
+    return {
+        type: 'UPDATE_UI_VM',
+        vm,
+    };
+}
+
+export function deleteUiVm(vm) {
+    return {
+        type: 'DELETE_UI_VM',
+        vm,
+    };
+}
+
+export function addErrorNotification(notification) {
+    if (typeof notification === 'string') {
+        notification = { message: notification };
+    }
+    notification.type = 'error';
+
+    return {
+        type: 'ADD_NOTIFICATION',
+        notification,
+    };
+}
+
+export function addNotification(notification) {
+    return {
+        type: 'ADD_NOTIFICATION',
+        notification,
+    };
+}
+
+export function clearNotification(id) {
+    return {
+        type: 'CLEAR_NOTIFICATION',
+        id,
+
+    };
+}
+
+export function clearNotifications() {
+    return {
+        type: 'CLEAR_NOTIFICATIONS',
+    };
+}
+
+export function updateLibvirtState(state) {
+    return {
+        type: 'UPDATE_LIBVIRT_STATE',
+        state,
+    };
+}
+
+export function setHypervisorMaxVCPU({ count, connectionName }) {
+    return {
+        type: 'SET_HYPERVISOR_MAX_VCPU',
+        payload: {
+            count,
+            connectionName,
+        }
     };
 }
 
@@ -156,8 +280,13 @@ export function vmActionFailed({ name, connectionName, message, detail, extraPay
             message,
             detail,
             extraPayload,
-        }
+        },
     };
+}
+
+export function deleteVmMessage({ name, connectionName }) {
+    // recently there's just the last error message kept so we can reuse the code
+    return vmActionFailed({ name, connectionName, message: null, detail: null, extraPayload: null });
 }
 
 export function undefineVm(connectionName, name, transientOnly) {
@@ -165,7 +294,7 @@ export function undefineVm(connectionName, name, transientOnly) {
         type: 'UNDEFINE_VM',
         name,
         connectionName,
-        transientOnly
+        transientOnly,
     };
 }
 
@@ -173,6 +302,6 @@ export function deleteUnlistedVMs(connectionName, vmNames) {
     return {
         type: 'DELETE_UNLISTED_VMS',
         vmNames,
-        connectionName
+        connectionName,
     };
 }

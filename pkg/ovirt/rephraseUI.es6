@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -18,8 +17,8 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 import cockpit from 'cockpit';
-const _ = cockpit.gettext;
 import { logDebug } from '../machines/helpers.es6';
+const _ = cockpit.gettext;
 
 const transform = {
     'hostStatus': {
@@ -44,7 +43,6 @@ const transform = {
         'false': _("no"),
     },
 };
-
 
 function rephraseUI(key, original) {
     if (!(key in transform)) {

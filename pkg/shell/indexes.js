@@ -17,8 +17,6 @@
  * along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
  */
 
-var phantom_checkpoint = phantom_checkpoint || function () { };
-
 (function() {
     "use strict";
 
@@ -155,7 +153,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
             $(".curtains-ct p").text(cockpit.message(watchdog_problem));
             $(".curtains-ct").show();
             $("#navbar-dropdown").addClass("disabled");
-            phantom_checkpoint();
         }
 
         /* Handles navigation */
@@ -266,12 +263,19 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
 
         function update_sidebar(machine, state, compiled) {
             function links(component) {
-                return $("<li class='list-group-item'>")
-                    .toggleClass("active", state.component === component.path)
+                var active = state.component === component.path;
+                var listItem;
+
+                listItem = $("<li class='list-group-item'>")
+                    .toggleClass("active", active)
                     .append($("<a>")
-                        .attr("href", index.href({ host: machine.address, component: component.path }))
-                        .attr("title", component.label)
+                        .attr("href", index.href({ host: machine.address, component: component.path, hash: component.hash }))
                         .append($("<span>").text(component.label)));
+
+                if (active)
+                    listItem.find('a').attr("aria-current", "page");
+
+                return listItem;
             }
 
             var menu = compiled.ordered("menu").map(links);
@@ -297,10 +301,12 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
 
         function update_active_machine (address) {
             var active_sel;
-            $("#machine-dropdown ul li").toggleClass("active", false);
+            $("#machine-dropdown ul li").toggleClass("active", false)
+                .find("a").removeAttr("aria-current");
             if (address) {
                 active_sel = "#machine-dropdown ul li[data-address='" + address + "']";
-                $(active_sel).toggleClass("active", true);
+                $(active_sel).toggleClass("active", true)
+                    .find("a").attr("aria-current", "page");
             }
         }
 
@@ -324,6 +330,7 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
 
             $("#host-nav-link span.list-group-item-value").text(machine ? machine.label : "");
             $("#host-nav-link")
+                .attr("aria-label", _("Host"))
                 .attr("data-machine", machine ? machine.address : "")
                 .attr("href", index.href({ host: machine ? machine.address : undefined }, true));
 
@@ -346,10 +353,12 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
                 var data = el.attr("data-component");
                 // Mark active component and save our place
                 if (data && data === state.component) {
-                    el.attr("href", index.href(state));
-                    el.toggleClass("active", true);
+                    el.attr("href", index.href(state))
+                        .toggleClass("active", true)
+                        .find("a").attr("aria-current", "page");
                 } else {
-                    el.toggleClass("active", false);
+                    el.toggleClass("active", false)
+                        .find("a").removeAttr("aria-current");
                 }
             });
 
@@ -468,8 +477,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
                 label = item ? item.label : "";
                 update_title(label, machine);
             }
-
-            phantom_checkpoint();
         }
 
         function update_machines() {
@@ -594,7 +601,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
             $(".curtains-ct p").text(cockpit.message(watchdog_problem));
             $(".curtains-ct").show();
             $("#navbar-dropdown").addClass("disabled");
-            phantom_checkpoint();
         }
 
         index.ready();
@@ -664,8 +670,6 @@ var phantom_checkpoint = phantom_checkpoint || function () { };
             item = compiled.items[state.component];
             label = item ? item.label : "";
             update_title(label);
-
-            phantom_checkpoint();
         }
 
         cockpit.transport.wait(function() {

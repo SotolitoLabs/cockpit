@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -22,7 +21,7 @@ import cockpit from 'cockpit';
 
 import { Listing, ListingRow } from "cockpit-components-listing.jsx";
 
-import { VmLastMessage, VmDescription, VmMemory, VmCpu, VmOS, VmHA, VmStateless  } from './ClusterVms.jsx';
+import { VmLastMessage, VmDescription, VmMemory, VmCpu, VmOS, VmHA, VmStateless } from './ClusterVms.jsx';
 import { createVmFromTemplate } from '../actions.es6';
 import { getCurrentCluster } from '../selectors.es6';
 import { logDebug } from '../../machines/helpers.es6';
@@ -30,7 +29,6 @@ import { logDebug } from '../../machines/helpers.es6';
 const NoTemplate = () => (<div>{_("No VM found in oVirt.")}</div>);
 const NoTemplateUnitialized = () => (<div>{_("Please wait till list of templates is loaded from the server.")}</div>);
 
-React;
 const _ = cockpit.gettext;
 
 class CreateVmFromTemplate extends React.Component {
@@ -84,7 +82,7 @@ class CreateVmFromTemplate extends React.Component {
     }
 }
 
-const TemplateActions = ({ template, cluster, dispatch}) => {
+const TemplateActions = ({ template, cluster, dispatch }) => {
     if (!cluster) {
         logDebug('TemplateActions: unknown cluster');
         return null;
@@ -92,8 +90,8 @@ const TemplateActions = ({ template, cluster, dispatch}) => {
 
     return (
         <span>
-            <CreateVmFromTemplate template={template} cluster={cluster} dispatch={dispatch}/>
-            <VmLastMessage vm={template}/>
+            <CreateVmFromTemplate template={template} cluster={cluster} dispatch={dispatch} />
+            <VmLastMessage vm={template} />
         </span>
     );
 };
@@ -106,12 +104,12 @@ const Template = ({ template, templates, cluster, dispatch }) => {
             template.version.baseTemplateId ? (templates[template.version.baseTemplateId].name) : null,
             <VmDescription descr={template.description} />,
             <VmMemory mem={template.memory} />,
-            <VmCpu cpu={template.cpu} />,
+            <VmCpu vm={template} />,
             <VmOS os={template.os} />,
             <VmHA highAvailability={template.highAvailability} />,
             <VmStateless stateless={template.stateless} />,
             <TemplateActions template={template} cluster={cluster} dispatch={dispatch} />
-            ]}
+        ]}
     />);
 };
 
@@ -134,14 +132,14 @@ const ClusterTemplates = ({ config, dispatch }) => {
 
     return (<div className='container-fluid'>
         <Listing title={title} columnTitles={[
-        _("Name"), _("Version"), _("Base Template"), _("Description"), _("Memory"), _("vCPUs"), _("OS"),
-        _("HA"), _("Stateless"), _("Action")]}>
+            _("Name"), _("Version"), _("Base Template"), _("Description"), _("Memory"), _("vCPUs"), _("OS"),
+            _("HA"), _("Stateless"), _("Action")]}>
             {Object.getOwnPropertyNames(templates).map(templateId => {
                 return (
                     <Template template={templates[templateId]}
-                              templates={templates}
-                              cluster={currentCluster}
-                              dispatch={dispatch}
+                        templates={templates}
+                        cluster={currentCluster}
+                        dispatch={dispatch}
                     />);
             })}
         </Listing>

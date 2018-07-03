@@ -1,4 +1,3 @@
-/*jshint esversion: 6 */
 /*
  * This file is part of Cockpit.
  *
@@ -29,26 +28,25 @@ function removeResource(state, id) {
         return newState;
     }
     return state;
-
 }
 
 function hostsReducer (state, action) {
     state = state || {}; // object of 'hostId: host'
 
     switch (action.type) {
-        case 'OVIRT_UPDATE_HOST':
-        {
-            const newState = Object.assign({}, state);
-            newState[action.payload.id] = newState[action.payload.id] || {};
-            Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
-            return newState;
-        }
-        case 'OVIRT_REMOVE_HOST':
-        {
-            return removeResource(state, action.payload.id);
-        }
-        default:
-            return state;
+    case 'OVIRT_UPDATE_HOST':
+    {
+        const newState = Object.assign({}, state);
+        newState[action.payload.id] = newState[action.payload.id] || {};
+        Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
+        return newState;
+    }
+    case 'OVIRT_REMOVE_HOST':
+    {
+        return removeResource(state, action.payload.id);
+    }
+    default:
+        return state;
     }
 }
 
@@ -56,19 +54,19 @@ function clustersReducer (state, action) {
     state = state || {}; // object of 'clusterId: cluster'
 
     switch (action.type) {
-        case 'OVIRT_UPDATE_CLUSTER':
-        {
-            const newState = Object.assign({}, state);
-            newState[action.payload.id] = newState[action.payload.id] || {};
-            Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
-            return newState;
-        }
-        case 'OVIRT_REMOVE_CLUSTER':
-        {
-            return removeResource(state, action.payload.id);
-        }
-        default:
-            return state;
+    case 'OVIRT_UPDATE_CLUSTER':
+    {
+        const newState = Object.assign({}, state);
+        newState[action.payload.id] = newState[action.payload.id] || {};
+        Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
+        return newState;
+    }
+    case 'OVIRT_REMOVE_CLUSTER':
+    {
+        return removeResource(state, action.payload.id);
+    }
+    default:
+        return state;
     }
 }
 
@@ -76,34 +74,38 @@ function iconsReducer (state, action) {
     state = state || {}; // object of 'iconId: icon'
 
     switch (action.type) {
-        case 'OVIRT_UPDATE_ICON':
-        {
-            const newState = Object.assign({}, state);
-            newState[action.payload.id] = newState[action.payload.id] || {};
-            Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
-            return newState;
-        }
-        default:
-            return state;
+    case 'OVIRT_UPDATE_ICON':
+    {
+        const newState = Object.assign({}, state);
+        newState[action.payload.id] = newState[action.payload.id] || {};
+        Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
+        return newState;
+    }
+    default:
+        return state;
     }
 }
 
 function configReducer (state, action) {
     state = state || {
-            loginInProgress: true,
-        };
+        loginInProgress: true,
+    };
 
     switch (action.type) {
-        case 'OVIRT_LOGIN_IN_PROGRESS':
-        {
-            return Object.assign({}, state, { loginInProgress: action.payload.loginInProgress });
-        }
-        case 'OVIRT_SET_HOSTNAME':
-        {
-            return Object.assign({}, state, { hostname: action.payload.hostname });
-        }
-        default:
-            return state;
+    case 'OVIRT_LOGIN_IN_PROGRESS':
+    {
+        return Object.assign({}, state, { loginInProgress: action.payload.loginInProgress });
+    }
+    case 'OVIRT_SET_HOSTNAME':
+    {
+        return Object.assign({}, state, { hostname: action.payload.hostname });
+    }
+    case 'OVIRT_SET_HOST_IPS':
+    {
+        return Object.assign({}, state, { hostIPs: action.payload.ips });
+    }
+    default:
+        return state;
     }
 }
 
@@ -111,36 +113,36 @@ function vmsReducer (state, action) {
     state = state || {}; // object of 'vmId: vm'
 
     switch (action.type) {
-        case 'OVIRT_UPDATE_VM':
-        {
-            const newState = Object.assign({}, state);
-            newState[action.payload.id] = newState[action.payload.id] || {};
-            Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
-            return newState;
-        }
-        case 'OVIRT_REMOVE_VM':
-        {
-            return removeResource(state, action.payload.id);
-        }
-        case 'VM_ACTION_FAILED': // this reducer seconds the implementation in cockpit:machines (see the 'vms' reducer there).
-        { // If an action failed on a VM running on this host, the error will be recorded on two places - it's as expected.
-            // If the VM is unknown for this host, the user needs to be still informed about the result
-            // So far, the VM is identified by "name" only
-            // See the templatesReducer() as well.
-            const vmId =  Object.getOwnPropertyNames(state).filter(vmId => state[vmId].name === action.payload.name);
-            if (!vmId) {
-                return state;
-            }
-
-            const updatedVm = Object.assign({}, state[vmId],
-                {lastMessage: action.payload.message, lastMessageDetail: action.payload.detail});
-            const updatedPartOfState = {};
-            updatedPartOfState[vmId] = updatedVm;
-            const newState = Object.assign({}, state, updatedPartOfState);
-            return newState;
-        }
-        default:
+    case 'OVIRT_UPDATE_VM':
+    {
+        const newState = Object.assign({}, state);
+        newState[action.payload.id] = newState[action.payload.id] || {};
+        Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
+        return newState;
+    }
+    case 'OVIRT_REMOVE_VM':
+    {
+        return removeResource(state, action.payload.id);
+    }
+    case 'VM_ACTION_FAILED': // this reducer seconds the implementation in cockpit:machines (see the 'vms' reducer there).
+    { // If an action failed on a VM running on this host, the error will be recorded on two places - it's as expected.
+        // If the VM is unknown for this host, the user needs to be still informed about the result
+        // So far, the VM is identified by "name" only
+        // See the templatesReducer() as well.
+        const vmId = Object.getOwnPropertyNames(state).filter(vmId => state[vmId].name === action.payload.name);
+        if (!vmId || vmId.length === 0) {
             return state;
+        }
+
+        const updatedVm = Object.assign({}, state[vmId],
+                                        {lastMessage: action.payload.message, lastMessageDetail: action.payload.detail});
+        const updatedPartOfState = {};
+        updatedPartOfState[vmId] = updatedVm;
+        const newState = Object.assign({}, state, updatedPartOfState);
+        return newState;
+    }
+    default:
+        return state;
     }
 }
 
@@ -148,36 +150,36 @@ function templatesReducer (state, action) {
     state = state || {}; // object of 'templateId: template'
 
     switch (action.type) {
-        case 'OVIRT_UPDATE_TEMPLATE':
-        {
-            const newState = Object.assign({}, state);
-            newState[action.payload.id] = newState[action.payload.id] || {};
-            Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
+    case 'OVIRT_UPDATE_TEMPLATE':
+    {
+        const newState = Object.assign({}, state);
+        newState[action.payload.id] = newState[action.payload.id] || {};
+        Object.assign(newState[action.payload.id], action.payload); // merge instead of replace, is it as expected?
+        return newState;
+    }
+    case 'OVIRT_REMOVE_TEMPLATE':
+    {
+        return removeResource(state, action.payload.id);
+    }
+    case 'VM_ACTION_FAILED': // this reducer seconds the implementation in cockpit:machines and the vmsReducer()
+    {
+        logDebug(`templateReducer() VM_ACTION_FAILED payload: ${JSON.stringify(action.payload)}`);
+        if (action.payload.extraPayload && action.payload.extraPayload.templateName) {
+            const templateId = Object.getOwnPropertyNames(state).filter(templateId => state[templateId].name === action.payload.extraPayload.templateName);
+            const updatedTemplate = Object.assign({}, state[templateId], {
+                lastMessage: action.payload.message,
+                lastMessageDetail: action.payload.detail
+            });
+            const updatedPartOfState = {};
+            updatedPartOfState[templateId] = updatedTemplate;
+            const newState = Object.assign({}, state, updatedPartOfState);
+            logDebug(`templateReducer() VM_ACTION_FAILED: ${JSON.stringify(newState)}`);
             return newState;
         }
-        case 'OVIRT_REMOVE_TEMPLATE':
-        {
-            return removeResource(state, action.payload.id);
-        }
-        case 'VM_ACTION_FAILED': // this reducer seconds the implementation in cockpit:machines and the vmsReducer()
-        {
-            logDebug(`templateReducer() VM_ACTION_FAILED payload: ${JSON.stringify(action.payload)}`);
-            if (action.payload.extraPayload && action.payload.extraPayload.templateName) {
-                const templateId = Object.getOwnPropertyNames(state).filter(templateId => state[templateId].name === action.payload.extraPayload.templateName);
-                const updatedTemplate = Object.assign({}, state[templateId], {
-                    lastMessage: action.payload.message,
-                    lastMessageDetail: action.payload.detail
-                });
-                const updatedPartOfState = {};
-                updatedPartOfState[templateId] = updatedTemplate;
-                const newState = Object.assign({}, state, updatedPartOfState);
-                logDebug(`templateReducer() VM_ACTION_FAILED: ${JSON.stringify(newState)}`);
-                return newState;
-            }
-            return state;
-        }
-        default:
-            return state;
+        return state;
+    }
+    default:
+        return state;
     }
 }
 
@@ -187,11 +189,11 @@ function routerReducer (state, action) {
     };
 
     switch (action.type) {
-        case 'OVIRT_GOTO_SUBPAGE': {
-            return Object.assign({}, state, {route: action.payload.target});
-        }
-        default:
-            return state;
+    case 'OVIRT_GOTO_SUBPAGE': {
+        return Object.assign({}, state, {route: action.payload.target});
+    }
+    default:
+        return state;
     }
 }
 
@@ -207,8 +209,8 @@ function callSubReducer (newState, action, subreducer, substateName) {
 
 export function ovirtReducer (state, action) {
     state = state || {
-            hosts: {}, // {id:host}
-        };
+        hosts: {}, // {id:host}
+    };
 
     let newState = state;
     newState = callSubReducer(newState, action, hostsReducer, 'hosts');
